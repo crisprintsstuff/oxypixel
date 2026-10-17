@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.0
+      - name: Put rc.exe on PATH when the Windows SDK has it
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (Test-Path $vswhere) {
+            $rc = & $vswhere -latest -products * -find "**\rc.exe" | Select-Object -First 1
+            if ($rc) { Add-Content $env:GITHUB_PATH (Split-Path $rc) }
+          }
+      - name: Test and build
+        run: |
+          cargo test --workspace
+          cargo build --release -p oxypixel
+      - name: Install NSIS
+        run: choco install nsis -y
+      - name: Stage files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/release/oxypixel.exe dist/oxypixel.exe
+          Copy-Item installer/oxypixel.ico dist/oxypixel.ico
+          makensis installer/oxypixel.nsi
+          Get-FileHash dist/oxypixel.exe, dist/OxyPixel-0.1.0-Setup.exe -Algorithm SHA256 |
+            ForEach-Object { "{0}  {1}" -f $_.Hash.ToLower(), (Split-Path $_.Path -Leaf) } |
+            Set-Content dist/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oxypixel-windows-unsigned
+          path: |
+            dist/oxypixel.exe
+            dist/OxyPixel-0.1.0-Setup.exe
+            dist/oxypixel.ico
+            dist/SHA256SUMS.txt
+      - name: Attach unsigned binaries to the GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          body: |
+            Unsigned Windows build of OxyPixel. No Authenticode certificate was applied.
+            SmartScreen can warn about an unknown publisher. Verify SHA256SUMS.txt.
+          files: |
+            dist/oxypixel.exe
+            dist/OxyPixel-0.1.0-Setup.exe
+            dist/SHA256SUMS.txt

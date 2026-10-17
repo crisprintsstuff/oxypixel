@@ -1,0 +1,556 @@
+//! Pixel document: a shared layer stack and one cel per layer per frame.
+//!
+//! Layers are properties (name, visibility, opacity) shared by every frame.
+//! Each frame stores its own pixels for those layers, plus a duration.
+
+use crate::color::{source_over, Rgba};
+use crate::error::{Error, Result};
+use crate::limits::{check_stack, clamp_duration, clamp_name, DEFAULT_FRAME_MS, MAX_PALETTE};
+
+/// Name, visibility, and opacity shared by every frame.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LayerInfo {
+    pub name: String,
+    pub visible: bool,
+    /// 0 is hidden, 255 is fully opaque. Applied at composite time.
+    pub opacity: u8,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Frame {
+    pub duration_ms: u32,
+    /// One buffer per layer, row-major, length `width * height`.
+    pub cels: Vec<Vec<Rgba>>,
+}
+
+/// A pixel-art document. Fields stay private so the layer/frame invariant holds.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Document {
+    width: u32,
+    height: u32,
+    layers: Vec<LayerInfo>,
+    frames: Vec<Frame>,
+    active_frame: usize,
+    active_layer: usize,
+    palette: Vec<Rgba>,
+}
+
+impl Document {
+    pub fn new(width: u32, height: u32) -> Result<Self> {
+        check_stack(width, height, 1, 1)?;
+        Ok(Self {
+            width,
+            height,
+            layers: vec![LayerInfo {
+                name: "Layer 1".to_string(),
+                visible: true,
+                opacity: 255,
+            }],
+            frames: vec![Frame {
+                duration_ms: DEFAULT_FRAME_MS,
+                cels: vec![vec![Rgba::CLEAR; (width * height) as usize]],
+            }],
+            active_frame: 0,
+            active_layer: 0,
+            palette: default_palette(),
+        })
+    }
+
+    /// A two-frame sample used by File → Open example and by tests.
+    pub fn demo() -> Result<Self> {
+        let mut doc = Self::new(32, 32)?;
+        doc.layers[0].name = "Paper".to_string();
+        for px in &mut doc.frames[0].cels[0] {
+            *px = Rgba::new(20, 22, 30, 255);
+        }
+        doc.add_layer("Mark")?;
+        let amber = Rgba::new(232, 168, 56, 255);
+        let teal = Rgba::new(58, 161, 122, 255);
+        for (x, y, color) in mark(12, 12, amber, teal) {
+            doc.set_pixel(0, 1, x, y, color)?;
+        }
+        doc.duplicate_frame(0)?;
+        doc.frames[1].cels[1].fill(Rgba::CLEAR);
+        for (x, y, color) in mark(14, 13, amber, teal) {
+            doc.set_pixel(1, 1, x, y, color)?;
+        }
+        doc.frames[0].duration_ms = 180;
+        doc.frames[1].duration_ms = 180;
+        doc.active_frame = 0;
+        doc.active_layer = 1;
+        Ok(doc)
+    }
+
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    pub fn frame_count(&self) -> usize {
+        self.frames.len()
+    }
+
+    pub fn layer_count(&self) -> usize {
+        self.layers.len()
+    }
+
+    pub fn active_frame(&self) -> usize {
+        self.active_frame
+    }
+
+    pub fn active_layer(&self) -> usize {
+        self.active_layer
+    }
+
+    pub fn layer(&self, index: usize) -> Option<&LayerInfo> {
+        self.layers.get(index)
+    }
+
+    pub fn layers(&self) -> &[LayerInfo] {
+        &self.layers
+    }
+
+    pub fn frame_duration(&self, index: usize) -> Option<u32> {
+        self.frames.get(index).map(|f| f.duration_ms)
+    }
+
+    pub fn palette(&self) -> &[Rgba] {
+        &self.palette
+    }
+
+    pub fn set_active_frame(&mut self, index: usize) -> Result<()> {
+        if index >= self.frames.len() {
+            return Err(Error::Index { what: "frame" });
+        }
+        self.active_frame = index;
+        Ok(())
+    }
+
+    pub fn set_active_layer(&mut self, index: usize) -> Result<()> {
+        if index >= self.layers.len() {
+            return Err(Error::Index { what: "layer" });
+        }
+        self.active_layer = index;
+        Ok(())
+    }
+
+    pub fn pixel_bytes(&self) -> usize {
+        self.frames.len() * self.layers.len() * (self.width as usize) * (self.height as usize) * 4
+    }
+
+    #[cfg(test)]
+    pub(crate) fn frames_mut(&mut self) -> &mut [Frame] {
+        &mut self.frames
+    }
+
+    pub(crate) fn frames(&self) -> &[Frame] {
+        &self.frames
+    }
+
+    pub(crate) fn layers_mut(&mut self) -> &mut [LayerInfo] {
+        &mut self.layers
+    }
+
+    #[cfg(test)]
+    pub(crate) fn palette_mut(&mut self) -> &mut Vec<Rgba> {
+        &mut self.palette
+    }
+
+    pub(crate) fn cel(&self, frame: usize, layer: usize) -> Result<&[Rgba]> {
+        self.frames
+            .get(frame)
+            .and_then(|f| f.cels.get(layer))
+            .map(Vec::as_slice)
+            .ok_or(Error::Index { what: "cel" })
+    }
+
+    pub(crate) fn cel_mut(&mut self, frame: usize, layer: usize) -> Result<&mut [Rgba]> {
+        self.frames
+            .get_mut(frame)
+            .and_then(|f| f.cels.get_mut(layer))
+            .map(Vec::as_mut_slice)
+            .ok_or(Error::Index { what: "cel" })
+    }
+
+    pub(crate) fn set_pixel(
+        &mut self,
+        frame: usize,
+        layer: usize,
+        x: i32,
+        y: i32,
+        color: Rgba,
+    ) -> Result<()> {
+        if x < 0 || y < 0 || x as u32 >= self.width || y as u32 >= self.height {
+            return Err(Error::Index { what: "pixel" });
+        }
+        let w = self.width;
+        let cel = self.cel_mut(frame, layer)?;
+        cel[(y as u32 * w + x as u32) as usize] = color;
+        Ok(())
+    }
+
+    pub fn add_layer(&mut self, name: &str) -> Result<()> {
+        check_stack(
+            self.width,
+            self.height,
+            self.frames.len(),
+            self.layers.len() + 1,
+        )?;
+        let name = if name.is_empty() {
+            format!("Layer {}", self.layers.len() + 1)
+        } else {
+            clamp_name(name)
+        };
+        self.layers.push(LayerInfo {
+            name,
+            visible: true,
+            opacity: 255,
+        });
+        let len = (self.width * self.height) as usize;
+        for frame in &mut self.frames {
+            frame.cels.push(vec![Rgba::CLEAR; len]);
+        }
+        self.active_layer = self.layers.len() - 1;
+        Ok(())
+    }
+
+    pub fn duplicate_layer(&mut self, index: usize) -> Result<()> {
+        if index >= self.layers.len() {
+            return Err(Error::Index { what: "layer" });
+        }
+        check_stack(
+            self.width,
+            self.height,
+            self.frames.len(),
+            self.layers.len() + 1,
+        )?;
+        let mut info = self.layers[index].clone();
+        info.name = clamp_name(&format!("{} copy", info.name));
+        self.layers.insert(index + 1, info);
+        for frame in &mut self.frames {
+            let copy = frame.cels[index].clone();
+            frame.cels.insert(index + 1, copy);
+        }
+        self.active_layer = index + 1;
+        Ok(())
+    }
+
+    pub fn delete_layer(&mut self, index: usize) -> Result<()> {
+        if self.layers.len() == 1 {
+            return Err(Error::LastLayer);
+        }
+        if index >= self.layers.len() {
+            return Err(Error::Index { what: "layer" });
+        }
+        self.layers.remove(index);
+        for frame in &mut self.frames {
+            frame.cels.remove(index);
+        }
+        if self.active_layer >= self.layers.len() {
+            self.active_layer = self.layers.len() - 1;
+        } else if self.active_layer > index {
+            self.active_layer -= 1;
+        }
+        Ok(())
+    }
+
+    /// Move a layer by `delta` positions. Positive is toward the top of the stack.
+    pub fn move_layer(&mut self, index: usize, delta: i32) -> Result<()> {
+        if index >= self.layers.len() {
+            return Err(Error::Index { what: "layer" });
+        }
+        let target = index as i32 + delta;
+        if target < 0 || target >= self.layers.len() as i32 {
+            return Err(Error::Index { what: "layer" });
+        }
+        let target = target as usize;
+        self.layers.swap(index, target);
+        for frame in &mut self.frames {
+            frame.cels.swap(index, target);
+        }
+        if self.active_layer == index {
+            self.active_layer = target;
+        } else if self.active_layer == target {
+            self.active_layer = index;
+        }
+        Ok(())
+    }
+
+    /// Bake `index` onto the layer below on every frame, then remove it.
+    pub fn merge_down(&mut self, index: usize) -> Result<()> {
+        if index == 0 {
+            return Err(Error::BottomLayer);
+        }
+        if index >= self.layers.len() {
+            return Err(Error::Index { what: "layer" });
+        }
+        let upper_opacity = self.layers[index].opacity;
+        let lower_opacity = self.layers[index - 1].opacity;
+        for frame in &mut self.frames {
+            let upper = frame.cels[index].clone();
+            let lower = &mut frame.cels[index - 1];
+            for (dst, src) in lower.iter_mut().zip(upper.iter()) {
+                let base = source_over(Rgba::CLEAR, *dst, lower_opacity);
+                *dst = source_over(base, *src, upper_opacity);
+            }
+        }
+        self.layers[index - 1].opacity = 255;
+        self.delete_layer(index)?;
+        self.active_layer = index - 1;
+        Ok(())
+    }
+
+    pub fn add_frame(&mut self) -> Result<usize> {
+        check_stack(
+            self.width,
+            self.height,
+            self.frames.len() + 1,
+            self.layers.len(),
+        )?;
+        let len = (self.width * self.height) as usize;
+        let cels = vec![vec![Rgba::CLEAR; len]; self.layers.len()];
+        self.frames.push(Frame {
+            duration_ms: DEFAULT_FRAME_MS,
+            cels,
+        });
+        self.active_frame = self.frames.len() - 1;
+        Ok(self.active_frame)
+    }
+
+    pub fn duplicate_frame(&mut self, index: usize) -> Result<usize> {
+        if index >= self.frames.len() {
+            return Err(Error::Index { what: "frame" });
+        }
+        check_stack(
+            self.width,
+            self.height,
+            self.frames.len() + 1,
+            self.layers.len(),
+        )?;
+        let copy = self.frames[index].clone();
+        self.frames.insert(index + 1, copy);
+        self.active_frame = index + 1;
+        Ok(self.active_frame)
+    }
+
+    pub fn delete_frame(&mut self, index: usize) -> Result<()> {
+        if self.frames.len() == 1 {
+            return Err(Error::LastFrame);
+        }
+        if index >= self.frames.len() {
+            return Err(Error::Index { what: "frame" });
+        }
+        self.frames.remove(index);
+        if self.active_frame >= self.frames.len() {
+            self.active_frame = self.frames.len() - 1;
+        } else if self.active_frame > index {
+            self.active_frame -= 1;
+        }
+        Ok(())
+    }
+
+    pub fn set_frame_duration(&mut self, index: usize, ms: u32) -> Result<()> {
+        let frame = self
+            .frames
+            .get_mut(index)
+            .ok_or(Error::Index { what: "frame" })?;
+        frame.duration_ms = clamp_duration(ms);
+        Ok(())
+    }
+
+    pub fn add_palette_color(&mut self, color: Rgba) -> Result<()> {
+        if self.palette.len() >= MAX_PALETTE {
+            return Err(Error::PaletteFull(MAX_PALETTE));
+        }
+        self.palette.push(color);
+        Ok(())
+    }
+
+    pub fn remove_palette_color(&mut self, index: usize) -> Result<()> {
+        if self.palette.len() == 1 {
+            return Err(Error::EmptyPalette);
+        }
+        if index >= self.palette.len() {
+            return Err(Error::Index {
+                what: "palette color",
+            });
+        }
+        self.palette.remove(index);
+        Ok(())
+    }
+
+    /// Composite one frame, bottom layer first. Hidden layers are skipped.
+    pub fn composite(&self, frame: usize) -> Result<Vec<Rgba>> {
+        let frame = self
+            .frames
+            .get(frame)
+            .ok_or(Error::Index { what: "frame" })?;
+        let mut out = vec![Rgba::CLEAR; (self.width * self.height) as usize];
+        for (info, cel) in self.layers.iter().zip(frame.cels.iter()) {
+            if !info.visible || info.opacity == 0 {
+                continue;
+            }
+            for (dst, src) in out.iter_mut().zip(cel.iter()) {
+                *dst = source_over(*dst, *src, info.opacity);
+            }
+        }
+        Ok(out)
+    }
+
+    pub(crate) fn from_parts(
+        width: u32,
+        height: u32,
+        layers: Vec<LayerInfo>,
+        frames: Vec<Frame>,
+        active_frame: usize,
+        active_layer: usize,
+        palette: Vec<Rgba>,
+    ) -> Result<Self> {
+        check_stack(width, height, frames.len(), layers.len())?;
+        if palette.is_empty() {
+            return Err(Error::EmptyPalette);
+        }
+        if palette.len() > MAX_PALETTE {
+            return Err(Error::PaletteFull(MAX_PALETTE));
+        }
+        let expected = (width * height) as usize;
+        for layer in &layers {
+            if layer.name.len() > crate::limits::MAX_NAME_BYTES {
+                return Err(Error::BadName);
+            }
+        }
+        for frame in &frames {
+            if frame.duration_ms < crate::limits::MIN_FRAME_MS
+                || frame.duration_ms > crate::limits::MAX_FRAME_MS
+            {
+                return Err(Error::BadFlag("frame duration"));
+            }
+            if frame.cels.len() != layers.len() {
+                return Err(Error::Truncated);
+            }
+            for cel in &frame.cels {
+                if cel.len() != expected {
+                    return Err(Error::Truncated);
+                }
+            }
+        }
+        if active_frame >= frames.len() || active_layer >= layers.len() {
+            return Err(Error::Index { what: "active cel" });
+        }
+        Ok(Self {
+            width,
+            height,
+            layers,
+            frames,
+            active_frame,
+            active_layer,
+            palette,
+        })
+    }
+}
+
+fn mark(x: i32, y: i32, amber: Rgba, teal: Rgba) -> Vec<(i32, i32, Rgba)> {
+    vec![
+        (x, y, teal),
+        (x + 1, y, teal),
+        (x, y + 1, amber),
+        (x + 1, y + 1, amber),
+        (x + 2, y + 1, amber),
+        (x + 1, y + 2, amber),
+        (x + 3, y + 3, teal),
+    ]
+}
+
+/// Original 16-color "Ink" palette. These values are not taken from another editor.
+pub fn default_palette() -> Vec<Rgba> {
+    const HEX: [&str; 16] = [
+        "14161F", "2A2E3D", "565D73", "C5C8D4", "F6F3EC", "E8A838", "D06A2B", "B33A3A", "7A3048",
+        "215E5A", "3AA17A", "8FBE4A", "3C5C9A", "6E4C93", "D47AA8", "8D5A2B",
+    ];
+    HEX.into_iter()
+        .map(|h| Rgba::parse_hex(h).expect("static palette entry"))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_document_is_one_clear_layer() {
+        let doc = Document::new(8, 4).unwrap();
+        assert_eq!(doc.width(), 8);
+        assert_eq!(doc.frame_count(), 1);
+        assert!(doc.composite(0).unwrap().iter().all(|p| *p == Rgba::CLEAR));
+        assert!(Document::new(0, 4).is_err());
+        assert!(Document::new(1025, 1).is_err());
+    }
+
+    #[test]
+    fn layers_are_shared_and_pixels_are_not() {
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.add_frame().unwrap();
+        doc.add_layer("Ink").unwrap();
+        doc.set_pixel(1, 1, 0, 0, Rgba::new(1, 2, 3, 255)).unwrap();
+        assert_eq!(doc.cel(0, 1).unwrap()[0], Rgba::CLEAR);
+        assert_eq!(doc.layer(1).unwrap().name, "Ink");
+        assert_eq!(doc.frame_count(), 2);
+        assert_eq!(doc.layer_count(), 2);
+    }
+
+    #[test]
+    fn cannot_remove_the_last_layer_or_frame() {
+        let mut doc = Document::new(2, 2).unwrap();
+        assert!(matches!(doc.delete_layer(0), Err(Error::LastLayer)));
+        assert!(matches!(doc.delete_frame(0), Err(Error::LastFrame)));
+        assert!(matches!(doc.merge_down(0), Err(Error::BottomLayer)));
+    }
+
+    #[test]
+    fn composite_uses_visibility_and_opacity() {
+        let mut doc = Document::new(1, 1).unwrap();
+        doc.frames[0].cels[0][0] = Rgba::new(255, 0, 0, 255);
+        doc.add_layer("top").unwrap();
+        doc.frames[0].cels[1][0] = Rgba::new(0, 0, 255, 255);
+        doc.layers[1].opacity = 0;
+        assert_eq!(doc.composite(0).unwrap()[0], Rgba::new(255, 0, 0, 255));
+        doc.layers[1].opacity = 255;
+        doc.layers[1].visible = false;
+        assert_eq!(doc.composite(0).unwrap()[0], Rgba::new(255, 0, 0, 255));
+        doc.layers[1].visible = true;
+        assert_eq!(doc.composite(0).unwrap()[0], Rgba::new(0, 0, 255, 255));
+    }
+
+    #[test]
+    fn merge_down_bakes_both_opacities() {
+        let mut doc = Document::new(1, 1).unwrap();
+        doc.frames[0].cels[0][0] = Rgba::new(255, 0, 0, 255);
+        doc.add_layer("top").unwrap();
+        doc.frames[0].cels[1][0] = Rgba::new(0, 0, 255, 255);
+        doc.layers[1].opacity = 255;
+        doc.merge_down(1).unwrap();
+        assert_eq!(doc.layer_count(), 1);
+        assert_eq!(doc.composite(0).unwrap()[0], Rgba::new(0, 0, 255, 255));
+    }
+
+    #[test]
+    fn rejects_an_oversized_stack() {
+        let mut doc = Document::new(2, 2).unwrap();
+        for _ in 0..(crate::limits::MAX_LAYERS - 1) {
+            doc.add_layer("x").unwrap();
+        }
+        let err = doc.add_layer("overflow").unwrap_err();
+        assert!(matches!(err, Error::Limit { .. }));
+    }
+
+    #[test]
+    fn demo_has_two_frames() {
+        let doc = Document::demo().unwrap();
+        assert_eq!(doc.frame_count(), 2);
+        assert_eq!(doc.layer_count(), 2);
+        assert_ne!(doc.cel(0, 1).unwrap(), doc.cel(1, 1).unwrap());
+    }
+}

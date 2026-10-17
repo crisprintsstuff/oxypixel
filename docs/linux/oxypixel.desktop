@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=OxyPixel
+GenericName=Pixel-art editor
+Comment=Draw pixel art and short animations
+Exec=oxypixel %f
+Icon=oxypixel
+Terminal=false
+Categories=Graphics;2DGraphics;RasterGraphics;
+MimeType=application/x-oxypix;
+StartupWMClass=oxypixel

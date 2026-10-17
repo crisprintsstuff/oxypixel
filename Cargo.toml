@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = ["crates/oxypixel-core", "crates/oxypixel"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["OxyPixel contributors"]
+repository = "https://github.com/crisprintsstuff/oxypixel"
+rust-version = "1.85"
+description = "Original pixel-art editor"
+
+[workspace.dependencies]
+image = { version = "0.25.10", default-features = false, features = ["png", "bmp", "gif"] }
+thiserror = "2"
+
+[profile.release]
+strip = "symbols"
+lto = false
+codegen-units = 16
