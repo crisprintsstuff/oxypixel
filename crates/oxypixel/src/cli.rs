@@ -4,8 +4,6 @@ use std::path::Path;
 
 use oxypixel_core::{export_bmp, export_gif, export_png, export_spritesheet, Document, Error};
 
-use crate::native;
-
 pub fn dispatch(args: &[String]) -> Option<i32> {
     let command = args.first().map(String::as_str)?;
     let code = match command {
@@ -71,8 +69,14 @@ fn usage(message: &str) -> u8 {
     2
 }
 
+/// Report a failed export and return exit code 1.
+///
+/// This must not open a native dialog. `rfd`'s Windows backend calls
+/// `MessageBoxW`, which does not return until a button is clicked. On a
+/// headless runner nothing clicks it, so `cargo test` waits until the job
+/// timeout. The message is already on stderr for scripts and for the tests.
 fn fail(message: &str) -> u8 {
-    native::alert(message);
+    eprintln!("oxypixel: {message}");
     1
 }
 

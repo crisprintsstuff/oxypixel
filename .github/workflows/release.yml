@@ -11,6 +11,9 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
+    # Test, release build, and the NSIS install. Longer than CI because
+    # `choco install nsis` is extra, still far under the 6-hour default.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.0

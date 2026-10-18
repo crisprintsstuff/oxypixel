@@ -8,6 +8,10 @@ jobs:
   test:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    # Ubuntu finishes in about 5 minutes. Windows clippy was ~80s and the
+    # release compile is a separate profile, so a healthy Windows run is
+    # around 10 minutes. 15 leaves headroom without waiting out a hang.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
