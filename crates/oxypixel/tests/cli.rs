@@ -57,11 +57,33 @@ fn export_png_writes_the_painted_pixel() {
 
 #[test]
 fn missing_file_fails() {
-    let output = bin()
+    let mut child = bin()
         .args(["export-png", "this-file-does-not-exist.oxypix", "out.png"])
-        .output()
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
         .unwrap();
-    assert!(!output.status.success());
+
+    // A Windows message box never returns on a headless runner. Fail the
+    // test instead of waiting for the job timeout.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        if child.try_wait().unwrap().is_some() {
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("export-png on a missing file hung instead of exiting");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
     let err = String::from_utf8_lossy(&output.stderr);
-    assert!(!err.is_empty());
+    assert!(
+        err.contains("file error"),
+        "stderr should report the missing file, got {err}"
+    );
 }

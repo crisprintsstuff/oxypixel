@@ -21,6 +21,10 @@ pub fn pick_path(save: bool, title: &str, filter: &str, extensions: &[&str]) -> 
     None
 }
 
+/// Error box for when the editor window itself cannot start.
+///
+/// Headless commands must not call this. On Windows, `show` blocks in
+/// `MessageBoxW` until the box is dismissed.
 pub fn alert(message: &str) {
     eprintln!("oxypixel: {message}");
     #[cfg(windows)]
