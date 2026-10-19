@@ -34,7 +34,7 @@ fn store_path() -> Option<PathBuf> {
 fn data_dir() -> Option<PathBuf> {
     #[cfg(windows)]
     {
-        return std::env::var_os("APPDATA").map(|p| PathBuf::from(p).join("OxyPixel"));
+        std::env::var_os("APPDATA").map(|p| PathBuf::from(p).join("OxyPixel"))
     }
     #[cfg(not(windows))]
     {
