@@ -56,7 +56,11 @@ jobs:
           if (-not $env:MAKENSIS -or -not (Test-Path -LiteralPath $env:MAKENSIS)) {
             throw "MAKENSIS is not set to an existing makensis.exe"
           }
-          & $env:MAKENSIS installer/oxypixel.nsi
+          # Windows makensis changes to the script directory only when that
+          # path contains a backslash. A forward slash leaves the compiler in
+          # the repo root, and File "../dist/oxypixel.exe" then misses the exe.
+          $script = Join-Path (Get-Location) "installer\oxypixel.nsi"
+          & $env:MAKENSIS $script
           if ($LASTEXITCODE -ne 0) { throw "makensis exited with $LASTEXITCODE" }
           $files = @(
             "dist/oxypixel-$version-windows-x86_64.exe",
@@ -74,14 +78,6 @@ jobs:
         with:
           name: oxypixel-windows-unsigned
           path: |
-            dist/oxypixel-*-windows-x86_64.exe
-            dist/OxyPixel-*-Setup.exe
-            dist/SHA256SUMS-windows.txt
-      - name: Attach Windows files to the GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
             dist/oxypixel-*-windows-x86_64.exe
             dist/OxyPixel-*-Setup.exe
             dist/SHA256SUMS-windows.txt
@@ -104,10 +100,52 @@ jobs:
           path: |
             dist/oxypixel-*-linux-x86_64.tar.gz
             dist/SHA256SUMS-linux.txt
-      - name: Attach the Linux archive to the GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
+
+  publish:
+    needs: [windows, linux]
+    if: >-
+      always() &&
+      needs.windows.result == 'success' &&
+      needs.linux.result == 'success' &&
+      (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: oxypixel-*
+          path: artifacts
+          merge-multiple: true
+      - name: Collect release files
+        run: |
+          mkdir -p dist
+          find artifacts -type f -exec cp -t dist {} +
+          cat dist/SHA256SUMS-windows.txt dist/SHA256SUMS-linux.txt > dist/SHA256SUMS.txt
+          test -f dist/oxypixel-*-windows-x86_64.exe
+          test -f dist/OxyPixel-*-Setup.exe
+          test -f dist/oxypixel-*-linux-x86_64.tar.gz
+          test -s dist/SHA256SUMS.txt
+          echo "Release files:"
+          ls -l dist
+      - name: Choose the release tag
+        id: tag
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            echo "name=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          else
+            version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+            echo "name=v${version}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Attach Linux and Windows files to the GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          target_commitish: ${{ github.sha }}
           files: |
+            dist/oxypixel-*-windows-x86_64.exe
+            dist/OxyPixel-*-Setup.exe
             dist/oxypixel-*-linux-x86_64.tar.gz
+            dist/SHA256SUMS-windows.txt
             dist/SHA256SUMS-linux.txt
+            dist/SHA256SUMS.txt

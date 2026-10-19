@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2
+
+- A release started by hand publishes the Linux archive and the Windows files together. Check for updates still reads `SHA256SUMS.txt` from that release.
+- The Windows installer build passes `makensis` a script path with a backslash, so NSIS looks in `dist` for `oxypixel.exe`.
+
 ## 0.3.0
 
 - Drag a selection to move those pixels, or nudge them one pixel with the arrow keys. Ctrl+C and Ctrl+V copy between frames. Undo puts the marquee back with the pixels.
