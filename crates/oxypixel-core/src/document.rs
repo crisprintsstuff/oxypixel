@@ -400,6 +400,23 @@ impl Document {
         Ok(out)
     }
 
+    /// The composited color of one pixel, using the same rules as [`Self::composite`].
+    pub fn composite_pixel(&self, frame: usize, x: u32, y: u32) -> Option<Rgba> {
+        if x >= self.width || y >= self.height {
+            return None;
+        }
+        let frame = self.frames.get(frame)?;
+        let index = (y * self.width + x) as usize;
+        let mut color = Rgba::CLEAR;
+        for (info, cel) in self.layers.iter().zip(frame.cels.iter()) {
+            if !info.visible || info.opacity == 0 {
+                continue;
+            }
+            color = source_over(color, *cel.get(index)?, info.opacity);
+        }
+        Some(color)
+    }
+
     pub(crate) fn from_parts(
         width: u32,
         height: u32,
@@ -522,6 +539,11 @@ mod tests {
         assert_eq!(doc.composite(0).unwrap()[0], Rgba::new(255, 0, 0, 255));
         doc.layers[1].visible = true;
         assert_eq!(doc.composite(0).unwrap()[0], Rgba::new(0, 0, 255, 255));
+        assert_eq!(
+            doc.composite_pixel(0, 0, 0),
+            Some(Rgba::new(0, 0, 255, 255))
+        );
+        assert_eq!(doc.composite_pixel(0, 1, 0), None);
     }
 
     #[test]

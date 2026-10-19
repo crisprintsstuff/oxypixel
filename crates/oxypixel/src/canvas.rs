@@ -4,7 +4,7 @@ use eframe::egui::{
     self, Color32, Painter, PointerButton, Pos2, Rect, Sense, Stroke, StrokeKind, TextureHandle,
     TextureOptions, Vec2,
 };
-use oxypixel_core::{source_over, Editor, MouseButton, Rgba};
+use oxypixel_core::{source_over, Editor, MouseButton, Rgba, Tool};
 
 use crate::theme::{self, AMBER};
 
@@ -127,7 +127,17 @@ pub fn show_canvas(
         .hover_pos()
         .and_then(|pos| pixel_inside(origin, view.zoom, width, height, pos));
     if response.hovered() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+        let space = ui.input(|i| i.key_down(egui::Key::Space));
+        let icon = if view.panning {
+            egui::CursorIcon::Grabbing
+        } else if space {
+            egui::CursorIcon::Grab
+        } else if !allow_draw {
+            egui::CursorIcon::NotAllowed
+        } else {
+            egui::CursorIcon::Crosshair
+        };
+        ui.ctx().set_cursor_icon(icon);
         let scroll = ui.input(|i| i.raw_scroll_delta.y);
         if scroll != 0.0 {
             if let Some(pos) = response.hover_pos() {
@@ -137,22 +147,56 @@ pub fn show_canvas(
         }
     }
     if let Some((x, y)) = hover {
-        let brush = editor.brush() as f32;
-        let half = (brush / 2.0).floor();
-        let r = Rect::from_min_size(
-            origin + Vec2::new((x as f32 - half) * view.zoom, (y as f32 - half) * view.zoom),
-            Vec2::splat(brush.max(1.0) * view.zoom),
-        );
-        painter.rect_stroke(
-            r,
-            0.0,
-            Stroke::new(1.0_f32, theme::TEAL),
-            StrokeKind::Inside,
-        );
+        if let Some(mark) = hover_rect(editor.tool(), editor.brush(), x, y, origin, view.zoom) {
+            painter.rect_stroke(
+                mark,
+                0.0,
+                Stroke::new(1.0_f32, theme::TEAL),
+                StrokeKind::Inside,
+            );
+        }
+    }
+    if !allow_draw {
+        paint_playback_banner(&painter, rect);
     }
 
     handle_pointer(ui, &response, editor, view, origin, allow_draw);
     hover
+}
+
+/// Brush-sized tools preview the stamp. Point tools preview the single pixel under the cursor.
+fn hover_rect(tool: Tool, brush: u32, x: i32, y: i32, origin: Pos2, zoom: f32) -> Option<Rect> {
+    let (left, top, size) = match tool {
+        Tool::Pencil | Tool::Eraser | Tool::Line | Tool::Rectangle | Tool::Ellipse => {
+            let size = brush.max(1);
+            let half = (size / 2) as i32;
+            (x - half, y - half, size)
+        }
+        Tool::Bucket | Tool::Eyedropper | Tool::Select => (x, y, 1),
+    };
+    Some(Rect::from_min_size(
+        origin + Vec2::new(left as f32 * zoom, top as f32 * zoom),
+        Vec2::splat(size as f32 * zoom),
+    ))
+}
+
+fn paint_playback_banner(painter: &Painter, panel: Rect) {
+    let banner = Rect::from_center_size(
+        Pos2::new(panel.center().x, panel.min.y + 18.0),
+        Vec2::new(240.0, 24.0),
+    );
+    painter.rect_filled(
+        banner,
+        4.0,
+        Color32::from_rgba_unmultiplied(20, 22, 30, 230),
+    );
+    painter.text(
+        banner.center(),
+        egui::Align2::CENTER_CENTER,
+        "Playing. Drawing is paused.",
+        egui::FontId::proportional(13.0),
+        AMBER,
+    );
 }
 
 fn handle_pointer(
@@ -380,5 +424,23 @@ fn pixel_inside(origin: Pos2, zoom: f32, width: u32, height: u32, pos: Pos2) -> 
         Some((x, y))
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn brush_tools_preview_the_stamp_and_point_tools_preview_one_pixel() {
+        let origin = Pos2::ZERO;
+        let brush = hover_rect(Tool::Pencil, 3, 4, 5, origin, 10.0).unwrap();
+        assert_eq!(brush.min, Pos2::new(30.0, 40.0));
+        assert_eq!(brush.size(), Vec2::splat(30.0));
+        let pixel = hover_rect(Tool::Eyedropper, 8, 2, 2, origin, 10.0).unwrap();
+        assert_eq!(pixel.min, Pos2::new(20.0, 20.0));
+        assert_eq!(pixel.size(), Vec2::splat(10.0));
+        assert!(hover_rect(Tool::Bucket, 4, 0, 0, origin, 2.0).is_some());
+        assert!(hover_rect(Tool::Select, 4, 0, 0, origin, 2.0).is_some());
     }
 }

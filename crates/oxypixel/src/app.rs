@@ -625,94 +625,94 @@ impl OxyApp {
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("File", |ui| {
-                    if ui.button("New…").clicked() {
+                    if menu_item(ui, "New…", "Ctrl+N") {
                         self.request_new();
                         ui.close_menu();
                     }
-                    if ui.button("Open…").clicked() {
+                    if menu_item(ui, "Open…", "Ctrl+O") {
                         self.request_open();
                         ui.close_menu();
                     }
-                    if ui.button("Open example").clicked() {
+                    if menu_item(ui, "Open example", "") {
                         self.request_example();
                         ui.close_menu();
                     }
-                    if ui.button("Save").clicked() {
+                    if menu_item(ui, "Save", "Ctrl+S") {
                         self.request_save();
                         ui.close_menu();
                     }
-                    if ui.button("Save as…").clicked() {
+                    if menu_item(ui, "Save as…", "Ctrl+Shift+S") {
                         self.open_path_dialog(PathKind::Save);
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.button("Import image as document…").clicked() {
+                    if menu_item(ui, "Import image as document…", "") {
                         self.request_import();
                         ui.close_menu();
                     }
-                    if ui.button("Import image as layer…").clicked() {
+                    if menu_item(ui, "Import image as layer…", "") {
                         self.open_path_dialog(PathKind::ImportLayer);
                         ui.close_menu();
                     }
-                    if ui.button("Export PNG…").clicked() {
+                    if menu_item(ui, "Export PNG…", "") {
                         self.open_path_dialog(PathKind::ExportPng);
                         ui.close_menu();
                     }
-                    if ui.button("Export BMP…").clicked() {
+                    if menu_item(ui, "Export BMP…", "") {
                         self.open_path_dialog(PathKind::ExportBmp);
                         ui.close_menu();
                     }
-                    if ui.button("Export GIF…").clicked() {
+                    if menu_item(ui, "Export GIF…", "") {
                         self.open_path_dialog(PathKind::ExportGif);
                         ui.close_menu();
                     }
-                    if ui.button("Export spritesheet…").clicked() {
+                    if menu_item(ui, "Export spritesheet…", "") {
                         self.open_path_dialog(PathKind::ExportSheet);
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.button("Quit").clicked() {
+                    if menu_item(ui, "Quit", "Ctrl+Q") {
                         self.request_quit(ui.ctx());
                         ui.close_menu();
                     }
                 });
                 ui.menu_button("Edit", |ui| {
-                    if ui.button("Undo").clicked() {
+                    if menu_item_enabled(ui, "Undo", "Ctrl+Z", self.editor.can_undo()) {
                         self.editor.undo();
                         ui.close_menu();
                     }
-                    if ui.button("Redo").clicked() {
+                    if menu_item_enabled(ui, "Redo", "Ctrl+Y", self.editor.can_redo()) {
                         self.editor.redo();
                         ui.close_menu();
                     }
-                    if ui.button("Swap colors").clicked() {
+                    if menu_item(ui, "Swap colors", "X") {
                         self.editor.swap_colors();
                         self.hex = self.editor.primary().to_hex();
                         ui.close_menu();
                     }
-                    if ui.button("Select all").clicked() {
+                    if menu_item(ui, "Select all", "Ctrl+A") {
                         self.editor.select_all();
                         ui.close_menu();
                     }
-                    if ui.button("Deselect").clicked() {
+                    if menu_item(ui, "Deselect", "Ctrl+D") {
                         self.editor.deselect();
                         ui.close_menu();
                     }
-                    if ui.button("Clear selection").clicked() {
+                    if menu_item(ui, "Clear selection", "Delete") {
                         self.apply(|editor| editor.clear_selection_pixels());
                         ui.close_menu();
                     }
                 });
                 ui.menu_button("View", |ui| {
-                    if ui.button("Zoom in").clicked() {
+                    if menu_item(ui, "Zoom in", "Ctrl+Plus") {
                         self.view.zoom_center(1.1);
                         ui.close_menu();
                     }
-                    if ui.button("Zoom out").clicked() {
+                    if menu_item(ui, "Zoom out", "Ctrl+Minus") {
                         self.view.zoom_center(1.0 / 1.1);
                         ui.close_menu();
                     }
-                    if ui.button("Fit").clicked() {
+                    if menu_item(ui, "Fit", "Ctrl+0") {
                         self.view.fit(
                             self.editor.document().width(),
                             self.editor.document().height(),
@@ -770,9 +770,27 @@ impl OxyApp {
 
     fn tool_panel(&mut self, ctx: &egui::Context) {
         egui::SidePanel::left("tools")
-            .exact_width(124.0)
+            .exact_width(156.0)
             .show(ctx, |ui| {
                 ui.heading("Tools");
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(self.editor.can_undo(), egui::Button::new("Undo"))
+                        .on_hover_text("Ctrl+Z")
+                        .on_disabled_hover_text("Ctrl+Z")
+                        .clicked()
+                    {
+                        self.editor.undo();
+                    }
+                    if ui
+                        .add_enabled(self.editor.can_redo(), egui::Button::new("Redo"))
+                        .on_hover_text("Ctrl+Y")
+                        .on_disabled_hover_text("Ctrl+Y")
+                        .clicked()
+                    {
+                        self.editor.redo();
+                    }
+                });
                 self.tool_button(ui, Tool::Pencil, "Pencil", "B");
                 self.tool_button(ui, Tool::Eraser, "Eraser", "E");
                 self.tool_button(ui, Tool::Bucket, "Fill", "G");
@@ -782,26 +800,30 @@ impl OxyApp {
                 self.tool_button(ui, Tool::Ellipse, "Ellipse", "O");
                 self.tool_button(ui, Tool::Select, "Select", "M");
                 ui.separator();
-                ui.label(format!("Brush {} px", self.editor.brush()));
-                ui.horizontal(|ui| {
-                    if ui.button("-").clicked() {
-                        self.editor.nudge_brush(-1);
-                    }
-                    if ui.button("+").clicked() {
-                        self.editor.nudge_brush(1);
-                    }
-                });
+                let mut size = self.editor.brush();
+                if ui
+                    .add(
+                        egui::Slider::new(&mut size, 1..=oxypixel_core::MAX_BRUSH)
+                            .suffix(" px")
+                            .text("Brush"),
+                    )
+                    .on_hover_text("Brush size. [ and ] change it too.")
+                    .changed()
+                {
+                    self.editor.set_brush(size);
+                }
                 let shapes = matches!(self.editor.tool(), Tool::Rectangle | Tool::Ellipse);
-                ui.add_enabled_ui(shapes, |ui| {
-                    let mut filled = self.editor.shape_filled();
-                    if ui.checkbox(&mut filled, "Fill shape").changed() {
-                        self.editor.set_shape_filled(filled);
-                    }
-                });
+                let mut filled = self.editor.shape_filled();
+                let fill = ui
+                    .add_enabled(shapes, egui::Checkbox::new(&mut filled, "Fill shape"))
+                    .on_hover_text("Fill the rectangle or ellipse instead of drawing an outline.")
+                    .on_disabled_hover_text("Switch to rectangle or ellipse to fill a shape.");
+                if fill.changed() {
+                    self.editor.set_shape_filled(filled);
+                }
                 ui.separator();
-                ui.label("Shift constrains.");
-                ui.label("Alt picks a color.");
-                ui.label("Space pans.");
+                ui.label(egui::RichText::new(tool_hint(self.editor.tool())).small());
+                ui.label(egui::RichText::new("Alt picks a color. Space pans.").small());
             });
     }
 
@@ -811,7 +833,11 @@ impl OxyApp {
         if selected {
             button = button.fill(Color32::from_rgb(78, 62, 32));
         }
-        if ui.add_sized([108.0, 28.0], button).clicked() {
+        if ui
+            .add_sized([140.0, 28.0], button)
+            .on_hover_text(tool_hint(tool))
+            .clicked()
+        {
             self.editor.set_tool(tool);
         }
     }
@@ -834,15 +860,18 @@ impl OxyApp {
                         .desired_width(120.0)
                         .hint_text("#RRGGBB"),
                 );
-                if hex_resp.lost_focus() {
+                let submit_hex = hex_resp.lost_focus()
+                    || (hex_resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+                if submit_hex {
                     if let Some(color) = Rgba::parse_hex(&self.hex) {
                         self.editor.set_primary(color);
+                        self.hex = color.to_hex();
                     } else {
                         self.note_err("Enter a color as #RRGGBB or #RRGGBBAA.");
                         self.hex = self.editor.primary().to_hex();
                     }
-                }
-                if !hex_resp.has_focus() {
+                    hex_resp.surrender_focus();
+                } else if !hex_resp.has_focus() {
                     self.hex = self.editor.primary().to_hex();
                 }
                 ui.label("Palette");
@@ -864,6 +893,10 @@ impl OxyApp {
                                 egui::StrokeKind::Inside,
                             );
                         }
+                        let response = response.on_hover_text(format!(
+                            "{}\nClick for the primary color. Right-click for the secondary color.",
+                            color.to_hex()
+                        ));
                         if response.clicked() {
                             self.editor.set_primary(color);
                             self.swatch = index;
@@ -874,6 +907,9 @@ impl OxyApp {
                         }
                     }
                 });
+                ui.label(
+                    egui::RichText::new("Right-click a swatch to set the second color.").small(),
+                );
                 ui.horizontal(|ui| {
                     if ui.button("Add").clicked() {
                         let color = self.editor.primary();
@@ -897,9 +933,12 @@ impl OxyApp {
                     };
                     ui.horizontal(|ui| {
                         let mut visible = layer.visible;
-                        if ui.checkbox(&mut visible, "").changed() {
-                            let _ = self.editor.set_active_layer(index);
-                            self.editor.set_layer_visible(visible);
+                        if ui
+                            .checkbox(&mut visible, "")
+                            .on_hover_text("Show or hide this layer")
+                            .changed()
+                        {
+                            let _ = self.editor.set_layer_visible_at(index, visible);
                         }
                         if index == active {
                             let mut name = layer.name.clone();
@@ -915,7 +954,11 @@ impl OxyApp {
                             if resp.lost_focus() {
                                 self.editor.end_coalesce();
                             }
-                        } else if ui.selectable_label(false, layer.name).clicked() {
+                        } else if ui
+                            .selectable_label(false, layer.name)
+                            .on_hover_text("Draw on this layer")
+                            .clicked()
+                        {
                             let _ = self.editor.set_active_layer(index);
                         }
                     });
@@ -934,22 +977,46 @@ impl OxyApp {
                     }
                 }
                 ui.horizontal_wrapped(|ui| {
-                    if ui.button("Add").clicked() {
+                    if ui
+                        .button("Add")
+                        .on_hover_text("Add a layer on top")
+                        .clicked()
+                    {
                         self.apply(|editor| editor.add_layer());
                     }
-                    if ui.button("Copy").clicked() {
+                    if ui
+                        .button("Copy")
+                        .on_hover_text("Duplicate this layer")
+                        .clicked()
+                    {
                         self.apply(|editor| editor.duplicate_layer());
                     }
-                    if ui.button("Delete").clicked() {
+                    if ui
+                        .button("Delete")
+                        .on_hover_text("Delete this layer")
+                        .clicked()
+                    {
                         self.apply(|editor| editor.delete_layer());
                     }
-                    if ui.button("Up").clicked() {
+                    if ui
+                        .button("Up")
+                        .on_hover_text("Move this layer up")
+                        .clicked()
+                    {
                         self.apply(|editor| editor.move_layer(1));
                     }
-                    if ui.button("Down").clicked() {
+                    if ui
+                        .button("Down")
+                        .on_hover_text("Move this layer down")
+                        .clicked()
+                    {
                         self.apply(|editor| editor.move_layer(-1));
                     }
-                    if ui.button("Merge").clicked() {
+                    if ui
+                        .button("Merge")
+                        .on_hover_text("Merge this layer into the one below")
+                        .clicked()
+                    {
                         self.apply(|editor| editor.merge_down());
                     }
                 });
@@ -984,26 +1051,40 @@ impl OxyApp {
             ui.horizontal(|ui| {
                 if ui
                     .button(if self.playing { "Pause" } else { "Play" })
+                    .on_hover_text("Enter")
                     .clicked()
                 {
                     self.toggle_play();
                 }
-                if ui.button("|<").on_hover_text("Previous frame").clicked() {
+                if ui.button("Prev").on_hover_text("Previous frame").clicked() {
                     self.step_frame(-1);
                 }
-                if ui.button(">|").on_hover_text("Next frame").clicked() {
+                if ui.button("Next").on_hover_text("Next frame").clicked() {
                     self.step_frame(1);
                 }
                 let count = self.editor.document().frame_count();
                 let active = self.editor.document().active_frame();
-                for index in 0..count {
-                    let label = format!("{}", index + 1);
-                    let selected = index == active;
-                    if ui.selectable_label(selected, label).clicked() {
-                        self.playing = false;
-                        let _ = self.editor.set_active_frame(index);
-                    }
-                }
+                let strip = (ui.available_width() - 560.0).clamp(72.0, 320.0);
+                egui::ScrollArea::horizontal()
+                    .id_salt("frame-strip")
+                    .max_width(strip)
+                    .max_height(28.0)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            for index in 0..count {
+                                let label = format!("{}", index + 1);
+                                let selected = index == active;
+                                if ui
+                                    .selectable_label(selected, label)
+                                    .on_hover_text(format!("Frame {}", index + 1))
+                                    .clicked()
+                                {
+                                    self.playing = false;
+                                    let _ = self.editor.set_active_frame(index);
+                                }
+                            }
+                        });
+                    });
                 if ui.button("Add frame").clicked() {
                     self.apply(|editor| editor.add_frame());
                 }
@@ -1025,27 +1106,91 @@ impl OxyApp {
                     self.editor.end_coalesce();
                 }
                 let mut onion = self.view.onion;
-                if ui.checkbox(&mut onion, "Onion").changed() {
+                if ui
+                    .checkbox(&mut onion, "Onion")
+                    .on_hover_text("Show the previous frame faintly under this one")
+                    .changed()
+                {
                     self.view.onion = onion;
                 }
             });
-            let doc = self.editor.document();
-            let pixel = self
-                .hover
-                .map(|(x, y)| format!("{x},{y}"))
-                .unwrap_or_else(|| "-".to_string());
+            self.status_line(ui);
+        });
+    }
+
+    fn status_line(&mut self, ui: &mut egui::Ui) {
+        let width = self.editor.document().width();
+        let height = self.editor.document().height();
+        let layers = self.editor.document().layer_count();
+        let layer = self.editor.document().active_layer() + 1;
+        let frames = self.editor.document().frame_count();
+        let frame = self.editor.document().active_frame() + 1;
+        let tool = tool_name(self.editor.tool());
+        let zoom = (self.view.zoom * 100.0).round() as i32;
+        let hover = self.hovered_color();
+        ui.horizontal(|ui| {
+            ui.label(format!("{width}×{height}"));
+            if ui.small_button("−").on_hover_text("Zoom out").clicked() {
+                self.view.zoom_center(1.0 / 1.1);
+            }
+            ui.label(format!("{zoom}%"));
+            if ui.small_button("+").on_hover_text("Zoom in").clicked() {
+                self.view.zoom_center(1.1);
+            }
+            if ui
+                .small_button("Fit")
+                .on_hover_text("Fit the canvas")
+                .clicked()
+            {
+                self.view.fit(width, height);
+            }
+            let mut grid = self.view.grid;
+            if ui
+                .checkbox(&mut grid, "Grid")
+                .on_hover_text("Show pixel grid when zoomed in")
+                .changed()
+            {
+                self.view.grid = grid;
+            }
+            ui.separator();
+            if let Some((x, y, color)) = hover {
+                let (rect, _) =
+                    ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
+                ui.painter().rect_filled(
+                    rect,
+                    2.0,
+                    Color32::from_rgba_unmultiplied(color.r, color.g, color.b, color.a),
+                );
+                ui.painter().rect_stroke(
+                    rect,
+                    2.0,
+                    egui::Stroke::new(1.0_f32, Color32::from_gray(96)),
+                    egui::StrokeKind::Inside,
+                );
+                let name = if color.a == 0 {
+                    "clear".to_string()
+                } else {
+                    color.to_hex()
+                };
+                ui.label(format!("{x},{y}  {name}"));
+            } else {
+                ui.label("pixel —");
+            }
+            ui.separator();
             ui.label(format!(
-                "{}×{}   zoom {}%   pixel {pixel}   {}   layer {}/{}   frame {}/{}",
-                doc.width(),
-                doc.height(),
-                (self.view.zoom * 100.0).round() as i32,
-                tool_name(self.editor.tool()),
-                doc.active_layer() + 1,
-                doc.layer_count(),
-                doc.active_frame() + 1,
-                doc.frame_count(),
+                "{tool}   layer {layer}/{layers}   frame {frame}/{frames}"
             ));
         });
+    }
+
+    fn hovered_color(&self) -> Option<(i32, i32, Rgba)> {
+        let (x, y) = self.hover?;
+        if x < 0 || y < 0 {
+            return None;
+        }
+        let doc = self.editor.document();
+        let color = doc.composite_pixel(doc.active_frame(), x as u32, y as u32)?;
+        Some((x, y, color))
     }
 
     fn show_dialog(&mut self, ctx: &egui::Context) {
@@ -1099,7 +1244,9 @@ impl OxyApp {
                     ui.colored_label(Color32::from_rgb(220, 100, 90), error);
                 }
                 ui.horizontal(|ui| {
-                    if ui.button("Create").clicked() {
+                    if ui.button("Create").clicked()
+                        || ui.input(|i| i.key_pressed(egui::Key::Enter))
+                    {
                         self.create_document();
                     }
                     if ui.button("Cancel").clicked() {
@@ -1147,7 +1294,7 @@ impl OxyApp {
                     if ui.button("Browse…").clicked() {
                         browsed = native::pick_path(save, title, filter_name(self.path_kind), filter_ext(self.path_kind));
                     }
-                    if ui.button("OK").clicked() {
+                    if ui.button("OK").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         confirm = true;
                     }
                     if ui.button("Cancel").clicked() {
@@ -1183,7 +1330,8 @@ impl OxyApp {
             .show(ctx, |ui| {
                 ui.label("This document has unsaved changes.");
                 ui.horizontal(|ui| {
-                    if ui.button("Save").clicked() {
+                    if ui.button("Save").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter))
+                    {
                         action = Some(0);
                     }
                     if ui.button("Discard").clicked() {
@@ -1250,6 +1398,33 @@ impl OxyApp {
         if close {
             self.dialog = None;
         }
+    }
+}
+
+fn menu_item(ui: &mut egui::Ui, label: &str, shortcut: &str) -> bool {
+    menu_item_enabled(ui, label, shortcut, true)
+}
+
+fn menu_item_enabled(ui: &mut egui::Ui, label: &str, shortcut: &str, enabled: bool) -> bool {
+    let mut button = egui::Button::new(label);
+    if !shortcut.is_empty() {
+        button = button.shortcut_text(shortcut);
+    }
+    ui.add_enabled(enabled, button).clicked()
+}
+
+fn tool_hint(tool: Tool) -> &'static str {
+    match tool {
+        Tool::Pencil => "Left-drag draws. Right-drag uses the second color.",
+        Tool::Eraser => "Drag to erase pixels on this layer.",
+        Tool::Bucket => "Click a connected area on this layer to fill it.",
+        Tool::Eyedropper => {
+            "Click the canvas to copy that color. Alt+click picks without switching tools."
+        }
+        Tool::Line => "Drag a straight line. Hold Shift for 45 degrees.",
+        Tool::Rectangle => "Drag an outline. Hold Shift for a square.",
+        Tool::Ellipse => "Drag an outline. Hold Shift for a circle.",
+        Tool::Select => "Drag a rectangle. Later strokes stay inside it.",
     }
 }
 
