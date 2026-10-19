@@ -13,6 +13,7 @@ mod icon;
 mod native;
 mod shortcuts;
 mod theme;
+mod update;
 
 use std::path::PathBuf;
 

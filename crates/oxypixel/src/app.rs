@@ -1,6 +1,7 @@
 //! Editor window: menus, tools, layers, frames, and file dialogs.
 
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver};
 
 use eframe::egui::{self, Color32, RichText, ViewportCommand};
 use oxypixel_core::{
@@ -12,6 +13,7 @@ use crate::canvas::{self, ViewState};
 use crate::native;
 use crate::shortcuts::{self, Command};
 use crate::theme::AMBER;
+use crate::update::{self, PackageKind, Relation, UpdateReport};
 
 const PRESETS: &[u32] = &[16, 32, 64, 128, 256, 512];
 
@@ -27,6 +29,13 @@ enum DialogKind {
     Unsaved,
     About,
     Shortcuts,
+    Update,
+}
+
+enum UpdateStatus {
+    Checking,
+    Downloading,
+    Failed(String),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -69,6 +78,15 @@ pub struct OxyApp {
     play_acc: u32,
     last_time: Option<f64>,
     allow_quit: bool,
+    update_status: Option<UpdateStatus>,
+    update_report: Option<UpdateReport>,
+    update_file: Option<PathBuf>,
+    update_rx: Option<Receiver<UpdateMessage>>,
+}
+
+enum UpdateMessage {
+    Checked(Box<Result<UpdateReport, String>>),
+    Downloaded(Result<PathBuf, String>),
 }
 
 impl OxyApp {
@@ -93,6 +111,10 @@ impl OxyApp {
             play_acc: 0,
             last_time: None,
             allow_quit: false,
+            update_status: None,
+            update_report: None,
+            update_file: None,
+            update_rx: None,
         };
         app.hex = app.editor.primary().to_hex();
         if let Some(path) = open {
@@ -743,6 +765,10 @@ impl OxyApp {
                     }
                 });
                 ui.menu_button("Help", |ui| {
+                    if ui.button("Check for updates").clicked() {
+                        self.start_update_check();
+                        ui.close_menu();
+                    }
                     if ui.button("Shortcuts").clicked() {
                         self.dialog = Some(DialogKind::Shortcuts);
                         ui.close_menu();
@@ -1193,7 +1219,118 @@ impl OxyApp {
         Some((x, y, color))
     }
 
+    fn start_update_check(&mut self) {
+        self.dialog = Some(DialogKind::Update);
+        self.update_status = Some(UpdateStatus::Checking);
+        self.update_report = None;
+        self.update_file = None;
+        let (tx, rx) = mpsc::channel();
+        self.update_rx = Some(rx);
+        std::thread::spawn(move || {
+            let _ = tx.send(UpdateMessage::Checked(Box::new(update::check_latest())));
+        });
+    }
+
+    fn start_update_download(&mut self) {
+        let Some(report) = self.update_report.clone() else {
+            return;
+        };
+        let Some(asset) = report.asset.clone() else {
+            return;
+        };
+        let Some(checksums) = report.checksums.clone() else {
+            return;
+        };
+        self.update_status = Some(UpdateStatus::Downloading);
+        self.update_file = None;
+        let (tx, rx) = mpsc::channel();
+        self.update_rx = Some(rx);
+        std::thread::spawn(move || {
+            let result = update::download_verified(&asset, &checksums)
+                .and_then(|bytes| update::write_download(&asset.name, &bytes));
+            let _ = tx.send(UpdateMessage::Downloaded(result));
+        });
+    }
+
+    fn poll_update(&mut self, ctx: &egui::Context) {
+        let Some(rx) = &self.update_rx else {
+            return;
+        };
+        match rx.try_recv() {
+            Ok(UpdateMessage::Checked(result)) => {
+                let result = *result;
+                self.update_rx = None;
+                match result {
+                    Ok(report) => {
+                        self.update_report = Some(report);
+                        self.update_status = None;
+                    }
+                    Err(err) => self.update_status = Some(UpdateStatus::Failed(err)),
+                }
+            }
+            Ok(UpdateMessage::Downloaded(result)) => {
+                self.update_rx = None;
+                match result {
+                    Ok(path) => {
+                        self.update_file = Some(path);
+                        self.update_status = None;
+                    }
+                    Err(err) => self.update_status = Some(UpdateStatus::Failed(err)),
+                }
+            }
+            Err(mpsc::TryRecvError::Empty) => {
+                ctx.request_repaint_after(std::time::Duration::from_millis(150));
+            }
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.update_rx = None;
+                self.update_status = Some(UpdateStatus::Failed(
+                    "the update check stopped before it finished".to_string(),
+                ));
+            }
+        }
+    }
+
+    fn apply_update(&mut self, ctx: &egui::Context) {
+        if self.editor.is_dirty() {
+            self.note_err("Save or discard this drawing before installing the update.");
+            return;
+        }
+        let Some(path) = self.update_file.clone() else {
+            return;
+        };
+        let Some(report) = self.update_report.clone() else {
+            return;
+        };
+        let reopen = self.save_path.clone();
+        let result = match report.package {
+            PackageKind::WindowsInstaller => update::launch_installer(&path),
+            PackageKind::WindowsPortable => {
+                let current = std::env::current_exe().map_err(|err| err.to_string());
+                current.and_then(|current| {
+                    let bytes = std::fs::read(&path).map_err(|err| err.to_string())?;
+                    update::stage_windows_restart(&current, &bytes, reopen.as_deref())
+                })
+            }
+            PackageKind::LinuxArchive => {
+                let current = std::env::current_exe().map_err(|err| err.to_string());
+                current.and_then(|current| {
+                    let bytes = std::fs::read(&path).map_err(|err| err.to_string())?;
+                    let program = update::linux_binary_from_archive(&bytes)?;
+                    update::replace_and_restart(&current, &program, reopen.as_deref())
+                })
+            }
+        };
+        match result {
+            Ok(()) => {
+                self.allow_quit = true;
+                ctx.send_viewport_cmd(ViewportCommand::Close);
+            }
+            Err(err) => self.update_status = Some(UpdateStatus::Failed(err)),
+        }
+    }
+
     fn show_dialog(&mut self, ctx: &egui::Context) {
+        self.poll_update(ctx);
         let Some(kind) = self.dialog else {
             return;
         };
@@ -1212,6 +1349,7 @@ impl OxyApp {
             DialogKind::Unsaved => self.dialog_unsaved(ctx),
             DialogKind::About => self.dialog_about(ctx),
             DialogKind::Shortcuts => self.dialog_shortcuts(ctx),
+            DialogKind::Update => self.dialog_update(ctx),
         }
         if self.allow_quit && matches!(self.pending, Some(Pending::Quit)) {
             ctx.send_viewport_cmd(ViewportCommand::Close);
@@ -1357,6 +1495,88 @@ impl OxyApp {
         }
     }
 
+    fn dialog_update(&mut self, ctx: &egui::Context) {
+        let mut close = false;
+        let mut download = false;
+        let mut install = false;
+        egui::Window::new("Check for updates")
+            .collapsible(false)
+            .resizable(true)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                ui.label("This looks at the public OxyPixel releases on GitHub. It runs only when you open this window.");
+                ui.add_space(6.0);
+                match &self.update_status {
+                    Some(UpdateStatus::Checking) => {
+                        ui.label("Checking GitHub…");
+                    }
+                    Some(UpdateStatus::Downloading) => {
+                        ui.label("Downloading the release and its checksum…");
+                    }
+                    Some(UpdateStatus::Failed(err)) => {
+                        ui.colored_label(Color32::from_rgb(220, 100, 90), err);
+                    }
+                    None => {}
+                }
+                if let Some(report) = &self.update_report {
+                    match report.relation {
+                        Relation::Same => {
+                            ui.label(format!("OxyPixel {} is the latest release.", report.current));
+                        }
+                        Relation::Ahead => {
+                            ui.label(format!(
+                                "This copy is {} and the latest GitHub release is {}.",
+                                report.current, report.release.version
+                            ));
+                        }
+                        Relation::Behind => {
+                            ui.label(format!(
+                                "Version {} is available. This copy is {}.",
+                                report.release.version, report.current
+                            ));
+                            if !report.release.page_url.is_empty() {
+                                ui.hyperlink_to("Release notes", &report.release.page_url);
+                            }
+                            egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
+                                ui.label(report.release.notes.clone());
+                            });
+                            if report.asset.is_none() || report.checksums.is_none() {
+                                ui.label("This release does not include a checksummed file for this system.");
+                            } else if let Some(path) = &self.update_file {
+                                ui.label(format!("Checksum matched. Saved to {}.", path.display()));
+                                let action = match report.package {
+                                    PackageKind::WindowsInstaller => "Open installer",
+                                    PackageKind::WindowsPortable => "Restart and update",
+                                    PackageKind::LinuxArchive => "Replace this copy and restart",
+                                };
+                                if ui.button(action).clicked() {
+                                    install = true;
+                                }
+                                ui.label("The installer is not silent. Windows builds are still unsigned.");
+                            } else if !matches!(self.update_status, Some(UpdateStatus::Downloading))
+                                && ui.button("Download and verify").clicked()
+                            {
+                                download = true;
+                            }
+                        }
+                    }
+                }
+                if ui.button("Close").clicked() {
+                    close = true;
+                }
+            });
+        if download {
+            self.start_update_download();
+        }
+        if install {
+            self.apply_update(ctx);
+        }
+        if close {
+            self.dialog = None;
+        }
+    }
+
     fn dialog_about(&mut self, ctx: &egui::Context) {
         let mut close = false;
         egui::Window::new("About OxyPixel")
@@ -1367,8 +1587,8 @@ impl OxyApp {
             .show(ctx, |ui| {
                 ui.label(format!("OxyPixel {}", env!("CARGO_PKG_VERSION")));
                 ui.label("An original pixel-art editor.");
-                ui.label("MIT License. Documents stay on this computer.");
-                ui.label("OxyPixel does not send files or usage data anywhere.");
+                ui.label("MIT License. Drawings stay on this computer.");
+                ui.label("GitHub is contacted only when you choose Check for updates.");
                 if ui.button("Close").clicked() {
                     close = true;
                 }

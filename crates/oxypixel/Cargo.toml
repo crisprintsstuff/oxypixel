@@ -18,8 +18,13 @@ path = "src/main.rs"
 
 [dependencies]
 eframe = { version = "0.31.1", default-features = false, features = ["default_fonts", "glow"] }
+flate2 = "1"
 image = { workspace = true }
 oxypixel-core = { path = "../oxypixel-core" }
+serde_json = "1"
+sha2 = "0.10"
+tar = "0.4"
+ureq = { version = "2.12.1", default-features = false, features = ["tls"] }
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 eframe = { version = "0.31.1", default-features = false, features = ["default_fonts", "glow", "x11"] }

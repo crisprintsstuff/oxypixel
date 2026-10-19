@@ -6,7 +6,7 @@ OxyPixel is a pixel-art editor for Windows and Linux. Draw on a pixel canvas, st
 
 It is an original program written in Rust. The editing rules live in `oxypixel-core`. The window is an [egui](https://github.com/emilk/egui) app. OxyPixel is not affiliated with Pixelorama, Orama Interactive, Godot, or Aseprite.
 
-**[Releases](https://github.com/crisprintsstuff/oxypixel/releases)** · **[Changelog](CHANGELOG.md)** · **[v0.2.0](https://github.com/crisprintsstuff/oxypixel/releases/tag/v0.2.0)**
+**[Releases](https://github.com/crisprintsstuff/oxypixel/releases)** · **[Changelog](CHANGELOG.md)** · **[v0.2.1](https://github.com/crisprintsstuff/oxypixel/releases/tag/v0.2.1)**
 
 ## Contents
 
@@ -25,20 +25,20 @@ It is an original program written in Rust. The editing rules live in `oxypixel-c
 
 ## Download
 
-Current release: [v0.2.0](https://github.com/crisprintsstuff/oxypixel/releases/tag/v0.2.0). Older builds are on the [releases page](https://github.com/crisprintsstuff/oxypixel/releases). What changed is in the [changelog](CHANGELOG.md).
+Current release: [v0.2.1](https://github.com/crisprintsstuff/oxypixel/releases/tag/v0.2.1). Older builds are on the [releases page](https://github.com/crisprintsstuff/oxypixel/releases). What changed is in the [changelog](CHANGELOG.md).
 
 | File | Use |
 | --- | --- |
-| [OxyPixel-0.2.0-Setup.exe](https://github.com/crisprintsstuff/oxypixel/releases/download/v0.2.0/OxyPixel-0.2.0-Setup.exe) | Windows installer |
-| [oxypixel-0.2.0-windows-x86_64.exe](https://github.com/crisprintsstuff/oxypixel/releases/download/v0.2.0/oxypixel-0.2.0-windows-x86_64.exe) | Portable Windows executable |
-| [oxypixel-0.2.0-linux-x86_64.tar.gz](https://github.com/crisprintsstuff/oxypixel/releases/download/v0.2.0/oxypixel-0.2.0-linux-x86_64.tar.gz) | Linux x86_64 archive |
-| [SHA256SUMS.txt](https://github.com/crisprintsstuff/oxypixel/releases/download/v0.2.0/SHA256SUMS.txt) | Checksums |
+| [OxyPixel-0.2.1-Setup.exe](https://github.com/crisprintsstuff/oxypixel/releases/download/v0.2.1/OxyPixel-0.2.1-Setup.exe) | Windows installer |
+| [oxypixel-0.2.1-windows-x86_64.exe](https://github.com/crisprintsstuff/oxypixel/releases/download/v0.2.1/oxypixel-0.2.1-windows-x86_64.exe) | Portable Windows executable |
+| [oxypixel-0.2.1-linux-x86_64.tar.gz](https://github.com/crisprintsstuff/oxypixel/releases/download/v0.2.1/oxypixel-0.2.1-linux-x86_64.tar.gz) | Linux x86_64 archive |
+| [SHA256SUMS.txt](https://github.com/crisprintsstuff/oxypixel/releases/download/v0.2.1/SHA256SUMS.txt) | Checksums |
 
 The Windows files are unsigned. SmartScreen can warn that the publisher is unknown. Check `SHA256SUMS.txt` before you install. Signing steps are in [docs/BUILD-WINDOWS.md](docs/BUILD-WINDOWS.md).
 
 ## Windows installer
 
-`OxyPixel-0.2.0-Setup.exe` is a per-user NSIS setup.
+`OxyPixel-0.2.1-Setup.exe` is a per-user NSIS setup.
 
 1. Run the installer. It does not need administrator rights.
 2. OxyPixel is installed under `%LOCALAPPDATA%\OxyPixel`.
@@ -49,15 +49,15 @@ The program needs OpenGL (`opengl32.dll`, which ships with Windows). The release
 
 ## Portable Windows build
 
-`oxypixel-0.2.0-windows-x86_64.exe` is the same 64-bit program without an installer. Put it in any folder and run it. This copy has no embedded icon or version resource. The installer shortcut uses `oxypixel.ico`.
+`oxypixel-0.2.1-windows-x86_64.exe` is the same 64-bit program without an installer. Help, then Check for updates, can download a newer release and restart into it after the checksum matches. Put it in any folder and run it. This copy has no embedded icon or version resource. The installer shortcut uses `oxypixel.ico`.
 
 ## Linux
 
-`oxypixel-0.2.0-linux-x86_64.tar.gz` contains the x86_64 executable, `LICENSE`, and `README.txt`. It was built on Ubuntu 24.04. It is not a `.deb`, RPM, AppImage, or Flatpak. Packaging ideas are in [docs/LINUX-PACKAGING.md](docs/LINUX-PACKAGING.md).
+`oxypixel-0.2.1-linux-x86_64.tar.gz` contains the x86_64 executable, `LICENSE`, and `README.txt`. It was built on Ubuntu 24.04. It is not a `.deb`, RPM, AppImage, or Flatpak. Packaging ideas are in [docs/LINUX-PACKAGING.md](docs/LINUX-PACKAGING.md).
 
 ```bash
-tar -xzf oxypixel-0.2.0-linux-x86_64.tar.gz
-cd oxypixel-0.2.0-linux-x86_64
+tar -xzf oxypixel-0.2.1-linux-x86_64.tar.gz
+cd oxypixel-0.2.1-linux-x86_64
 ./oxypixel
 ```
 
@@ -146,7 +146,7 @@ Use a focused branch. Run `make check` before asking for review. Do not copy cod
 
 ## Security
 
-OxyPixel stays on the local machine. It does not open a network connection. Document parsing rejects oversized files before it allocates the pixel buffers. Report a problem the way [SECURITY.md](SECURITY.md) describes.
+OxyPixel does not open a network connection on its own. Help, then Check for updates, is the one request to GitHub, and it downloads a file only after `SHA256SUMS.txt` matches. Document parsing rejects oversized files before it allocates the pixel buffers. Report a problem the way [SECURITY.md](SECURITY.md) describes.
 
 ## License
 

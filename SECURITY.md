@@ -1,12 +1,12 @@
 # Security
 
-OxyPixel is a local editor. It does not open a network connection, does not phone home, and does not execute scripts stored in documents.
+OxyPixel is a local editor. It does not phone home, and it does not execute scripts stored in documents. The only network request is Help, then Check for updates, which the user starts. That request reads the public GitHub release list and, if the user continues, downloads one release file plus `SHA256SUMS.txt`.
 
 ## Supported versions
 
 | Version | Status |
 | --- | --- |
-| 0.1.x | Receives fixes for file-parsing and crash bugs |
+| 0.2.x | Current release line |
 
 ## What we harden
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+- Help, then Check for updates, asks GitHub for the latest public release. OxyPixel does not open a network connection until that command is chosen.
+- A downloaded file is kept only when its SHA-256 matches `SHA256SUMS.txt` from the same release. Files from any other site are refused.
+- A portable Windows copy restarts into the new executable. An installed copy opens the setup program, and the installer is not silent because the build is still unsigned. A Linux copy replaces `oxypixel` in its folder when that folder can be written, then restarts.
+
 ## 0.2.0
 
 Editor:
