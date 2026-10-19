@@ -453,14 +453,23 @@ impl Editor {
 
     pub fn set_layer_visible(&mut self, visible: bool) {
         let index = self.doc.active_layer();
+        let _ = self.set_layer_visible_at(index, visible);
+    }
+
+    /// Show or hide one layer and leave the active layer where it is.
+    pub fn set_layer_visible_at(&mut self, index: usize, visible: bool) -> Result<()> {
+        if self.doc.layer(index).is_none() {
+            return Err(Error::Index { what: "layer" });
+        }
         if self.doc.layer(index).map(|l| l.visible) == Some(visible) {
-            return;
+            return Ok(());
         }
         self.mutate(false, |doc| {
             if let Some(layer) = doc.layers_mut().get_mut(index) {
                 layer.visible = visible;
             }
         });
+        Ok(())
     }
 
     pub fn set_layer_opacity(&mut self, opacity: u8) {
@@ -895,6 +904,18 @@ mod tests {
         ed.add_frame().unwrap();
         assert_eq!(ed.document().cel(1, 0).unwrap()[0], Rgba::CLEAR);
         assert_eq!(ed.document().cel(0, 0).unwrap()[0].r, 3);
+    }
+
+    #[test]
+    fn hiding_another_layer_keeps_the_active_one() {
+        let mut ed = editor();
+        ed.add_layer().unwrap();
+        let active = ed.document().active_layer();
+        ed.set_layer_visible_at(0, false).unwrap();
+        assert_eq!(ed.document().active_layer(), active);
+        assert!(!ed.document().layer(0).unwrap().visible);
+        assert!(ed.document().layer(active).unwrap().visible);
+        assert!(ed.set_layer_visible_at(4, false).is_err());
     }
 
     #[test]
