@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Releases
+    url: https://github.com/crisprintsstuff/oxypixel/releases
+    about: Installers, portable builds, and checksums
+  - name: Changelog
+    url: https://github.com/crisprintsstuff/oxypixel/blob/main/CHANGELOG.md
+    about: What each version changed

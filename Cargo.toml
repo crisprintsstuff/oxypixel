@@ -9,7 +9,7 @@ license = "MIT"
 authors = ["OxyPixel contributors"]
 repository = "https://github.com/crisprintsstuff/oxypixel"
 rust-version = "1.85"
-description = "Original pixel-art editor"
+description = "Pixel-art editor for Windows and Linux"
 
 [workspace.dependencies]
 image = { version = "0.25.10", default-features = false, features = ["png", "bmp", "gif"] }

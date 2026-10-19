@@ -6,8 +6,10 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "OxyPixel pixel-art editor"
+description = "Pixel-art editor for Windows and Linux"
 publish = false
+keywords = ["pixel-art", "editor", "sprites", "animation", "gui"]
+categories = ["graphics", "gui"]
 build = "build.rs"
 
 [[bin]]

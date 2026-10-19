@@ -1,0 +1,36 @@
+name: Bug
+description: A drawing, file, or install problem in OxyPixel
+title: "Bug: "
+labels: []
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, and what OxyPixel did instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Release tag, or the commit you built.
+      placeholder: v0.2.0
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows installer
+        - Windows portable exe
+        - Linux archive
+        - Built from source
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Document or log
+      description: A small .oxypix or the export command helps. Leave out secrets.

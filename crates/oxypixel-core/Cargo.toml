@@ -6,8 +6,10 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "Document model, tools, and file IO for OxyPixel"
+description = "Document model, drawing tools, and image IO for the OxyPixel editor"
 publish = false
+keywords = ["pixel-art", "sprites", "animation", "image"]
+categories = ["graphics"]
 
 [dependencies]
 image.workspace = true
