@@ -80,8 +80,10 @@ fn fail(message: &str) -> u8 {
     1
 }
 
-pub const HELP: &str = "\
-OxyPixel 0.1.0, a pixel-art editor
+pub const HELP: &str = concat!(
+    "OxyPixel ",
+    env!("CARGO_PKG_VERSION"),
+    ", a pixel-art editor
 
 Usage:
   oxypixel [FILE]
@@ -94,4 +96,5 @@ Usage:
 
 With no command, OxyPixel opens the editor. A file argument opens that .oxypix document.
 Export commands do not open a window. FRAME is the zero-based frame index and defaults to 0.
-";
+"
+);

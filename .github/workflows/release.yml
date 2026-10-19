@@ -11,8 +11,6 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
-    # Test, release build, and the NSIS install. Longer than CI because
-    # `choco install nsis` is extra, still far under the 6-hour default.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -34,30 +32,62 @@ jobs:
       - name: Stage files
         shell: pwsh
         run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"' | Select-Object -First 1).Matches.Groups[1].Value
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item target/release/oxypixel.exe dist/oxypixel.exe
+          Copy-Item target/release/oxypixel.exe "dist/oxypixel-$version-windows-x86_64.exe"
           Copy-Item installer/oxypixel.ico dist/oxypixel.ico
           makensis installer/oxypixel.nsi
-          Get-FileHash dist/oxypixel.exe, dist/OxyPixel-0.1.0-Setup.exe -Algorithm SHA256 |
+          $files = @(
+            "dist/oxypixel-$version-windows-x86_64.exe",
+            "dist/OxyPixel-$version-Setup.exe"
+          )
+          Get-FileHash $files -Algorithm SHA256 |
             ForEach-Object { "{0}  {1}" -f $_.Hash.ToLower(), (Split-Path $_.Path -Leaf) } |
-            Set-Content dist/SHA256SUMS.txt
+            Set-Content dist/SHA256SUMS-windows.txt
+          Set-Content -Path dist/release-names.txt -Value @(
+            "oxypixel-$version-windows-x86_64.exe",
+            "OxyPixel-$version-Setup.exe",
+            "SHA256SUMS-windows.txt"
+          )
       - uses: actions/upload-artifact@v4
         with:
           name: oxypixel-windows-unsigned
           path: |
-            dist/oxypixel.exe
-            dist/OxyPixel-0.1.0-Setup.exe
-            dist/oxypixel.ico
-            dist/SHA256SUMS.txt
-      - name: Attach unsigned binaries to the GitHub release
+            dist/oxypixel-*-windows-x86_64.exe
+            dist/OxyPixel-*-Setup.exe
+            dist/SHA256SUMS-windows.txt
+      - name: Attach Windows files to the GitHub release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          prerelease: true
-          body: |
-            Unsigned Windows build of OxyPixel. No Authenticode certificate was applied.
-            SmartScreen can warn about an unknown publisher. Verify SHA256SUMS.txt.
           files: |
-            dist/oxypixel.exe
-            dist/OxyPixel-0.1.0-Setup.exe
-            dist/SHA256SUMS.txt
+            dist/oxypixel-*-windows-x86_64.exe
+            dist/OxyPixel-*-Setup.exe
+            dist/SHA256SUMS-windows.txt
+
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.0
+      - name: Test and pack
+        run: |
+          cargo test --workspace
+          chmod +x scripts/package-linux.sh
+          ./scripts/package-linux.sh
+          (cd dist && sha256sum oxypixel-*-linux-x86_64.tar.gz > SHA256SUMS-linux.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oxypixel-linux-x86_64
+          path: |
+            dist/oxypixel-*-linux-x86_64.tar.gz
+            dist/SHA256SUMS-linux.txt
+      - name: Attach the Linux archive to the GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/oxypixel-*-linux-x86_64.tar.gz
+            dist/SHA256SUMS-linux.txt

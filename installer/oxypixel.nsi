@@ -5,13 +5,13 @@ Unicode true
 ManifestDPIAware true
 
 !define APPNAME "OxyPixel"
-!define VERSION "0.1.0"
+!define VERSION "0.2.0"
 !define PUBLISHER "OxyPixel contributors"
 !define REGPATH "Software\Microsoft\Windows\CurrentVersion\Uninstall\OxyPixel"
 
 Name "${APPNAME}"
 Caption "${APPNAME} ${VERSION} Setup"
-OutFile "${__FILEDIR__}/../dist/${APPNAME}-${VERSION}-Setup.exe"
+OutFile "../dist/${APPNAME}-${VERSION}-Setup.exe"
 InstallDir "$LOCALAPPDATA\OxyPixel"
 InstallDirRegKey HKCU "${REGPATH}" "InstallLocation"
 RequestExecutionLevel user
@@ -21,15 +21,15 @@ BrandingText "${APPNAME} ${VERSION}"
 !include "MUI2.nsh"
 
 !define MUI_ABORTWARNING
-!define MUI_ICON "${__FILEDIR__}/oxypixel.ico"
-!define MUI_UNICON "${__FILEDIR__}/oxypixel.ico"
+!define MUI_ICON "oxypixel.ico"
+!define MUI_UNICON "oxypixel.ico"
 
 !define MUI_HEADERIMAGE
 !define MUI_HEADERIMAGE_RIGHT
-!define MUI_HEADERIMAGE_BITMAP "${__FILEDIR__}/header.bmp"
-!define MUI_HEADERIMAGE_UNBITMAP "${__FILEDIR__}/header.bmp"
-!define MUI_WELCOMEFINISHPAGE_BITMAP "${__FILEDIR__}/welcome.bmp"
-!define MUI_UNWELCOMEFINISHPAGE_BITMAP "${__FILEDIR__}/welcome.bmp"
+!define MUI_HEADERIMAGE_BITMAP "header.bmp"
+!define MUI_HEADERIMAGE_UNBITMAP "header.bmp"
+!define MUI_WELCOMEFINISHPAGE_BITMAP "welcome.bmp"
+!define MUI_UNWELCOMEFINISHPAGE_BITMAP "welcome.bmp"
 !define MUI_WELCOMEFINISHPAGE_BITMAP_NOSTRETCH
 !define MUI_UNWELCOMEFINISHPAGE_BITMAP_NOSTRETCH
 
@@ -56,7 +56,7 @@ BrandingText "${APPNAME} ${VERSION}"
 !define MUI_UNCONFIRMPAGE_TEXT_LOCATION "Installed in:"
 
 !insertmacro MUI_PAGE_WELCOME
-!insertmacro MUI_PAGE_LICENSE "${__FILEDIR__}/../LICENSE"
+!insertmacro MUI_PAGE_LICENSE "../LICENSE"
 !insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
@@ -66,8 +66,8 @@ BrandingText "${APPNAME} ${VERSION}"
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
 
-VIProductVersion "0.1.0.0"
-VIFileVersion "0.1.0.0"
+VIProductVersion "0.2.0.0"
+VIFileVersion "0.2.0.0"
 VIAddVersionKey "ProductName" "OxyPixel"
 VIAddVersionKey "CompanyName" "${PUBLISHER}"
 VIAddVersionKey "FileDescription" "OxyPixel installer"
@@ -81,8 +81,8 @@ VIAddVersionKey "Comments" "Unsigned build. No Authenticode certificate was appl
 Section "OxyPixel" SecMain
   SectionIn RO
   SetOutPath "$INSTDIR"
-  File "${__FILEDIR__}/../dist/oxypixel.exe"
-  File "${__FILEDIR__}/oxypixel.ico"
+  File "../dist/oxypixel.exe"
+  File "oxypixel.ico"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
   CreateDirectory "$SMPROGRAMS\OxyPixel"

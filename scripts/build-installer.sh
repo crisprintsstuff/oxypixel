@@ -20,10 +20,5 @@ docker run --rm \
   ubuntu:24.04 \
   bash -lc 'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y nsis && makensis installer/oxypixel.nsi'
 
-if command -v sha256sum >/dev/null 2>&1; then
-  (
-    cd dist
-    sha256sum oxypixel.exe oxypixel.ico OxyPixel-0.1.0-Setup.exe > SHA256SUMS.txt
-  )
-fi
-echo "Wrote dist/OxyPixel-0.1.0-Setup.exe (unsigned)"
+version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+echo "Wrote dist/OxyPixel-${version}-Setup.exe (unsigned)"

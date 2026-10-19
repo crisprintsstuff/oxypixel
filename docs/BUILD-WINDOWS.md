@@ -1,6 +1,6 @@
 # Windows build and installer
 
-The packaged artifact is a 64-bit `oxypixel.exe` plus `OxyPixel-0.1.0-Setup.exe`. Both are **unsigned** unless you add a certificate yourself. They are normal PE files, so `signtool` can sign them later. This repository does not contain a certificate and the build scripts never look for one.
+The packaged artifacts are a 64-bit `oxypixel-0.2.0-windows-x86_64.exe` plus `OxyPixel-0.2.0-Setup.exe`. Both are **unsigned** unless you add a certificate yourself. They are normal PE files, so `signtool` can sign them later. This repository does not contain a certificate and the build scripts never look for one.
 
 ## What the executable links
 
@@ -32,7 +32,7 @@ copy /Y installer\oxypixel.ico dist\oxypixel.ico
 makensis installer\oxypixel.nsi
 ```
 
-The installer is `dist\OxyPixel-0.1.0-Setup.exe`. It is a per-user install (`RequestExecutionLevel user`) into `%LOCALAPPDATA%\OxyPixel`, with an uninstaller, Start menu entries, an optional desktop shortcut, and an HKCU `.oxypix` association. Add/Remove Programs reads the uninstall key under `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\OxyPixel`.
+The installer is `dist\OxyPixel-0.2.0-Setup.exe`. It is a per-user install (`RequestExecutionLevel user`) into `%LOCALAPPDATA%\OxyPixel`, with an uninstaller, Start menu entries, an optional desktop shortcut, and an HKCU `.oxypix` association. Add/Remove Programs reads the uninstall key under `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\OxyPixel`.
 
 ## Cross-compile from Linux
 
@@ -54,7 +54,7 @@ This is how a Linux machine produces the same MSVC executable. It needs:
 - `rust-toolchain.toml` pins 1.99.0
 - `Cargo.lock` is committed
 - The Windows target always gets `+crt-static`
-- `scripts/build-windows.sh` writes `dist/SHA256SUMS.txt` when `sha256sum` exists
+- `scripts/build-windows.sh` copies `dist/oxypixel-<version>-windows-x86_64.exe`
 
 A GitHub Actions run on `windows-latest` (`.github/workflows/release.yml`) is the native build path. The Linux cross build is a convenience for machines that are not Windows. Prefer the Actions artifact when the two ever disagree.
 
@@ -64,9 +64,9 @@ No signature is applied. After you have a certificate, sign the application and 
 
 ```bat
 signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f your-cert.pfx /p YOUR_PASSWORD dist\oxypixel.exe
-signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f your-cert.pfx /p YOUR_PASSWORD dist\OxyPixel-0.1.0-Setup.exe
+signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f your-cert.pfx /p YOUR_PASSWORD dist\OxyPixel-0.2.0-Setup.exe
 signtool verify /pa /v dist\oxypixel.exe
-signtool verify /pa /v dist\OxyPixel-0.1.0-Setup.exe
+signtool verify /pa /v dist\OxyPixel-0.2.0-Setup.exe
 ```
 
 Do not put the `.pfx` or the password in the repository, in CI logs, or in a script that gets committed. A GitHub Actions secret named something like `WINDOWS_CERT_PFX` (base64) and `WINDOWS_CERT_PASSWORD` can feed `signtool` later. Until that exists, tell users the build is unsigned.

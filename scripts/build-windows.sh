@@ -16,13 +16,9 @@ fi
 
 cargo xwin build --release --target x86_64-pc-windows-msvc -p oxypixel --cross-compiler clang-cl
 
+version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 mkdir -p dist
 cp -f target/x86_64-pc-windows-msvc/release/oxypixel.exe dist/oxypixel.exe
+cp -f dist/oxypixel.exe "dist/oxypixel-${version}-windows-x86_64.exe"
 cp -f installer/oxypixel.ico dist/oxypixel.ico
-if command -v sha256sum >/dev/null 2>&1; then
-  (
-    cd dist
-    sha256sum oxypixel.exe oxypixel.ico > SHA256SUMS.txt
-  )
-fi
-echo "Wrote dist/oxypixel.exe (unsigned, Authenticode-ready)"
+echo "Wrote dist/oxypixel-${version}-windows-x86_64.exe (unsigned, Authenticode-ready)"

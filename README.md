@@ -4,7 +4,7 @@ OxyPixel is an original pixel-art editor. It is not affiliated with Pixelorama, 
 
 The editor is a small Rust program. Drawing, layers, frames, undo, and file IO live in `oxypixel-core`, which has no windowing code. The `oxypixel` binary is an [egui](https://github.com/emilk/egui) interface on top of that library.
 
-## Features in 0.1.0
+## Features in 0.2.0
 
 - Pixel canvas with nearest-neighbor zoom, pan, and an optional grid
 - Pencil, eraser, fill, eyedropper, line, rectangle, ellipse, and rectangular selection
@@ -22,9 +22,9 @@ Canvas limits are intentional: at most 1024 pixels on a side, 1,048,576 pixels i
 
 The supported desktop package is the Windows installer.
 
-1. Download `oxypixel.exe` and `OxyPixel-0.1.0-Setup.exe` from a GitHub release of this private repository, or build them with [docs/BUILD-WINDOWS.md](docs/BUILD-WINDOWS.md).
-2. Run `OxyPixel-0.1.0-Setup.exe`. It installs for the current user under `%LOCALAPPDATA%\OxyPixel`, adds a Start menu shortcut, and registers the `.oxypix` extension.
-3. Launch OxyPixel from the Start menu.
+1. Download `OxyPixel-0.2.0-Setup.exe` from a GitHub release of this private repository, or build it with [docs/BUILD-WINDOWS.md](docs/BUILD-WINDOWS.md).
+2. Run the setup. It installs for the current user under `%LOCALAPPDATA%\OxyPixel`, adds a Start menu shortcut, and registers the `.oxypix` extension.
+3. Launch OxyPixel from the Start menu. `oxypixel-0.2.0-windows-x86_64.exe` is the same program without an installer.
 
 **This build is unsigned.** No Authenticode certificate was available. Windows SmartScreen can warn that the publisher is unknown. That warning is expected. The executable and the installer are ordinary PE files and can be signed later with `signtool`. The signing commands are in [docs/BUILD-WINDOWS.md](docs/BUILD-WINDOWS.md). Do not bypass SmartScreen for a binary you did not build or receive from a source you trust.
 
@@ -52,15 +52,15 @@ Windows cross-compilation and the installer are documented in [docs/BUILD-WINDOW
 
 ## Linux
 
-The same source builds on Linux because the editor is Rust and the Linux CI job compiles and tests it. That is not a packaged Linux release. There is no `.deb`, AppImage, or Flatpak in this version. The proposed packaging is in [docs/LINUX-PACKAGING.md](docs/LINUX-PACKAGING.md). Do not treat Linux as a supported desktop download unless that document says a package was built and tested.
+Release 0.2.0 includes `oxypixel-0.2.0-linux-x86_64.tar.gz`. Unpack it and run `./oxypixel`. The archive is an x86_64 executable built on Ubuntu 24.04, plus `LICENSE` and a short `README.txt`. It is not a `.deb`, RPM, AppImage, or Flatpak. Proposed packages are still in [docs/LINUX-PACKAGING.md](docs/LINUX-PACKAGING.md).
 
-A machine without an X11 display can still run `cargo test` and the export commands. Opening the window needs OpenGL and an X11 display (`libX11.so.6`, `libGL.so.1`).
+Opening the window needs OpenGL and an X11 display (`libGL.so.1`, `libX11.so.6`, `libxkbcommon.so.0`). `oxypixel export-png` and the other export commands do not need a display.
 
 ## Assumptions
 
 - The project lives in a new `oxylabs/oxypixel` directory.
 - Windows is the packaged target. The GUI uses egui's `glow` backend.
-- Animation is in the 0.1.0 core: one shared layer stack, per-frame cels, playback, GIF, and spritesheet.
+- Animation uses one shared layer stack, per-frame cels, playback, GIF, and a spritesheet.
 - There is no code-signing certificate in this environment.
 - The private GitHub repository, when created from this checkout, is `crisprintsstuff/oxypixel`.
 
