@@ -1,13 +1,26 @@
-//! Native file dialogs and error boxes. Windows uses the system dialogs.
-//! Other targets keep the in-app path field, which does not need a GUI toolkit.
+//! Native file dialogs and error boxes.
+//!
+//! Windows uses the system dialog. Linux uses the XDG desktop portal when a
+//! desktop provides one. If that returns no path, the in-app path field stays.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-#[cfg(windows)]
-pub fn pick_path(save: bool, title: &str, filter: &str, extensions: &[&str]) -> Option<PathBuf> {
-    let dialog = rfd::FileDialog::new()
+#[cfg(any(windows, all(unix, not(target_os = "macos"))))]
+pub fn pick_path(
+    save: bool,
+    title: &str,
+    filter: &str,
+    extensions: &[&str],
+    directory: Option<&Path>,
+) -> Option<PathBuf> {
+    let mut dialog = rfd::FileDialog::new()
         .set_title(title)
         .add_filter(filter, extensions);
+    if let Some(dir) = directory {
+        if dir.is_dir() {
+            dialog = dialog.set_directory(dir);
+        }
+    }
     if save {
         dialog.save_file()
     } else {
@@ -15,9 +28,15 @@ pub fn pick_path(save: bool, title: &str, filter: &str, extensions: &[&str]) -> 
     }
 }
 
-#[cfg(not(windows))]
-pub fn pick_path(save: bool, title: &str, filter: &str, extensions: &[&str]) -> Option<PathBuf> {
-    let _ = (save, title, filter, extensions);
+#[cfg(not(any(windows, all(unix, not(target_os = "macos")))))]
+pub fn pick_path(
+    save: bool,
+    title: &str,
+    filter: &str,
+    extensions: &[&str],
+    directory: Option<&Path>,
+) -> Option<PathBuf> {
+    let _ = (save, title, filter, extensions, directory);
     None
 }
 

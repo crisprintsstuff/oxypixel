@@ -11,8 +11,10 @@ mod canvas;
 mod cli;
 mod icon;
 mod native;
+mod recent;
 mod shortcuts;
 mod theme;
+mod toolicons;
 mod update;
 
 use std::path::PathBuf;

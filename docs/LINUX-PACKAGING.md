@@ -1,6 +1,6 @@
 # Linux packaging proposal
 
-Release 0.2.1 ships `oxypixel-0.2.1-linux-x86_64.tar.gz`: the x86_64 executable, `LICENSE`, and a short run note. That is not a `.deb`, RPM, AppImage, or Flatpak. This document is still the plan for those packages.
+Release 0.3.0 ships `oxypixel-0.3.0-linux-x86_64.tar.gz`: the x86_64 executable, `LICENSE`, and a short run note. That is not a `.deb`, RPM, AppImage, or Flatpak. This document is still the plan for those packages.
 
 ## What was checked on Ubuntu 24.04
 
@@ -22,7 +22,7 @@ Interactive use needs a display and a driver that can load `libGL.so.1`. The bin
 - `libxkbcommon0`
 - `libxcb1`
 
-No GTK package is required. File paths are typed into the window on non-Windows builds.
+No GTK package is required. Browse asks the XDG desktop portal for a file dialog. If no portal is running, type the path in the window.
 
 ## Proposed `.deb`
 

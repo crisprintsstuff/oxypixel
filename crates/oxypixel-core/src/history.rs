@@ -1,27 +1,35 @@
 use crate::document::Document;
+use crate::draw::PixelRect;
 use crate::limits::{MAX_UNDO, MAX_UNDO_BYTES};
+
+/// Document plus the selection rectangle, so undo puts the marquee back too.
+#[derive(Clone, Debug)]
+pub(crate) struct Snapshot {
+    pub doc: Document,
+    pub selection: Option<PixelRect>,
+}
 
 #[derive(Debug, Default)]
 pub(crate) struct History {
-    undo: Vec<Document>,
-    redo: Vec<Document>,
+    undo: Vec<Snapshot>,
+    redo: Vec<Snapshot>,
 }
 
 impl History {
-    pub(crate) fn push(&mut self, snapshot: Document) {
+    pub(crate) fn push(&mut self, snapshot: Snapshot) {
         self.undo.push(snapshot);
         self.redo.clear();
         trim(&mut self.undo);
     }
 
-    pub(crate) fn undo(&mut self, current: Document) -> Option<Document> {
+    pub(crate) fn undo(&mut self, current: Snapshot) -> Option<Snapshot> {
         let previous = self.undo.pop()?;
         self.redo.push(current);
         trim(&mut self.redo);
         Some(previous)
     }
 
-    pub(crate) fn redo(&mut self, current: Document) -> Option<Document> {
+    pub(crate) fn redo(&mut self, current: Snapshot) -> Option<Snapshot> {
         let next = self.redo.pop()?;
         self.undo.push(current);
         trim(&mut self.undo);
@@ -42,7 +50,7 @@ impl History {
     }
 }
 
-fn trim(stack: &mut Vec<Document>) {
+fn trim(stack: &mut Vec<Snapshot>) {
     while stack.len() > MAX_UNDO {
         stack.remove(0);
     }
@@ -51,6 +59,6 @@ fn trim(stack: &mut Vec<Document>) {
     }
 }
 
-fn byte_size(stack: &[Document]) -> usize {
-    stack.iter().map(Document::pixel_bytes).sum()
+fn byte_size(stack: &[Snapshot]) -> usize {
+    stack.iter().map(|snap| snap.doc.pixel_bytes()).sum()
 }

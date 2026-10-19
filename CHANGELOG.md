@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0
+
+- Drag a selection to move those pixels, or nudge them one pixel with the arrow keys. Ctrl+C and Ctrl+V copy between frames. Undo puts the marquee back with the pixels.
+- Canvas size can grow or crop. The offset says where the current top-left pixel moves, and Top-left or Center set that offset.
+- Mirror H and Mirror V stamp pencil, eraser, and shape strokes on the opposite side of the canvas.
+- PNG and spritesheet export can be 2× or 4× nearest-neighbor, so the pixels stay sharp.
+- Tool buttons use an original icon set. The shortcut letter stays on the tooltip.
+- The window opens on the built-in example, already fitted. File remembers recent `.oxypix` documents. Dropping a PNG, BMP, or GIF imports it, and dropping a `.oxypix` file opens it.
+- Linux Browse uses the system file dialog through the desktop portal. The path field remains when that dialog does not return a file.
+
 ## 0.2.1
 
 - Help, then Check for updates, asks GitHub for the latest public release. OxyPixel does not open a network connection until that command is chosen.

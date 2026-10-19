@@ -7,7 +7,7 @@ use crate::draw::{
     line_points, rect_points, PixelRect,
 };
 use crate::error::{Error, Result};
-use crate::history::History;
+use crate::history::{History, Snapshot};
 use crate::limits::{clamp_name, MAX_BRUSH};
 
 /// Drawing tool. Shape tools commit on pointer release. Pencil and eraser paint immediately.
@@ -47,6 +47,21 @@ enum Gesture {
         origin: (i32, i32),
         current: (i32, i32),
     },
+    /// Drag the current selection. `base` is the cel with the rectangle cleared,
+    /// so placing `patch` does not leave a copy behind.
+    MoveSel {
+        anchor: (i32, i32),
+        origin: PixelRect,
+        base: Vec<Rgba>,
+        patch: Vec<Rgba>,
+    },
+}
+
+#[derive(Clone, Debug)]
+struct Clipboard {
+    width: u32,
+    height: u32,
+    pixels: Vec<Rgba>,
 }
 
 /// Editor state that is not part of the saved document: tool, colors, selection, history.
@@ -59,7 +74,10 @@ pub struct Editor {
     secondary: Rgba,
     brush: u32,
     shape_filled: bool,
+    mirror_x: bool,
+    mirror_y: bool,
     selection: Option<PixelRect>,
+    clipboard: Option<Clipboard>,
     gesture: Gesture,
     gesture_saved: bool,
     coalescing: bool,
@@ -102,7 +120,10 @@ impl Editor {
             secondary,
             brush: 1,
             shape_filled: false,
+            mirror_x: false,
+            mirror_y: false,
             selection: None,
+            clipboard: None,
             gesture: Gesture::None,
             gesture_saved: false,
             coalescing: false,
@@ -158,6 +179,22 @@ impl Editor {
         self.shape_filled = filled;
     }
 
+    pub fn mirror_x(&self) -> bool {
+        self.mirror_x
+    }
+
+    pub fn mirror_y(&self) -> bool {
+        self.mirror_y
+    }
+
+    pub fn set_mirror_x(&mut self, enabled: bool) {
+        self.mirror_x = enabled;
+    }
+
+    pub fn set_mirror_y(&mut self, enabled: bool) {
+        self.mirror_y = enabled;
+    }
+
     pub fn primary(&self) -> Rgba {
         self.primary
     }
@@ -188,24 +225,38 @@ impl Editor {
 
     pub fn undo(&mut self) -> bool {
         self.cancel_gesture();
-        let Some(previous) = self.history.undo(self.doc.clone()) else {
+        let Some(previous) = self.history.undo(self.snapshot()) else {
             return false;
         };
-        self.doc = previous;
-        self.dirty = true;
-        self.generation += 1;
+        self.restore(previous);
         true
     }
 
     pub fn redo(&mut self) -> bool {
         self.cancel_gesture();
-        let Some(next) = self.history.redo(self.doc.clone()) else {
+        let Some(next) = self.history.redo(self.snapshot()) else {
             return false;
         };
-        self.doc = next;
+        self.restore(next);
+        true
+    }
+
+    fn snapshot(&self) -> Snapshot {
+        Snapshot {
+            doc: self.doc.clone(),
+            selection: self.selection,
+        }
+    }
+
+    fn restore(&mut self, snapshot: Snapshot) {
+        self.doc = snapshot.doc;
+        self.selection = snapshot.selection;
         self.dirty = true;
         self.generation += 1;
-        true
+    }
+
+    fn push_undo(&mut self) {
+        self.history.push(self.snapshot());
     }
 
     /// Group the next document edits into one undo step until [`Self::end_coalesce`].
@@ -314,6 +365,19 @@ impl Editor {
                 };
             }
             Tool::Select => {
+                if self.selection.is_some_and(|sel| sel.contains(x, y)) {
+                    if let Some(origin) = self.selection {
+                        if let Some((base, patch)) = self.capture_selection(origin) {
+                            self.gesture = Gesture::MoveSel {
+                                anchor: (x, y),
+                                origin,
+                                base,
+                                patch,
+                            };
+                            return;
+                        }
+                    }
+                }
                 self.gesture = Gesture::Select {
                     origin: (x, y),
                     current: (x, y),
@@ -354,6 +418,32 @@ impl Editor {
                     current: (x, y),
                 };
             }
+            Gesture::MoveSel { .. } => {
+                let Gesture::MoveSel {
+                    anchor,
+                    origin,
+                    base,
+                    patch,
+                } = std::mem::replace(&mut self.gesture, Gesture::None)
+                else {
+                    return;
+                };
+                let dx = x - anchor.0;
+                let dy = y - anchor.1;
+                if dx != 0 || dy != 0 {
+                    if !self.gesture_saved {
+                        self.push_undo();
+                        self.gesture_saved = true;
+                    }
+                    self.place_moved_selection(origin, &base, &patch, dx, dy);
+                }
+                self.gesture = Gesture::MoveSel {
+                    anchor,
+                    origin,
+                    base,
+                    patch,
+                };
+            }
             Gesture::None => {}
         }
     }
@@ -382,7 +472,159 @@ impl Editor {
                 self.selection = Some(PixelRect::from_corners(origin.0, origin.1, x, y));
                 self.gesture = Gesture::None;
             }
+            Gesture::MoveSel { .. } => {
+                self.gesture = Gesture::None;
+                self.gesture_saved = false;
+            }
             Gesture::None => {}
+        }
+    }
+
+    pub fn copy_selection(&mut self) -> bool {
+        let Some(sel) = self.selection else {
+            return false;
+        };
+        let Some((_, patch)) = self.capture_selection(sel) else {
+            return false;
+        };
+        self.clipboard = Some(Clipboard {
+            width: sel.width,
+            height: sel.height,
+            pixels: patch,
+        });
+        true
+    }
+
+    pub fn paste_clipboard(&mut self) -> Result<()> {
+        let Some(clip) = self.clipboard.clone() else {
+            return Err(Error::EmptyClipboard);
+        };
+        let x = self.selection.map(|sel| sel.x).unwrap_or(0);
+        let y = self.selection.map(|sel| sel.y).unwrap_or(0);
+        self.cancel_gesture();
+        self.push_undo();
+        self.blit_patch(x, y, clip.width, clip.height, &clip.pixels);
+        self.selection = Some(PixelRect {
+            x,
+            y,
+            width: clip.width,
+            height: clip.height,
+        });
+        self.dirty = true;
+        self.generation += 1;
+        Ok(())
+    }
+
+    pub fn nudge_selection(&mut self, dx: i32, dy: i32) -> Result<()> {
+        if dx == 0 && dy == 0 {
+            return Ok(());
+        }
+        let Some(sel) = self.selection else {
+            return Err(Error::NoSelection);
+        };
+        let Some((base, patch)) = self.capture_selection(sel) else {
+            return Err(Error::NoSelection);
+        };
+        self.cancel_gesture();
+        self.push_undo();
+        self.place_moved_selection(sel, &base, &patch, dx, dy);
+        Ok(())
+    }
+
+    pub fn resize_canvas(
+        &mut self,
+        width: u32,
+        height: u32,
+        shift_x: i32,
+        shift_y: i32,
+    ) -> Result<()> {
+        if width == self.doc.width() && height == self.doc.height() && shift_x == 0 && shift_y == 0
+        {
+            return Ok(());
+        }
+        self.structural(|doc| doc.resize(width, height, shift_x, shift_y))?;
+        self.selection = None;
+        Ok(())
+    }
+
+    fn capture_selection(&self, sel: PixelRect) -> Option<(Vec<Rgba>, Vec<Rgba>)> {
+        let frame = self.doc.active_frame();
+        let layer = self.doc.active_layer();
+        let cel = self.doc.cel(frame, layer).ok()?;
+        let width = self.doc.width();
+        let height = self.doc.height();
+        let mut base = cel.to_vec();
+        let mut patch = vec![Rgba::CLEAR; (sel.width * sel.height) as usize];
+        for y in 0..sel.height as i32 {
+            for x in 0..sel.width as i32 {
+                let sx = sel.x + x;
+                let sy = sel.y + y;
+                if sx < 0 || sy < 0 || sx as u32 >= width || sy as u32 >= height {
+                    continue;
+                }
+                let src = (sy as u32 * width + sx as u32) as usize;
+                patch[(y as u32 * sel.width + x as u32) as usize] = cel[src];
+                base[src] = Rgba::CLEAR;
+            }
+        }
+        Some((base, patch))
+    }
+
+    fn place_moved_selection(
+        &mut self,
+        origin: PixelRect,
+        base: &[Rgba],
+        patch: &[Rgba],
+        dx: i32,
+        dy: i32,
+    ) {
+        let frame = self.doc.active_frame();
+        let layer = self.doc.active_layer();
+        let Ok(cel) = self.doc.cel_mut(frame, layer) else {
+            return;
+        };
+        if cel.len() != base.len() {
+            return;
+        }
+        cel.copy_from_slice(base);
+        self.blit_patch(
+            origin.x + dx,
+            origin.y + dy,
+            origin.width,
+            origin.height,
+            patch,
+        );
+        self.selection = Some(PixelRect {
+            x: origin.x + dx,
+            y: origin.y + dy,
+            width: origin.width,
+            height: origin.height,
+        });
+        self.dirty = true;
+        self.generation += 1;
+    }
+
+    fn blit_patch(&mut self, dest_x: i32, dest_y: i32, width: u32, height: u32, pixels: &[Rgba]) {
+        let frame = self.doc.active_frame();
+        let layer = self.doc.active_layer();
+        let canvas_w = self.doc.width();
+        let canvas_h = self.doc.height();
+        let Ok(cel) = self.doc.cel_mut(frame, layer) else {
+            return;
+        };
+        for y in 0..height as i32 {
+            for x in 0..width as i32 {
+                let dx = dest_x + x;
+                let dy = dest_y + y;
+                if dx < 0 || dy < 0 || dx as u32 >= canvas_w || dy as u32 >= canvas_h {
+                    continue;
+                }
+                let src = (y as u32 * width + x as u32) as usize;
+                let dst = (dy as u32 * canvas_w + dx as u32) as usize;
+                if let Some(px) = pixels.get(src) {
+                    cel[dst] = *px;
+                }
+            }
         }
     }
 
@@ -561,7 +803,7 @@ impl Editor {
 
     fn structural(&mut self, f: impl FnOnce(&mut Document) -> Result<()>) -> Result<()> {
         self.cancel_gesture();
-        let snapshot = self.doc.clone();
+        let snapshot = self.snapshot();
         match f(&mut self.doc) {
             Ok(()) => {
                 self.history.push(snapshot);
@@ -570,7 +812,8 @@ impl Editor {
                 Ok(())
             }
             Err(err) => {
-                self.doc = snapshot;
+                self.doc = snapshot.doc;
+                self.selection = snapshot.selection;
                 Err(err)
             }
         }
@@ -580,7 +823,7 @@ impl Editor {
         self.cancel_gesture();
         let grouped = coalesce || self.coalescing;
         if !(grouped && self.coalesce_saved) {
-            self.history.push(self.doc.clone());
+            self.push_undo();
             if grouped {
                 self.coalesce_saved = true;
             }
@@ -673,7 +916,7 @@ impl Editor {
             return;
         }
         if !(coalesce && self.gesture_saved) {
-            self.history.push(self.doc.clone());
+            self.push_undo();
             if coalesce {
                 self.gesture_saved = true;
             }
@@ -697,16 +940,40 @@ impl Editor {
             for (dx, dy) in &offsets {
                 let px = x + dx;
                 let py = y + dy;
-                if px < 0 || py < 0 || px >= width || py >= height {
-                    continue;
-                }
-                if self.selection.is_some_and(|sel| !sel.contains(px, py)) {
-                    continue;
-                }
-                out.push((px, py, px_color));
+                self.stamp_one(&mut out, px, py, px_color, width, height);
             }
         }
         out
+    }
+
+    fn stamp_one(
+        &self,
+        out: &mut Vec<(i32, i32, Rgba)>,
+        x: i32,
+        y: i32,
+        color: Rgba,
+        width: i32,
+        height: i32,
+    ) {
+        let mut points = vec![(x, y)];
+        if self.mirror_x {
+            points.push((width - 1 - x, y));
+        }
+        if self.mirror_y {
+            points.push((x, height - 1 - y));
+        }
+        if self.mirror_x && self.mirror_y {
+            points.push((width - 1 - x, height - 1 - y));
+        }
+        for (px, py) in points {
+            if px < 0 || py < 0 || px >= width || py >= height {
+                continue;
+            }
+            if self.selection.is_some_and(|sel| !sel.contains(px, py)) {
+                continue;
+            }
+            out.push((px, py, color));
+        }
     }
 
     fn bucket(&mut self, x: i32, y: i32, color: Rgba) {
@@ -727,13 +994,13 @@ impl Editor {
         if cel.get(i).copied() == Some(color) {
             return;
         }
-        let snapshot = self.doc.clone();
+        let snapshot = self.snapshot();
         let selection = self.selection;
         let Ok(cel) = self.doc.cel_mut(frame, layer) else {
             return;
         };
         if !flood_fill(cel, width, height, x, y, color, selection) {
-            self.doc = snapshot;
+            self.doc = snapshot.doc;
             return;
         }
         self.history.push(snapshot);
@@ -916,6 +1183,107 @@ mod tests {
         assert!(!ed.document().layer(0).unwrap().visible);
         assert!(ed.document().layer(active).unwrap().visible);
         assert!(ed.set_layer_visible_at(4, false).is_err());
+    }
+
+    #[test]
+    fn moving_a_selection_does_not_leave_a_copy() {
+        let mut ed = editor();
+        let ink = Rgba::new(9, 0, 0, 255);
+        ed.set_primary(ink);
+        ed.pointer_down(2, 2, MouseButton::Primary, false);
+        ed.pointer_up(2, 2, false);
+        ed.set_tool(Tool::Select);
+        ed.pointer_down(1, 1, MouseButton::Primary, false);
+        ed.pointer_up(3, 3, false);
+        ed.pointer_down(2, 2, MouseButton::Primary, false);
+        ed.pointer_move(4, 3, false);
+        ed.pointer_up(4, 3, false);
+        let cel = ed.document().cel(0, 0).unwrap();
+        let painted = cel.iter().filter(|px| px.a > 0).count();
+        assert_eq!(painted, 1);
+        assert_eq!(cel[4 + 3 * 8], ink);
+        assert_eq!(cel[2 + 2 * 8], Rgba::CLEAR);
+        let sel = ed.selection().unwrap();
+        assert_eq!((sel.x, sel.y, sel.width, sel.height), (3, 2, 3, 3));
+        assert!(ed.undo());
+        assert_eq!(ed.document().cel(0, 0).unwrap()[2 + 2 * 8], ink);
+        assert_eq!(ed.selection().unwrap().x, 1);
+        assert_eq!(ed.selection().unwrap().y, 1);
+    }
+
+    #[test]
+    fn nudge_copy_and_paste_cross_frames() {
+        let mut ed = editor();
+        let ink = Rgba::new(4, 5, 6, 255);
+        ed.set_primary(ink);
+        ed.pointer_down(1, 1, MouseButton::Primary, false);
+        ed.pointer_up(1, 1, false);
+        ed.set_tool(Tool::Select);
+        ed.pointer_down(1, 1, MouseButton::Primary, false);
+        ed.pointer_up(1, 1, false);
+        ed.nudge_selection(1, 0).unwrap();
+        assert_eq!(ed.document().cel(0, 0).unwrap()[2 + 8], ink);
+        assert_eq!(ed.document().cel(0, 0).unwrap()[1 + 8], Rgba::CLEAR);
+        assert!(ed.copy_selection());
+        ed.add_frame().unwrap();
+        ed.paste_clipboard().unwrap();
+        assert_eq!(ed.document().cel(1, 0).unwrap()[2 + 8], ink);
+        assert_eq!(ed.document().cel(0, 0).unwrap()[2 + 8], ink);
+        assert_eq!(ed.selection().unwrap().x, 2);
+        assert!(ed.undo());
+        assert_eq!(ed.document().cel(1, 0).unwrap()[2 + 8], Rgba::CLEAR);
+        assert!(matches!(
+            Editor::new(2, 2).unwrap().paste_clipboard(),
+            Err(Error::EmptyClipboard)
+        ));
+    }
+
+    #[test]
+    fn mirror_stamps_the_opposite_side_and_respects_selection() {
+        let mut ed = editor();
+        let ink = Rgba::new(1, 2, 3, 255);
+        ed.set_primary(ink);
+        ed.set_mirror_x(true);
+        ed.set_mirror_y(true);
+        ed.pointer_down(1, 2, MouseButton::Primary, false);
+        ed.pointer_up(1, 2, false);
+        let cel = ed.document().cel(0, 0).unwrap();
+        assert_eq!(cel[1 + 2 * 8], ink);
+        assert_eq!(cel[6 + 2 * 8], ink);
+        assert_eq!(cel[1 + 5 * 8], ink);
+        assert_eq!(cel[6 + 5 * 8], ink);
+        ed.undo();
+        ed.selection = Some(PixelRect {
+            x: 0,
+            y: 0,
+            width: 4,
+            height: 8,
+        });
+        ed.pointer_down(1, 2, MouseButton::Primary, false);
+        ed.pointer_up(1, 2, false);
+        let cel = ed.document().cel(0, 0).unwrap();
+        assert_eq!(cel[1 + 2 * 8], ink);
+        assert_eq!(cel[6 + 2 * 8], Rgba::CLEAR);
+    }
+
+    #[test]
+    fn resize_canvas_is_one_undo_and_drops_the_marquee() {
+        let mut ed = editor();
+        let ink = Rgba::new(8, 0, 0, 255);
+        ed.set_primary(ink);
+        ed.pointer_down(0, 0, MouseButton::Primary, false);
+        ed.pointer_up(0, 0, false);
+        ed.select_all();
+        ed.resize_canvas(4, 4, 1, 1).unwrap();
+        assert_eq!(ed.document().width(), 4);
+        assert_eq!(ed.document().cel(0, 0).unwrap()[1 + 4], ink);
+        assert!(ed.selection().is_none());
+        assert!(ed.undo());
+        assert_eq!(ed.document().width(), 8);
+        assert_eq!(ed.document().cel(0, 0).unwrap()[0], ink);
+        assert_eq!(ed.selection().unwrap().width, 8);
+        ed.resize_canvas(8, 8, 0, 0).unwrap();
+        assert!(ed.selection().is_some());
     }
 
     #[test]

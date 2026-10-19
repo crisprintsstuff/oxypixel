@@ -37,6 +37,8 @@ pub enum Error {
     PaletteFull(usize),
     #[error("nothing is selected")]
     NoSelection,
+    #[error("the clipboard is empty")]
+    EmptyClipboard,
     #[error("unsupported image format (import PNG, BMP, or GIF)")]
     UnsupportedFormat,
     #[error("could not decode the image: {0}")]

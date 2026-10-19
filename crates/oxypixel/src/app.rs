@@ -5,14 +5,17 @@ use std::sync::mpsc::{self, Receiver};
 
 use eframe::egui::{self, Color32, RichText, ViewportCommand};
 use oxypixel_core::{
-    advance, decode_first_rgba, export_bmp, export_gif, export_png, export_spritesheet, fit_into,
-    import_image, load_oxypix, save_oxypix, Editor, Fit, Rgba, Tool,
+    advance, decode_first_rgba, export_bmp, export_gif, export_png_scaled,
+    export_spritesheet_scaled, fit_into, import_image, load_oxypix, save_oxypix, Editor, Fit, Rgba,
+    Tool,
 };
 
 use crate::canvas::{self, ViewState};
 use crate::native;
+use crate::recent;
 use crate::shortcuts::{self, Command};
 use crate::theme::AMBER;
+use crate::toolicons;
 use crate::update::{self, PackageKind, Relation, UpdateReport};
 
 const PRESETS: &[u32] = &[16, 32, 64, 128, 256, 512];
@@ -25,6 +28,7 @@ enum Note {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DialogKind {
     New,
+    Canvas,
     Path,
     Unsaved,
     About,
@@ -54,6 +58,7 @@ enum PathKind {
 enum Pending {
     New,
     Open,
+    OpenAt,
     Import,
     Example,
     Quit,
@@ -71,6 +76,15 @@ pub struct OxyApp {
     pending: Option<Pending>,
     new_width: String,
     new_height: String,
+    canvas_w: String,
+    canvas_h: String,
+    canvas_x: String,
+    canvas_y: String,
+    export_scale: u32,
+    recent: Vec<PathBuf>,
+    last_dir: Option<PathBuf>,
+    pending_path: Option<PathBuf>,
+    tool_icons: Option<Vec<(Tool, egui::TextureHandle)>>,
     hex: String,
     swatch: usize,
     hover: Option<(i32, i32)>,
@@ -92,8 +106,16 @@ enum UpdateMessage {
 impl OxyApp {
     pub fn new(cc: &eframe::CreationContext<'_>, open: Option<PathBuf>) -> Self {
         crate::theme::apply(&cc.egui_ctx);
+        let recent_files = recent::load();
+        let last_dir = recent_files
+            .first()
+            .and_then(|path| path.parent())
+            .filter(|dir| !dir.as_os_str().is_empty())
+            .map(Path::to_path_buf);
+        let mut editor = Editor::demo().unwrap_or_else(|_| Editor::default());
+        editor.mark_clean();
         let mut app = Self {
-            editor: Editor::default(),
+            editor,
             view: ViewState::default(),
             save_path: None,
             note: None,
@@ -104,6 +126,15 @@ impl OxyApp {
             pending: None,
             new_width: "64".to_string(),
             new_height: "64".to_string(),
+            canvas_w: "32".to_string(),
+            canvas_h: "32".to_string(),
+            canvas_x: "0".to_string(),
+            canvas_y: "0".to_string(),
+            export_scale: 1,
+            recent: recent_files,
+            last_dir,
+            pending_path: None,
+            tool_icons: None,
             hex: String::new(),
             swatch: 5,
             hover: None,
@@ -163,6 +194,7 @@ impl OxyApp {
         match load_oxypix(&path) {
             Ok(doc) => {
                 self.editor.replace_document(doc);
+                self.remember_file(&path);
                 self.save_path = Some(path);
                 self.view.fit_next = true;
                 self.playing = false;
@@ -177,6 +209,7 @@ impl OxyApp {
         match save_oxypix(self.editor.document(), &path) {
             Ok(()) => {
                 self.editor.mark_clean();
+                self.remember_file(&path);
                 self.save_path = Some(path);
                 self.note_ok("Saved.");
                 true
@@ -201,6 +234,7 @@ impl eframe::App for OxyApp {
             self.dialog = Some(DialogKind::Unsaved);
         }
         self.tick_playback(ctx);
+        self.handle_drops(ctx);
         self.handle_shortcuts(ctx);
         self.top_bar(ctx);
         self.bottom_bar(ctx);
@@ -241,6 +275,7 @@ impl OxyApp {
             if escape {
                 self.dialog = None;
                 self.pending = None;
+                self.pending_path = None;
                 self.dialog_error = None;
             }
             return;
@@ -330,6 +365,66 @@ impl OxyApp {
             Command::DeleteSelection => {
                 self.apply(|editor| editor.clear_selection_pixels());
             }
+            Command::Copy => {
+                if !self.editor.copy_selection() {
+                    self.note_err("Nothing is selected.");
+                }
+            }
+            Command::Paste => {
+                self.apply(|editor| editor.paste_clipboard());
+            }
+            Command::Nudge(dx, dy) => {
+                if self.editor.selection().is_some() {
+                    self.apply(|editor| editor.nudge_selection(dx, dy));
+                }
+            }
+        }
+    }
+
+    fn remember_file(&mut self, path: &Path) {
+        recent::push(&mut self.recent, path);
+        recent::save(&self.recent);
+        self.note_dir(path);
+    }
+
+    fn note_dir(&mut self, path: &Path) {
+        if let Some(parent) = path.parent() {
+            if parent.components().next().is_some() {
+                self.last_dir = Some(parent.to_path_buf());
+            }
+        }
+    }
+
+    fn handle_drops(&mut self, ctx: &egui::Context) {
+        if self.dialog.is_some() {
+            return;
+        }
+        let dropped: Vec<PathBuf> = ctx.input(|input| {
+            input
+                .raw
+                .dropped_files
+                .iter()
+                .filter_map(|file| file.path.clone())
+                .collect()
+        });
+        let Some(path) = dropped.into_iter().next() else {
+            return;
+        };
+        match extension_of(&path).as_str() {
+            "oxypix" => self.request_open_at(path),
+            "png" | "bmp" | "gif" => {
+                if self.editor.is_dirty() {
+                    let _ = self.import_layer(&path);
+                    if let Some(err) = self.dialog_error.take() {
+                        self.note_err(err);
+                    }
+                } else if self.import_document(&path) {
+                    self.view.fit_next = true;
+                } else if let Some(err) = self.dialog_error.take() {
+                    self.note_err(err);
+                }
+            }
+            _ => self.note_err("Drop a .oxypix, PNG, BMP, or GIF file."),
         }
     }
 
@@ -369,6 +464,26 @@ impl OxyApp {
         } else {
             self.open_path_dialog(PathKind::Open);
         }
+    }
+
+    fn request_open_at(&mut self, path: PathBuf) {
+        if self.editor.is_dirty() {
+            self.pending_path = Some(path);
+            self.pending = Some(Pending::OpenAt);
+            self.dialog = Some(DialogKind::Unsaved);
+        } else {
+            self.open_path(path);
+        }
+    }
+
+    fn open_canvas_dialog(&mut self) {
+        let doc = self.editor.document();
+        self.canvas_w = doc.width().to_string();
+        self.canvas_h = doc.height().to_string();
+        self.canvas_x = "0".to_string();
+        self.canvas_y = "0".to_string();
+        self.dialog_error = None;
+        self.dialog = Some(DialogKind::Canvas);
     }
 
     fn request_import(&mut self) {
@@ -436,6 +551,11 @@ impl OxyApp {
                 self.dialog = Some(DialogKind::New);
             }
             Pending::Open => self.open_path_dialog(PathKind::Open),
+            Pending::OpenAt => {
+                if let Some(path) = self.pending_path.take() {
+                    self.open_path(path);
+                }
+            }
             Pending::Import => self.open_path_dialog(PathKind::ImportDocument),
             Pending::Example => self.load_example(),
             Pending::Quit => {
@@ -489,10 +609,10 @@ impl OxyApp {
             PathKind::Save => self.save_to(path),
             PathKind::ImportDocument => self.import_document(&path),
             PathKind::ImportLayer => self.import_layer(&path),
-            PathKind::ExportPng => self.export_frame(&path, export_png),
+            PathKind::ExportPng => self.export_scaled(&path, true),
             PathKind::ExportBmp => self.export_frame(&path, export_bmp),
             PathKind::ExportGif => self.export_doc(&path, export_gif),
-            PathKind::ExportSheet => self.export_doc(&path, export_spritesheet),
+            PathKind::ExportSheet => self.export_scaled(&path, false),
         };
         if ok {
             self.dialog = None;
@@ -515,6 +635,7 @@ impl OxyApp {
         match import_image(path) {
             Ok(doc) => {
                 self.editor.replace_document(doc);
+                self.note_dir(path);
                 self.save_path = None;
                 self.view.fit_next = true;
                 self.playing = false;
@@ -562,6 +683,7 @@ impl OxyApp {
         {
             return false;
         }
+        self.note_dir(path);
         self.note_ok(match fit {
             Fit::Exact => "Imported the image as a new layer.".to_string(),
             Fit::Cropped => {
@@ -585,6 +707,7 @@ impl OxyApp {
         let frame = self.editor.document().active_frame();
         match write(self.editor.document(), frame, path) {
             Ok(()) => {
+                self.note_dir(path);
                 self.note_ok(format!("Exported {}.", path.display()));
                 true
             }
@@ -602,6 +725,7 @@ impl OxyApp {
     ) -> bool {
         match write(self.editor.document(), path) {
             Ok(()) => {
+                self.note_dir(path);
                 self.note_ok(format!("Exported {}.", path.display()));
                 true
             }
@@ -610,6 +734,79 @@ impl OxyApp {
                 false
             }
         }
+    }
+
+    fn export_scaled(&mut self, path: &Path, png_frame: bool) -> bool {
+        let scale = match self.export_scale {
+            2 => 2,
+            4 => 4,
+            _ => 1,
+        };
+        let result = if png_frame {
+            let frame = self.editor.document().active_frame();
+            export_png_scaled(self.editor.document(), frame, path, scale)
+        } else {
+            export_spritesheet_scaled(self.editor.document(), path, scale)
+        };
+        match result {
+            Ok(()) => {
+                self.note_dir(path);
+                if scale == 1 {
+                    self.note_ok(format!("Exported {}.", path.display()));
+                } else {
+                    self.note_ok(format!("Exported {} at {scale}×.", path.display()));
+                }
+                true
+            }
+            Err(err) => {
+                self.dialog_error = Some(err.to_string());
+                false
+            }
+        }
+    }
+
+    fn apply_canvas_size(&mut self) {
+        let width = match parse_u32(&self.canvas_w, "Width") {
+            Ok(value) => value,
+            Err(err) => {
+                self.dialog_error = Some(err);
+                return;
+            }
+        };
+        let height = match parse_u32(&self.canvas_h, "Height") {
+            Ok(value) => value,
+            Err(err) => {
+                self.dialog_error = Some(err);
+                return;
+            }
+        };
+        let shift_x = match parse_i32(&self.canvas_x, "Offset X") {
+            Ok(value) => value,
+            Err(err) => {
+                self.dialog_error = Some(err);
+                return;
+            }
+        };
+        let shift_y = match parse_i32(&self.canvas_y, "Offset Y") {
+            Ok(value) => value,
+            Err(err) => {
+                self.dialog_error = Some(err);
+                return;
+            }
+        };
+        if self
+            .apply(|editor| editor.resize_canvas(width, height, shift_x, shift_y))
+            .is_none()
+        {
+            if let Some(Note::Error(text)) = &self.note {
+                self.dialog_error = Some(text.clone());
+            }
+            return;
+        }
+        self.view.fit_next = true;
+        self.dialog = None;
+        self.dialog_error = None;
+        self.note_ok(format!("Canvas is {width}×{height}."));
     }
 
     fn create_document(&mut self) {
@@ -658,6 +855,25 @@ impl OxyApp {
                     if menu_item(ui, "Open example", "") {
                         self.request_example();
                         ui.close_menu();
+                    }
+                    if !self.recent.is_empty() {
+                        ui.menu_button("Open recent", |ui| {
+                            let recent = self.recent.clone();
+                            for path in recent {
+                                let name = path
+                                    .file_name()
+                                    .map(|n| n.to_string_lossy().to_string())
+                                    .unwrap_or_else(|| path.display().to_string());
+                                if ui
+                                    .button(name)
+                                    .on_hover_text(path.display().to_string())
+                                    .clicked()
+                                {
+                                    self.request_open_at(path);
+                                    ui.close_menu();
+                                }
+                            }
+                        });
                     }
                     if menu_item(ui, "Save", "Ctrl+S") {
                         self.request_save();
@@ -718,6 +934,21 @@ impl OxyApp {
                     }
                     if menu_item(ui, "Deselect", "Ctrl+D") {
                         self.editor.deselect();
+                        ui.close_menu();
+                    }
+                    if menu_item(ui, "Copy", "Ctrl+C") {
+                        if !self.editor.copy_selection() {
+                            self.note_err("Nothing is selected.");
+                        }
+                        ui.close_menu();
+                    }
+                    if menu_item(ui, "Paste", "Ctrl+V") {
+                        self.apply(|editor| editor.paste_clipboard());
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if menu_item(ui, "Canvas size…", "") {
+                        self.open_canvas_dialog();
                         ui.close_menu();
                     }
                     if menu_item(ui, "Clear selection", "Delete") {
@@ -817,14 +1048,23 @@ impl OxyApp {
                         self.editor.redo();
                     }
                 });
-                self.tool_button(ui, Tool::Pencil, "Pencil", "B");
-                self.tool_button(ui, Tool::Eraser, "Eraser", "E");
-                self.tool_button(ui, Tool::Bucket, "Fill", "G");
-                self.tool_button(ui, Tool::Eyedropper, "Pick", "I");
-                self.tool_button(ui, Tool::Line, "Line", "L");
-                self.tool_button(ui, Tool::Rectangle, "Rect", "R");
-                self.tool_button(ui, Tool::Ellipse, "Ellipse", "O");
-                self.tool_button(ui, Tool::Select, "Select", "M");
+                self.ensure_tool_icons(ui.ctx());
+                let tools = [
+                    (Tool::Pencil, "B"),
+                    (Tool::Eraser, "E"),
+                    (Tool::Bucket, "G"),
+                    (Tool::Eyedropper, "I"),
+                    (Tool::Line, "L"),
+                    (Tool::Rectangle, "R"),
+                    (Tool::Ellipse, "O"),
+                    (Tool::Select, "M"),
+                ];
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+                    for (tool, shortcut) in tools {
+                        self.tool_button(ui, tool, shortcut);
+                    }
+                });
                 ui.separator();
                 let mut size = self.editor.brush();
                 if ui
@@ -847,21 +1087,86 @@ impl OxyApp {
                 if fill.changed() {
                     self.editor.set_shape_filled(filled);
                 }
+                let mut mirror_x = self.editor.mirror_x();
+                if ui
+                    .checkbox(&mut mirror_x, "Mirror H")
+                    .on_hover_text(
+                        "Pencil, eraser, and shapes also stamp across the vertical center.",
+                    )
+                    .changed()
+                {
+                    self.editor.set_mirror_x(mirror_x);
+                }
+                let mut mirror_y = self.editor.mirror_y();
+                if ui
+                    .checkbox(&mut mirror_y, "Mirror V")
+                    .on_hover_text(
+                        "Pencil, eraser, and shapes also stamp across the horizontal center.",
+                    )
+                    .changed()
+                {
+                    self.editor.set_mirror_y(mirror_y);
+                }
                 ui.separator();
                 ui.label(egui::RichText::new(tool_hint(self.editor.tool())).small());
                 ui.label(egui::RichText::new("Alt picks a color. Space pans.").small());
             });
     }
 
-    fn tool_button(&mut self, ui: &mut egui::Ui, tool: Tool, label: &str, shortcut: &str) {
+    fn ensure_tool_icons(&mut self, ctx: &egui::Context) {
+        if self.tool_icons.is_some() {
+            return;
+        }
+        let tools = [
+            Tool::Pencil,
+            Tool::Eraser,
+            Tool::Bucket,
+            Tool::Eyedropper,
+            Tool::Line,
+            Tool::Rectangle,
+            Tool::Ellipse,
+            Tool::Select,
+        ];
+        let icons = tools
+            .into_iter()
+            .map(|tool| {
+                let image = egui::ColorImage::from_rgba_unmultiplied(
+                    [toolicons::SIZE, toolicons::SIZE],
+                    &toolicons::rgba(tool),
+                );
+                let texture = ctx.load_texture(
+                    format!("oxypixel-tool-{}", tool_name(tool)),
+                    image,
+                    egui::TextureOptions::NEAREST,
+                );
+                (tool, texture)
+            })
+            .collect();
+        self.tool_icons = Some(icons);
+    }
+
+    fn tool_button(&mut self, ui: &mut egui::Ui, tool: Tool, shortcut: &str) {
         let selected = self.editor.tool() == tool;
-        let mut button = egui::Button::new(format!("{label}  {shortcut}"));
+        let image = self.tool_icons.as_ref().and_then(|icons| {
+            icons
+                .iter()
+                .find(|(candidate, _)| *candidate == tool)
+                .map(|(_, texture)| {
+                    egui::Image::new((texture.id(), egui::vec2(16.0, 16.0)))
+                        .fit_to_exact_size(egui::vec2(22.0, 22.0))
+                })
+        });
+        let mut button = match image {
+            Some(image) => egui::Button::image(image),
+            None => egui::Button::new(shortcut),
+        };
         if selected {
             button = button.fill(Color32::from_rgb(78, 62, 32));
         }
+        let tip = format!("{} ({shortcut})\n{}", tool_name(tool), tool_hint(tool));
         if ui
-            .add_sized([140.0, 28.0], button)
-            .on_hover_text(tool_hint(tool))
+            .add_sized([34.0, 34.0], button)
+            .on_hover_text(tip)
             .clicked()
         {
             self.editor.set_tool(tool);
@@ -1345,6 +1650,7 @@ impl OxyApp {
         );
         match kind {
             DialogKind::New => self.dialog_new(ctx),
+            DialogKind::Canvas => self.dialog_canvas(ctx),
             DialogKind::Path => self.dialog_path(ctx),
             DialogKind::Unsaved => self.dialog_unsaved(ctx),
             DialogKind::About => self.dialog_about(ctx),
@@ -1398,6 +1704,76 @@ impl OxyApp {
         }
     }
 
+    fn dialog_canvas(&mut self, ctx: &egui::Context) {
+        let mut close = false;
+        let mut apply = false;
+        let mut anchor = None;
+        egui::Window::new("Canvas size")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                ui.label("New size, in pixels. Offset is where the current top-left pixel moves.");
+                ui.horizontal(|ui| {
+                    ui.label("Width");
+                    ui.add(egui::TextEdit::singleline(&mut self.canvas_w).desired_width(72.0));
+                    ui.label("Height");
+                    ui.add(egui::TextEdit::singleline(&mut self.canvas_h).desired_width(72.0));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Offset X");
+                    ui.add(egui::TextEdit::singleline(&mut self.canvas_x).desired_width(72.0));
+                    ui.label("Y");
+                    ui.add(egui::TextEdit::singleline(&mut self.canvas_y).desired_width(72.0));
+                });
+                ui.horizontal(|ui| {
+                    if ui.button("Top-left").clicked() {
+                        anchor = Some((0, 0));
+                    }
+                    if ui.button("Center").clicked() {
+                        anchor = Some((1, 1));
+                    }
+                });
+                if let Some(error) = &self.dialog_error {
+                    ui.colored_label(Color32::from_rgb(220, 100, 90), error);
+                }
+                ui.horizontal(|ui| {
+                    if ui.button("Resize").clicked()
+                        || ui.input(|i| i.key_pressed(egui::Key::Enter))
+                    {
+                        apply = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        close = true;
+                    }
+                });
+            });
+        if let Some((mode_x, mode_y)) = anchor {
+            let old_w = self.editor.document().width() as i32;
+            let old_h = self.editor.document().height() as i32;
+            let new_w = self.canvas_w.parse::<i32>().unwrap_or(old_w);
+            let new_h = self.canvas_h.parse::<i32>().unwrap_or(old_h);
+            self.canvas_x = if mode_x == 0 {
+                "0".to_string()
+            } else {
+                ((new_w - old_w) / 2).to_string()
+            };
+            self.canvas_y = if mode_y == 0 {
+                "0".to_string()
+            } else {
+                ((new_h - old_h) / 2).to_string()
+            };
+            self.dialog_error = None;
+        }
+        if apply {
+            self.apply_canvas_size();
+        } else if close {
+            self.dialog = None;
+            self.dialog_error = None;
+        }
+    }
+
     fn dialog_path(&mut self, ctx: &egui::Context) {
         let title = match self.path_kind {
             PathKind::Open => "Open .oxypix",
@@ -1428,9 +1804,24 @@ impl OxyApp {
             .show(ctx, |ui| {
                 ui.label("Path");
                 ui.add(egui::TextEdit::singleline(&mut self.path_buf).desired_width(420.0));
+                if matches!(self.path_kind, PathKind::ExportPng | PathKind::ExportSheet) {
+                    ui.horizontal(|ui| {
+                        ui.label("Scale");
+                        for (label, scale) in [("1×", 1u32), ("2×", 2), ("4×", 4)] {
+                            ui.selectable_value(&mut self.export_scale, scale, label);
+                        }
+                    });
+                    ui.label("Nearest neighbor. Each pixel stays a hard square.");
+                }
                 ui.horizontal(|ui| {
                     if ui.button("Browse…").clicked() {
-                        browsed = native::pick_path(save, title, filter_name(self.path_kind), filter_ext(self.path_kind));
+                        browsed = native::pick_path(
+                            save,
+                            title,
+                            filter_name(self.path_kind),
+                            filter_ext(self.path_kind),
+                            self.last_dir.as_deref(),
+                        );
                     }
                     if ui.button("OK").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         confirm = true;
@@ -1439,14 +1830,13 @@ impl OxyApp {
                         close = true;
                     }
                 });
-                if !cfg!(windows) {
-                    ui.label("On this build, type a full path. The Windows installer uses the system file dialog.");
-                }
+                ui.label("Browse opens the system dialog. You can also type a path.");
                 if let Some(error) = &self.dialog_error {
                     ui.colored_label(Color32::from_rgb(220, 100, 90), error);
                 }
             });
         if let Some(path) = browsed {
+            self.note_dir(&path);
             self.path_buf = path.display().to_string();
         }
         if confirm {
@@ -1490,6 +1880,7 @@ impl OxyApp {
             Some(2) => {
                 self.dialog = None;
                 self.pending = None;
+                self.pending_path = None;
             }
             _ => {}
         }
@@ -1644,7 +2035,7 @@ fn tool_hint(tool: Tool) -> &'static str {
         Tool::Line => "Drag a straight line. Hold Shift for 45 degrees.",
         Tool::Rectangle => "Drag an outline. Hold Shift for a square.",
         Tool::Ellipse => "Drag an outline. Hold Shift for a circle.",
-        Tool::Select => "Drag a rectangle. Later strokes stay inside it.",
+        Tool::Select => "Drag a rectangle. Drag inside it to move those pixels. Arrows nudge.",
     }
 }
 
@@ -1659,6 +2050,25 @@ fn tool_name(tool: Tool) -> &'static str {
         Tool::Ellipse => "Ellipse",
         Tool::Select => "Select",
     }
+}
+
+fn extension_of(path: &Path) -> String {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+}
+
+fn parse_u32(text: &str, label: &str) -> Result<u32, String> {
+    text.trim()
+        .parse::<u32>()
+        .map_err(|_| format!("{label} must be a whole number."))
+}
+
+fn parse_i32(text: &str, label: &str) -> Result<i32, String> {
+    text.trim()
+        .parse::<i32>()
+        .map_err(|_| format!("{label} must be a whole number."))
 }
 
 fn filter_name(kind: PathKind) -> &'static str {

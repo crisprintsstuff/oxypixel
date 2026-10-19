@@ -103,8 +103,17 @@ pub fn export_png(doc: &Document, frame: usize, path: &Path) -> Result<()> {
 }
 
 pub fn export_png_bytes(doc: &Document, frame: usize) -> Result<Vec<u8>> {
-    let pixels = doc.composite(frame)?;
-    encode_still(&pack(&pixels), doc.width(), doc.height(), ImageFormat::Png)
+    export_png_bytes_scaled(doc, frame, 1)
+}
+
+/// Write one composited frame as a PNG at 1×, 2×, or 4× nearest-neighbor scale.
+pub fn export_png_scaled(doc: &Document, frame: usize, path: &Path, scale: u32) -> Result<()> {
+    std::fs::write(path, export_png_bytes_scaled(doc, frame, scale)?).map_err(Error::io)
+}
+
+pub fn export_png_bytes_scaled(doc: &Document, frame: usize, scale: u32) -> Result<Vec<u8>> {
+    let (width, height, pixels) = composite_scaled(doc, frame, scale)?;
+    encode_still(&pack(&pixels), width, height, ImageFormat::Png)
 }
 
 pub fn export_bmp(doc: &Document, frame: usize, path: &Path) -> Result<()> {
@@ -141,8 +150,19 @@ pub fn export_spritesheet(doc: &Document, path: &Path) -> Result<()> {
 }
 
 pub fn export_spritesheet_bytes(doc: &Document) -> Result<Vec<u8>> {
+    export_spritesheet_bytes_scaled(doc, 1)
+}
+
+/// Horizontal spritesheet at 1×, 2×, or 4× nearest-neighbor scale.
+pub fn export_spritesheet_scaled(doc: &Document, path: &Path, scale: u32) -> Result<()> {
+    std::fs::write(path, export_spritesheet_bytes_scaled(doc, scale)?).map_err(Error::io)
+}
+
+pub fn export_spritesheet_bytes_scaled(doc: &Document, scale: u32) -> Result<Vec<u8>> {
     let frames = doc.frame_count() as u32;
-    let sheet_w = doc.width().checked_mul(frames).ok_or(Error::Limit {
+    let cell_w = checked_scale(doc.width(), scale)?;
+    let cell_h = checked_scale(doc.height(), scale)?;
+    let sheet_w = cell_w.checked_mul(frames).ok_or(Error::Limit {
         what: "spritesheet width",
         value: u64::MAX,
         max: u64::from(MAX_SHEET_WIDTH),
@@ -154,19 +174,71 @@ pub fn export_spritesheet_bytes(doc: &Document) -> Result<Vec<u8>> {
             max: u64::from(MAX_SHEET_WIDTH),
         });
     }
-    let sheet_h = doc.height();
-    let mut out = vec![0u8; (sheet_w as usize) * (sheet_h as usize) * 4];
+    let mut out = vec![Rgba::CLEAR; (sheet_w as usize) * (cell_h as usize)];
     for index in 0..doc.frame_count() {
-        let composite = pack(&doc.composite(index)?);
-        let x0 = index * doc.width() as usize;
-        for y in 0..sheet_h as usize {
-            let src = y * doc.width() as usize * 4;
-            let dst = (y * sheet_w as usize + x0) * 4;
-            let n = doc.width() as usize * 4;
-            out[dst..dst + n].copy_from_slice(&composite[src..src + n]);
+        let (_, _, frame) = composite_scaled(doc, index, scale)?;
+        let x0 = index as u32 * cell_w;
+        for y in 0..cell_h {
+            for x in 0..cell_w {
+                let src = (y * cell_w + x) as usize;
+                let dst = (y * sheet_w + x0 + x) as usize;
+                out[dst] = frame[src];
+            }
         }
     }
-    encode_still(&out, sheet_w, sheet_h, ImageFormat::Png)
+    encode_still(&pack(&out), sheet_w, cell_h, ImageFormat::Png)
+}
+
+fn checked_scale(side: u32, scale: u32) -> Result<u32> {
+    if !matches!(scale, 1 | 2 | 4) {
+        return Err(Error::Limit {
+            what: "export scale",
+            value: u64::from(scale),
+            max: 4,
+        });
+    }
+    side.checked_mul(scale).ok_or(Error::Limit {
+        what: "export size",
+        value: u64::MAX,
+        max: u64::from(u32::MAX),
+    })
+}
+
+fn composite_scaled(doc: &Document, frame: usize, scale: u32) -> Result<(u32, u32, Vec<Rgba>)> {
+    let width = checked_scale(doc.width(), scale)?;
+    let height = checked_scale(doc.height(), scale)?;
+    let src = doc.composite(frame)?;
+    Ok((
+        width,
+        height,
+        scale_nearest(&src, doc.width(), doc.height(), scale)?,
+    ))
+}
+
+/// Repeat each pixel into a `scale` by `scale` block. `scale` is 1, 2, or 4.
+pub fn scale_nearest(pixels: &[Rgba], width: u32, height: u32, scale: u32) -> Result<Vec<Rgba>> {
+    let dst_w = checked_scale(width, scale)?;
+    let dst_h = checked_scale(height, scale)?;
+    if pixels.len() != (width as usize) * (height as usize) {
+        return Err(Error::Truncated);
+    }
+    if scale == 1 {
+        return Ok(pixels.to_vec());
+    }
+    let mut out = vec![Rgba::CLEAR; (dst_w as usize) * (dst_h as usize)];
+    for y in 0..height {
+        for x in 0..width {
+            let px = pixels[(y * width + x) as usize];
+            for dy in 0..scale {
+                for dx in 0..scale {
+                    let nx = x * scale + dx;
+                    let ny = y * scale + dy;
+                    out[(ny * dst_w + nx) as usize] = px;
+                }
+            }
+        }
+    }
+    Ok(out)
 }
 
 fn still_document(width: u32, height: u32, pixels: Vec<Rgba>) -> Result<Document> {
@@ -349,6 +421,18 @@ mod tests {
         assert_eq!((w, h), (2, 1));
         assert_eq!(pixels[0].r, 1);
         assert_eq!(pixels[1].g, 1);
+    }
+
+    #[test]
+    fn nearest_export_keeps_hard_pixel_blocks() {
+        let doc = painted();
+        let bytes = export_png_bytes_scaled(&doc, 0, 2).unwrap();
+        let (w, h, pixels) = decode_first_rgba(&bytes).unwrap();
+        assert_eq!((w, h), (4, 2));
+        assert_eq!(pixels[0], Rgba::new(255, 0, 0, 255));
+        assert_eq!(pixels[1], pixels[0]);
+        assert_eq!(pixels[2].b, 255);
+        assert!(export_png_bytes_scaled(&doc, 0, 3).is_err());
     }
 
     #[test]

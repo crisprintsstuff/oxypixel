@@ -6,7 +6,7 @@ OxyPixel is a pixel-art editor for Windows and Linux. Draw on a pixel canvas, st
 
 It is an original program written in Rust. The editing rules live in `oxypixel-core`. The window is an [egui](https://github.com/emilk/egui) app. OxyPixel is not affiliated with Pixelorama, Orama Interactive, Godot, or Aseprite.
 
-**[Releases](https://github.com/crisprintsstuff/oxypixel/releases)** · **[Changelog](CHANGELOG.md)** · **[v0.2.1](https://github.com/crisprintsstuff/oxypixel/releases/tag/v0.2.1)**
+**[Releases](https://github.com/crisprintsstuff/oxypixel/releases)** · **[Changelog](CHANGELOG.md)** · **[v0.3.0](https://github.com/crisprintsstuff/oxypixel/releases/tag/v0.3.0)**
 
 ## Contents
 
@@ -25,20 +25,20 @@ It is an original program written in Rust. The editing rules live in `oxypixel-c
 
 ## Download
 
-Current release: [v0.2.1](https://github.com/crisprintsstuff/oxypixel/releases/tag/v0.2.1). Older builds are on the [releases page](https://github.com/crisprintsstuff/oxypixel/releases). What changed is in the [changelog](CHANGELOG.md).
+Current release: [v0.3.0](https://github.com/crisprintsstuff/oxypixel/releases/tag/v0.3.0). Older builds are on the [releases page](https://github.com/crisprintsstuff/oxypixel/releases). What changed is in the [changelog](CHANGELOG.md).
 
 | File | Use |
 | --- | --- |
-| [OxyPixel-0.2.1-Setup.exe](https://github.com/crisprintsstuff/oxypixel/releases/download/v0.2.1/OxyPixel-0.2.1-Setup.exe) | Windows installer |
-| [oxypixel-0.2.1-windows-x86_64.exe](https://github.com/crisprintsstuff/oxypixel/releases/download/v0.2.1/oxypixel-0.2.1-windows-x86_64.exe) | Portable Windows executable |
-| [oxypixel-0.2.1-linux-x86_64.tar.gz](https://github.com/crisprintsstuff/oxypixel/releases/download/v0.2.1/oxypixel-0.2.1-linux-x86_64.tar.gz) | Linux x86_64 archive |
-| [SHA256SUMS.txt](https://github.com/crisprintsstuff/oxypixel/releases/download/v0.2.1/SHA256SUMS.txt) | Checksums |
+| [OxyPixel-0.3.0-Setup.exe](https://github.com/crisprintsstuff/oxypixel/releases/download/v0.3.0/OxyPixel-0.3.0-Setup.exe) | Windows installer |
+| [oxypixel-0.3.0-windows-x86_64.exe](https://github.com/crisprintsstuff/oxypixel/releases/download/v0.3.0/oxypixel-0.3.0-windows-x86_64.exe) | Portable Windows executable |
+| [oxypixel-0.3.0-linux-x86_64.tar.gz](https://github.com/crisprintsstuff/oxypixel/releases/download/v0.3.0/oxypixel-0.3.0-linux-x86_64.tar.gz) | Linux x86_64 archive |
+| [SHA256SUMS.txt](https://github.com/crisprintsstuff/oxypixel/releases/download/v0.3.0/SHA256SUMS.txt) | Checksums |
 
 The Windows files are unsigned. SmartScreen can warn that the publisher is unknown. Check `SHA256SUMS.txt` before you install. Signing steps are in [docs/BUILD-WINDOWS.md](docs/BUILD-WINDOWS.md).
 
 ## Windows installer
 
-`OxyPixel-0.2.1-Setup.exe` is a per-user NSIS setup.
+`OxyPixel-0.3.0-Setup.exe` is a per-user NSIS setup.
 
 1. Run the installer. It does not need administrator rights.
 2. OxyPixel is installed under `%LOCALAPPDATA%\OxyPixel`.
@@ -49,15 +49,15 @@ The program needs OpenGL (`opengl32.dll`, which ships with Windows). The release
 
 ## Portable Windows build
 
-`oxypixel-0.2.1-windows-x86_64.exe` is the same 64-bit program without an installer. Help, then Check for updates, can download a newer release and restart into it after the checksum matches. Put it in any folder and run it. This copy has no embedded icon or version resource. The installer shortcut uses `oxypixel.ico`.
+`oxypixel-0.3.0-windows-x86_64.exe` is the same 64-bit program without an installer. Help, then Check for updates, can download a newer release and restart into it after the checksum matches. Put it in any folder and run it. This copy has no embedded icon or version resource. The installer shortcut uses `oxypixel.ico`.
 
 ## Linux
 
-`oxypixel-0.2.1-linux-x86_64.tar.gz` contains the x86_64 executable, `LICENSE`, and `README.txt`. It was built on Ubuntu 24.04. It is not a `.deb`, RPM, AppImage, or Flatpak. Packaging ideas are in [docs/LINUX-PACKAGING.md](docs/LINUX-PACKAGING.md).
+`oxypixel-0.3.0-linux-x86_64.tar.gz` contains the x86_64 executable, `LICENSE`, and `README.txt`. It was built on Ubuntu 24.04. It is not a `.deb`, RPM, AppImage, or Flatpak. Packaging ideas are in [docs/LINUX-PACKAGING.md](docs/LINUX-PACKAGING.md).
 
 ```bash
-tar -xzf oxypixel-0.2.1-linux-x86_64.tar.gz
-cd oxypixel-0.2.1-linux-x86_64
+tar -xzf oxypixel-0.3.0-linux-x86_64.tar.gz
+cd oxypixel-0.3.0-linux-x86_64
 ./oxypixel
 ```
 
@@ -71,11 +71,16 @@ The window needs an X11 display and these libraries: `libGL.so.1`, `libX11.so.6`
 
 - Pixel canvas with nearest-neighbor zoom, pan, and an optional grid
 - Pencil, eraser, fill, eyedropper, line, rectangle, ellipse, and rectangular selection
+- Move, nudge, copy, and paste a selection
+- Canvas resize and crop
+- Horizontal and vertical mirror while drawing
 - Primary and secondary colors, hex entry, and the Ink palette
 - Layers with visibility, opacity, rename, reorder, duplicate, and merge down
-- Undo and redo
+- Undo and redo, including the selection rectangle
 - Animation frames, playback, onion skin, GIF export, and a horizontal spritesheet
+- PNG and spritesheet export at 1×, 2×, or 4× nearest-neighbor
 - `.oxypix` documents, plus PNG, BMP, and GIF import and export
+- Recent files, drag-and-drop, and system file dialogs on Windows and Linux
 - Keyboard shortcuts
 
 A canvas side is at most 1024 pixels. One cel holds at most 1,048,576 pixels. The whole document holds at most 16,777,216 pixels across frames and layers. Details are in [docs/FORMAT.md](docs/FORMAT.md).
@@ -87,6 +92,9 @@ A canvas side is at most 1024 pixels. One cel holds at most 1,048,576 pixels. Th
 | B, E, G, I | Pencil, eraser, fill, eyedropper |
 | L, R, O, M | Line, rectangle, ellipse, select |
 | Ctrl+Z / Ctrl+Y | Undo / redo |
+| Ctrl+C / Ctrl+V | Copy / paste the selection |
+| Arrow keys | Nudge the selection |
+| Comma / Period | Previous / next frame |
 | Ctrl+N / Ctrl+O / Ctrl+S | New, open, save |
 | Enter | Play or pause |
 | Space+drag | Pan |

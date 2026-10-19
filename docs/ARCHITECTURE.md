@@ -13,13 +13,13 @@ A document has a size, a palette, and a layer stack. Layer name, visibility, and
 
 Compositing walks layers from bottom to top with source-over. Hidden layers and layers at opacity 0 are skipped. Pencil and eraser **replace** pixels on the active cel. They do not blend into the cel. Blend happens only when compositing.
 
-Undo stores clones of the document, capped at 50 steps and 256 MiB of pixel data. Tool choice, zoom, and the selection rectangle are session state and are not undone. Slider edits (opacity, duration, rename) are coalesced while the control is active so one drag is one undo step.
+Undo stores a clone of the document and the selection rectangle, capped at 50 steps and 256 MiB of pixel data. Tool choice, zoom, and mirror toggles stay session state. Slider edits (opacity, duration, rename) are coalesced while the control is active so one drag is one undo step.
 
 ## Tools
 
 Geometry (line, rectangle, ellipse, flood fill, brush stamps) is pure and tested in `draw.rs`. The editor clamps pointer coordinates to a margin around the canvas before generating a shape, so a drag from `i32::MIN` cannot allocate a huge point list.
 
-Shape tools preview until pointer release, then commit one undo step. Pencil commits during the drag as a single undo step. A selection, when present, clips stamps and flood fill. No selection means the whole canvas is editable.
+Shape tools preview until pointer release, then commit one undo step. Pencil commits during the drag as a single undo step. A selection, when present, clips stamps and flood fill. Dragging inside the selection moves those pixels on the active cel, and arrow keys nudge them. Copy and paste use an in-memory clipboard, not the system clipboard. No selection means the whole canvas is editable. Mirror stamps the same point across the canvas center.
 
 ## Files
 
@@ -27,7 +27,7 @@ Shape tools preview until pointer release, then commit one undo step. Pencil com
 
 ## GUI
 
-The window is egui 0.31 with the `glow` OpenGL backend. The canvas is a nearest-neighbor texture rebuilt when the document changes, and on every frame while a shape preview is active. Windows file dialogs use `rfd`. Other builds ask for a path in the window so the Linux build does not need GTK development packages.
+The window is egui 0.31 with the `glow` OpenGL backend. The canvas is a nearest-neighbor texture rebuilt when the document changes, and on every frame while a shape preview is active. File dialogs use `rfd`: the system dialog on Windows, and the XDG desktop portal on Linux. The path field stays available when the portal does not return a file. The Linux build does not need GTK development packages. Tool icons are drawn in code at 16×16.
 
 ## Windows and Linux
 

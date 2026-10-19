@@ -382,6 +382,42 @@ impl Document {
         Ok(())
     }
 
+    /// Change the canvas size. Existing pixels land at `(x + shift_x, y + shift_y)`.
+    ///
+    /// A positive shift adds transparent margin on the left or top. Pixels that
+    /// fall outside the new canvas are dropped. The active frame and layer stay put.
+    pub fn resize(&mut self, width: u32, height: u32, shift_x: i32, shift_y: i32) -> Result<()> {
+        check_stack(width, height, self.frames.len(), self.layers.len())?;
+        let new_len = (width as usize)
+            .checked_mul(height as usize)
+            .ok_or(Error::Limit {
+                what: "pixels in one cel",
+                value: u64::MAX,
+                max: crate::limits::MAX_CEL_PIXELS,
+            })?;
+        for frame in &mut self.frames {
+            for cel in &mut frame.cels {
+                let mut next = vec![Rgba::CLEAR; new_len];
+                for y in 0..self.height {
+                    for x in 0..self.width {
+                        let nx = i64::from(x) + i64::from(shift_x);
+                        let ny = i64::from(y) + i64::from(shift_y);
+                        if nx < 0 || ny < 0 || nx >= i64::from(width) || ny >= i64::from(height) {
+                            continue;
+                        }
+                        let src = (y * self.width + x) as usize;
+                        let dst = (ny as u32 * width + nx as u32) as usize;
+                        next[dst] = cel[src];
+                    }
+                }
+                *cel = next;
+            }
+        }
+        self.width = width;
+        self.height = height;
+        Ok(())
+    }
+
     /// Composite one frame, bottom layer first. Hidden layers are skipped.
     pub fn composite(&self, frame: usize) -> Result<Vec<Rgba>> {
         let frame = self
@@ -574,5 +610,24 @@ mod tests {
         assert_eq!(doc.frame_count(), 2);
         assert_eq!(doc.layer_count(), 2);
         assert_ne!(doc.cel(0, 1).unwrap(), doc.cel(1, 1).unwrap());
+    }
+
+    #[test]
+    fn resize_shifts_pixels_and_crops_the_rest() {
+        let mut doc = Document::new(4, 3).unwrap();
+        let red = Rgba::new(200, 0, 0, 255);
+        let blue = Rgba::new(0, 0, 200, 255);
+        doc.set_pixel(0, 0, 0, 0, red).unwrap();
+        doc.set_pixel(0, 0, 3, 2, blue).unwrap();
+        doc.add_frame().unwrap();
+        doc.set_pixel(1, 0, 0, 0, blue).unwrap();
+        doc.resize(3, 3, 1, 1).unwrap();
+        assert_eq!((doc.width(), doc.height()), (3, 3));
+        assert_eq!(doc.cel(0, 0).unwrap()[1 + 3], red);
+        assert_eq!(doc.cel(0, 0).unwrap()[0], Rgba::CLEAR);
+        assert!(doc.cel(0, 0).unwrap().iter().all(|px| *px != blue));
+        assert_eq!(doc.cel(1, 0).unwrap()[1 + 3], blue);
+        assert!(doc.resize(0, 3, 0, 0).is_err());
+        assert_eq!(doc.width(), 3);
     }
 }

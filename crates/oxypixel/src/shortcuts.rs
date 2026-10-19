@@ -29,6 +29,9 @@ pub enum Command {
     AddFrame,
     AddLayer,
     DeleteSelection,
+    Copy,
+    Paste,
+    Nudge(i32, i32),
 }
 
 pub struct Binding {
@@ -106,7 +109,15 @@ pub const BINDINGS: &[Binding] = &[
         action: "Play or pause",
     },
     Binding {
-        keys: "Left / Right",
+        keys: "Ctrl+C / Ctrl+V",
+        action: "Copy or paste the selection",
+    },
+    Binding {
+        keys: "Arrow keys",
+        action: "Nudge the selection by one pixel",
+    },
+    Binding {
+        keys: "Comma / Period",
         action: "Previous or next frame",
     },
     Binding {
@@ -149,6 +160,8 @@ pub fn command_from(modifiers: Modifiers, key: Key) -> Option<Command> {
         (true, false, Key::Equals | Key::Plus) => Some(Command::ZoomIn),
         (true, false, Key::Minus) => Some(Command::ZoomOut),
         (true, false, Key::Q) => Some(Command::Quit),
+        (true, false, Key::C) => Some(Command::Copy),
+        (true, false, Key::V) => Some(Command::Paste),
         (false, false, Key::B) => Some(Command::Tool(Tool::Pencil)),
         (false, false, Key::E) => Some(Command::Tool(Tool::Eraser)),
         (false, false, Key::G) => Some(Command::Tool(Tool::Bucket)),
@@ -161,8 +174,12 @@ pub fn command_from(modifiers: Modifiers, key: Key) -> Option<Command> {
         (false, false, Key::OpenBracket) => Some(Command::BrushSmaller),
         (false, false, Key::CloseBracket) => Some(Command::BrushLarger),
         (false, false, Key::Enter) => Some(Command::PlayToggle),
-        (false, false, Key::Comma | Key::ArrowLeft) => Some(Command::PrevFrame),
-        (false, false, Key::Period | Key::ArrowRight) => Some(Command::NextFrame),
+        (false, false, Key::Comma) => Some(Command::PrevFrame),
+        (false, false, Key::Period) => Some(Command::NextFrame),
+        (false, false, Key::ArrowLeft) => Some(Command::Nudge(-1, 0)),
+        (false, false, Key::ArrowRight) => Some(Command::Nudge(1, 0)),
+        (false, false, Key::ArrowUp) => Some(Command::Nudge(0, -1)),
+        (false, false, Key::ArrowDown) => Some(Command::Nudge(0, 1)),
         (false, false, Key::Delete | Key::Backspace) => Some(Command::DeleteSelection),
         (false, false, Key::Escape) => Some(Command::Escape),
         _ => None,
@@ -172,7 +189,11 @@ pub fn command_from(modifiers: Modifiers, key: Key) -> Option<Command> {
 pub fn allows_repeat(command: Command) -> bool {
     matches!(
         command,
-        Command::BrushSmaller | Command::BrushLarger | Command::ZoomIn | Command::ZoomOut
+        Command::BrushSmaller
+            | Command::BrushLarger
+            | Command::ZoomIn
+            | Command::ZoomOut
+            | Command::Nudge(_, _)
     )
 }
 
@@ -193,6 +214,22 @@ mod tests {
             Some(Command::Undo)
         );
         assert_eq!(command_from(mods, Key::Z), Some(Command::Redo));
+        assert_eq!(
+            command_from(Modifiers::NONE, Key::ArrowLeft),
+            Some(Command::Nudge(-1, 0))
+        );
+        assert_eq!(
+            command_from(Modifiers::NONE, Key::Comma),
+            Some(Command::PrevFrame)
+        );
+        assert_eq!(
+            command_from(Modifiers::COMMAND, Key::C),
+            Some(Command::Copy)
+        );
+        assert_eq!(
+            command_from(Modifiers::COMMAND, Key::V),
+            Some(Command::Paste)
+        );
     }
 
     #[test]
