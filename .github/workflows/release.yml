@@ -56,11 +56,14 @@ jobs:
           if (-not $env:MAKENSIS -or -not (Test-Path -LiteralPath $env:MAKENSIS)) {
             throw "MAKENSIS is not set to an existing makensis.exe"
           }
-          # Windows makensis changes to the script directory only when that
-          # path contains a backslash. A forward slash leaves the compiler in
-          # the repo root, and File "../dist/oxypixel.exe" then misses the exe.
-          $script = Join-Path (Get-Location) "installer\oxypixel.nsi"
-          & $env:MAKENSIS $script
+          $root = (Get-Location).Path
+          $exe = Join-Path $root "dist\oxypixel.exe"
+          $out = Join-Path $root "dist\OxyPixel-$version-Setup.exe"
+          $script = Join-Path $root "installer\oxypixel.nsi"
+          if (-not (Test-Path -LiteralPath $exe)) { throw "dist\oxypixel.exe was not staged" }
+          # Pass absolute paths. File "../dist/oxypixel.exe" is missed when
+          # makensis stays in the repository root.
+          & $env:MAKENSIS "/DSOURCE_EXE=$exe" "/DOUTFILE=$out" $script
           if ($LASTEXITCODE -ne 0) { throw "makensis exited with $LASTEXITCODE" }
           $files = @(
             "dist/oxypixel-$version-windows-x86_64.exe",

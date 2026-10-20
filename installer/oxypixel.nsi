@@ -9,9 +9,18 @@ ManifestDPIAware true
 !define PUBLISHER "OxyPixel contributors"
 !define REGPATH "Software\Microsoft\Windows\CurrentVersion\Uninstall\OxyPixel"
 
+; SOURCE_EXE and OUTFILE may be absolute paths. The File instruction does not
+; look in ../dist when makensis is started from the repository root.
+!ifndef SOURCE_EXE
+  !define SOURCE_EXE "../dist/oxypixel.exe"
+!endif
+!ifndef OUTFILE
+  !define OUTFILE "../dist/${APPNAME}-${VERSION}-Setup.exe"
+!endif
+
 Name "${APPNAME}"
 Caption "${APPNAME} ${VERSION} Setup"
-OutFile "../dist/${APPNAME}-${VERSION}-Setup.exe"
+OutFile "${OUTFILE}"
 InstallDir "$LOCALAPPDATA\OxyPixel"
 InstallDirRegKey HKCU "${REGPATH}" "InstallLocation"
 RequestExecutionLevel user
@@ -81,7 +90,7 @@ VIAddVersionKey "Comments" "Unsigned build. No Authenticode certificate was appl
 Section "OxyPixel" SecMain
   SectionIn RO
   SetOutPath "$INSTDIR"
-  File "../dist/oxypixel.exe"
+  File "${SOURCE_EXE}"
   File "oxypixel.ico"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
