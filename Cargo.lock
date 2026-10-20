@@ -2107,7 +2107,7 @@ dependencies = [
 
 [[package]]
 name = "oxypixel"
-version = "0.3.0"
+version = "0.3.2"
 dependencies = [
  "eframe",
  "flate2",
@@ -2122,7 +2122,7 @@ dependencies = [
 
 [[package]]
 name = "oxypixel-core"
-version = "0.3.0"
+version = "0.3.2"
 dependencies = [
  "image",
  "thiserror 2.0.21",

@@ -1,6 +1,6 @@
 # Linux packaging proposal
 
-Release 0.3.0 ships `oxypixel-0.3.0-linux-x86_64.tar.gz`: the x86_64 executable, `LICENSE`, and a short run note. That is not a `.deb`, RPM, AppImage, or Flatpak. This document is still the plan for those packages.
+Release 0.3.2 ships `oxypixel-0.3.2-linux-x86_64.tar.gz`: the x86_64 executable, `LICENSE`, and a short run note. That is not a `.deb`, RPM, AppImage, or Flatpak. This document is still the plan for those packages.
 
 ## What was checked on Ubuntu 24.04
 
