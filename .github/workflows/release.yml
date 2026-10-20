@@ -121,20 +121,42 @@ jobs:
         run: |
           mkdir -p dist
           find artifacts -type f -exec cp -t dist {} +
-          cat dist/SHA256SUMS-windows.txt dist/SHA256SUMS-linux.txt > dist/SHA256SUMS.txt
-          test -f dist/oxypixel-*-windows-x86_64.exe
-          test -f dist/OxyPixel-*-Setup.exe
-          test -f dist/oxypixel-*-linux-x86_64.tar.gz
-          test -s dist/SHA256SUMS.txt
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          portable="oxypixel-${version}-windows-x86_64.exe"
+          setup="OxyPixel-${version}-Setup.exe"
+          linux="oxypixel-${version}-linux-x86_64.tar.gz"
+          test -f "dist/${portable}"
+          test -f "dist/${setup}"
+          test -f "dist/${linux}"
+          # The updater matches these basenames exactly. Hash the files that
+          # will be uploaded, in the same order as the 0.3.0 checksum list.
+          (
+            cd dist
+            sha256sum "$portable" "$setup" "$linux"
+          ) > dist/SHA256SUMS.txt
+          awk -v p="$portable" -v s="$setup" -v l="$linux" '
+            NF != 2 || length($1) != 64 { exit 1 }
+            { seen[$2] = 1 }
+            END { if (!seen[p] || !seen[s] || !seen[l]) exit 1 }
+          ' dist/SHA256SUMS.txt
+          awk -v ver="$version" '
+            $0 == "## " ver { show = 1; next }
+            show && $0 ~ /^## / { exit }
+            show { print }
+          ' CHANGELOG.md > dist/release-notes.txt
+          test -s dist/release-notes.txt
           echo "Release files:"
           ls -l dist
+          echo "Checksums:"
+          cat dist/SHA256SUMS.txt
       - name: Choose the release tag
         id: tag
         run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
             echo "name=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
           else
-            version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
             echo "name=v${version}" >> "$GITHUB_OUTPUT"
           fi
       - name: Attach Linux and Windows files to the GitHub release
@@ -142,6 +164,8 @@ jobs:
         with:
           tag_name: ${{ steps.tag.outputs.name }}
           target_commitish: ${{ github.sha }}
+          name: OxyPixel ${{ steps.tag.outputs.version }}
+          body_path: dist/release-notes.txt
           files: |
             dist/oxypixel-*-windows-x86_64.exe
             dist/OxyPixel-*-Setup.exe

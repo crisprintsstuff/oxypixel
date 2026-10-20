@@ -563,6 +563,27 @@ mod tests {
     }
 
     #[test]
+    fn release_checksum_list_names_each_package() {
+        let sums = "\
+            aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  oxypixel-0.3.2-windows-x86_64.exe\r\n\
+            bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  OxyPixel-0.3.2-Setup.exe\n\
+            cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc  oxypixel-0.3.2-linux-x86_64.tar.gz\n";
+        assert_eq!(
+            expected_hash(sums, "oxypixel-0.3.2-windows-x86_64.exe").as_deref(),
+            Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        );
+        assert_eq!(
+            expected_hash(sums, "OxyPixel-0.3.2-Setup.exe").as_deref(),
+            Some("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+        );
+        assert_eq!(
+            expected_hash(sums, "oxypixel-0.3.2-linux-x86_64.tar.gz").as_deref(),
+            Some("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+        );
+        assert!(expected_hash(sums, "dist/OxyPixel-0.3.2-Setup.exe").is_none());
+    }
+
+    #[test]
     fn foreign_urls_are_rejected() {
         assert!(!allowed_download(
             "http://github.com/crisprintsstuff/oxypixel/releases/download/v0.2.1/a.exe"

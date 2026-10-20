@@ -2,8 +2,9 @@
 
 ## 0.3.2
 
-- A release started by hand publishes the Linux archive and the Windows files together. Check for updates still reads `SHA256SUMS.txt` from that release.
-- The Windows installer build passes `makensis` a script path with a backslash, so NSIS looks in `dist` for `oxypixel.exe`.
+- Help, then Check for updates, can move an existing install to this release. The download is kept only when its SHA-256 matches `SHA256SUMS.txt` from the same release.
+- An installed Windows copy opens `OxyPixel-0.3.2-Setup.exe`. A portable Windows copy replaces its exe and restarts. A Linux copy replaces `oxypixel` in its folder when that folder can be written, then restarts.
+- The release notes in that dialog are the text of this section.
 
 ## 0.3.0
 
