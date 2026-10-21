@@ -10,9 +10,8 @@ When you finish a task, change its status here in the same pull request.
 
 Infrastructure, then small fixes that already have a place in the code.
 
-1. [OX-002](#ox-002) — one command for the Windows-target clippy check.
-2. [OX-011](#ox-011) — test that update filenames stay tied to `PackageKind`.
-3. [OX-012](#ox-012) — test the recent-files directory on both platforms.
+1. [OX-011](#ox-011) — test that update filenames stay tied to `PackageKind`.
+2. [OX-012](#ox-012) — test the recent-files directory on both platforms.
 
 ## Scorecard
 
@@ -37,7 +36,7 @@ Shipped in 0.3.2 and covered by tests or by the release workflow.
 | Windows package | Per-user NSIS installer and portable exe. Static CRT. Unsigned | `installer/oxypixel.nsi`, `release.yml` |
 | Portable exe resources | The v0.3.2 release exe embeds an icon and VERSIONINFO (`FileVersion` 0.3.2). A cross-build without `rc.exe`, `llvm-rc`, or `windres` does not | `build.rs`, [README.md](../README.md), [BUILD-WINDOWS.md](BUILD-WINDOWS.md) |
 | Linux package | `oxypixel-<version>-linux-x86_64.tar.gz` from `scripts/package-linux.sh` | `release.yml` |
-| CI | One Windows job per pull request. `push` is `main` only; tags stay on `release.yml`. Docs-only changes skip the matrix. `ubuntu-latest` and `windows-latest`, fmt, clippy `-D warnings`, tests, release build. Job timeout 15 minutes | `.github/workflows/ci.yml` |
+| CI | One Windows job per pull request. `push` is `main` only; tags stay on `release.yml`. Docs-only changes skip the matrix. Ubuntu also runs `make check-windows`. `ubuntu-latest` and `windows-latest`, fmt, clippy `-D warnings`, tests, release build. Job timeout 15 minutes | `.github/workflows/ci.yml`, `Makefile` |
 
 ### Partial
 
@@ -64,11 +63,9 @@ Nothing below is an open GitHub issue. The proposals are optional. The human-onl
 
 ### OX-002
 
-**One command for Windows-target clippy.** Status: open. Area: `Makefile`.
+**One command for Windows-target clippy.** Status: done. Area: `Makefile`, `AGENTS.md`, `.github/workflows/ci.yml`.
 
-Linux `cargo clippy` does not compile `#[cfg(windows)]` code. Agents are supposed to run the MinGW target clippy from [AGENTS.md](../AGENTS.md) when they touch that code. There is no Make target for it.
-
-Acceptance: `make check-windows` runs `cargo clippy --workspace --all-targets --target x86_64-pc-windows-gnu -- -D warnings`. The target's comment names the MinGW compiler it needs. A clean tree exits 0.
+`make check-windows` runs `cargo clippy --workspace --all-targets --target x86_64-pc-windows-gnu -- -D warnings`. The target comment names the MinGW compiler `x86_64-w64-mingw32-gcc`. If that compiler, `rustup`, or the `x86_64-pc-windows-gnu` target is missing, it prints the install command and exits 1. A clean tree exits 0. [AGENTS.md](../AGENTS.md) tells agents to run it when a diff touches Windows-only code. The Ubuntu CI job installs the compiler and runs the same target, so a Windows-only lint fails on the runner that is not billed double. The Windows job still runs host clippy.
 
 ### OX-010
 

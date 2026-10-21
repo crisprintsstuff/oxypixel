@@ -13,7 +13,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-`make check` runs the same three commands.
+`make check` runs the same three commands. `make check-windows` runs clippy with warnings denied for the `x86_64-pc-windows-gnu` target. It needs `x86_64-w64-mingw32-gcc` and that rustup target. [AGENTS.md](AGENTS.md) says when to run it.
 
 ## What to change
 
