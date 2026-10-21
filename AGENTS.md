@@ -59,7 +59,7 @@ That needs a MinGW cross compiler on Linux (`x86_64-w64-mingw32-gcc`). The MSVC 
 
 **Version trio.** A version bump updates `Cargo.toml`, `installer/oxypixel.nsi` (`!define VERSION`, `VIProductVersion`, `VIFileVersion`), and `crates/oxypixel/assets/oxypixel.rc` together.
 
-**Actions minutes.** The owner is short on GitHub Actions minutes, and Windows minutes count double. Do not push tags and do not dispatch `.github/workflows/release.yml` to test. Do not rerun a green workflow. CI already runs on pull requests. One PR is enough.
+**Actions minutes.** The owner is short on GitHub Actions minutes, and Windows minutes count double. CI runs on pull requests and on pushes to `main`. It does not also run for the pull-request branch push, and it does not run on tags. A docs-only change (`*.md`, `docs/**`) skips the test matrix. Do not push tags and do not dispatch `.github/workflows/release.yml` to test. Do not rerun a green workflow. One PR is enough.
 
 ## Per-task loop
 

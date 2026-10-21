@@ -10,10 +10,9 @@ When you finish a task, change its status here in the same pull request.
 
 Infrastructure, then small fixes that already have a place in the code.
 
-1. [OX-001](#ox-001) — stop paying for two Windows CI runs on a pull request.
-2. [OX-002](#ox-002) — one command for the Windows-target clippy check.
-3. [OX-011](#ox-011) — test that update filenames stay tied to `PackageKind`.
-4. [OX-012](#ox-012) — test the recent-files directory on both platforms.
+1. [OX-002](#ox-002) — one command for the Windows-target clippy check.
+2. [OX-011](#ox-011) — test that update filenames stay tied to `PackageKind`.
+3. [OX-012](#ox-012) — test the recent-files directory on both platforms.
 
 ## Scorecard
 
@@ -38,7 +37,7 @@ Shipped in 0.3.2 and covered by tests or by the release workflow.
 | Windows package | Per-user NSIS installer and portable exe. Static CRT. Unsigned | `installer/oxypixel.nsi`, `release.yml` |
 | Portable exe resources | The v0.3.2 release exe embeds an icon and VERSIONINFO (`FileVersion` 0.3.2). A cross-build without `rc.exe`, `llvm-rc`, or `windres` does not | `build.rs`, [README.md](../README.md), [BUILD-WINDOWS.md](BUILD-WINDOWS.md) |
 | Linux package | `oxypixel-<version>-linux-x86_64.tar.gz` from `scripts/package-linux.sh` | `release.yml` |
-| CI | `ubuntu-latest` and `windows-latest`, fmt, clippy `-D warnings`, tests, release build. Job timeout 15 minutes | `.github/workflows/ci.yml` |
+| CI | One Windows job per pull request. `push` is `main` only; tags stay on `release.yml`. Docs-only changes skip the matrix. `ubuntu-latest` and `windows-latest`, fmt, clippy `-D warnings`, tests, release build. Job timeout 15 minutes | `.github/workflows/ci.yml` |
 
 ### Partial
 
@@ -50,7 +49,6 @@ Shipped in 0.3.2 and covered by tests or by the release workflow.
 | Linux packages | The release archive is built and uploaded | `.deb`, RPM, AppImage, and Flatpak are only described in [LINUX-PACKAGING.md](LINUX-PACKAGING.md). See [OX-P2](#ox-p2) |
 | Code signing | `docs/BUILD-WINDOWS.md` tells a human how to run `signtool` | No certificate in the repo or in CI. See [OX-H1](#ox-h1) |
 | GUI checks | Canvas math, shortcuts, and the CLI have tests | Nothing clicks the window. See [OX-P3](#ox-p3) |
-| CI cost | Both OS jobs are required | A branch push and the pull request each start a Windows job. See [OX-001](#ox-001) |
 
 ### Missing
 
@@ -60,11 +58,9 @@ Nothing below is an open GitHub issue. The proposals are optional. The human-onl
 
 ### OX-001
 
-**Stop the duplicate Windows CI run.** Status: open. Area: `.github/workflows/ci.yml`.
+**Stop the duplicate Windows CI run.** Status: done. Area: `.github/workflows/ci.yml`.
 
-`on: push` and `on: pull_request` both run the full matrix. A pull-request branch therefore starts two Windows jobs. Windows minutes are the scarce ones.
-
-Acceptance: a commit on a pull-request branch starts one Windows job, a push to `main` still runs CI, and a short comment in the workflow says why. Do not dispatch the release workflow to prove it. The pull request's own CI is the check.
+`push` runs only on `main`. Pull requests use `pull_request`, so a branch no longer starts a second workflow. A concurrency group cancels a run that a newer push on the same ref replaces. Tag pushes stay on `release.yml`. A change that only touches `*.md` or `docs/**` skips the Ubuntu and Windows jobs with a job condition, which reports success. `paths-ignore` was not used: a workflow skipped that way never reports, and a required check stays pending. The comment at the top of `ci.yml` says why. The pull request's own CI is the check. `release.yml` was not dispatched.
 
 ### OX-002
 
