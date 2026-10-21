@@ -564,23 +564,35 @@ mod tests {
 
     #[test]
     fn release_checksum_list_names_each_package() {
-        let sums = "\
-            aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  oxypixel-0.3.2-windows-x86_64.exe\r\n\
-            bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  OxyPixel-0.3.2-Setup.exe\n\
-            cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc  oxypixel-0.3.2-linux-x86_64.tar.gz\n";
+        let version = Version {
+            major: 0,
+            minor: 3,
+            patch: 2,
+        };
+        let portable = PackageKind::WindowsPortable.asset_name(version);
+        let installer = PackageKind::WindowsInstaller.asset_name(version);
+        let archive = PackageKind::LinuxArchive.asset_name(version);
+        assert_eq!(portable, "oxypixel-0.3.2-windows-x86_64.exe");
+        assert_eq!(installer, "OxyPixel-0.3.2-Setup.exe");
+        assert_eq!(archive, "oxypixel-0.3.2-linux-x86_64.tar.gz");
+        let sums = format!(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  {portable}\r\n\
+             bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  {installer}\n\
+             cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc  {archive}\n"
+        );
         assert_eq!(
-            expected_hash(sums, "oxypixel-0.3.2-windows-x86_64.exe").as_deref(),
+            expected_hash(&sums, &portable).as_deref(),
             Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         );
         assert_eq!(
-            expected_hash(sums, "OxyPixel-0.3.2-Setup.exe").as_deref(),
+            expected_hash(&sums, &installer).as_deref(),
             Some("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
         );
         assert_eq!(
-            expected_hash(sums, "oxypixel-0.3.2-linux-x86_64.tar.gz").as_deref(),
+            expected_hash(&sums, &archive).as_deref(),
             Some("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
         );
-        assert!(expected_hash(sums, "dist/OxyPixel-0.3.2-Setup.exe").is_none());
+        assert!(expected_hash(&sums, "dist/OxyPixel-0.3.2-Setup.exe").is_none());
     }
 
     #[test]

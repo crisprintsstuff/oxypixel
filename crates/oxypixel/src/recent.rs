@@ -86,4 +86,40 @@ mod tests {
         assert_eq!(paths[0], PathBuf::from("c"));
         assert!(!paths.iter().any(|p| p == Path::new("a")));
     }
+
+    /// Puts an environment variable back when the test returns.
+    struct EnvVar {
+        key: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl EnvVar {
+        fn set(key: &'static str, value: &std::ffi::OsStr) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVar {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
+    #[test]
+    fn data_dir_uses_the_platform_folder() {
+        let root = std::env::temp_dir().join("oxypixel-recent-dir-test");
+        #[cfg(windows)]
+        let (key, leaf) = ("APPDATA", "OxyPixel");
+        #[cfg(not(windows))]
+        let (key, leaf) = ("XDG_DATA_HOME", "oxypixel");
+        let _restore = EnvVar::set(key, root.as_os_str());
+        let dir = data_dir().expect("data directory");
+        assert_eq!(dir.file_name().and_then(|name| name.to_str()), Some(leaf));
+        assert_eq!(dir.parent(), Some(root.as_path()));
+    }
 }
