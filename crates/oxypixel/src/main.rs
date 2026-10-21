@@ -9,6 +9,7 @@
 mod app;
 mod canvas;
 mod cli;
+mod clipboard;
 mod icon;
 mod native;
 mod recent;

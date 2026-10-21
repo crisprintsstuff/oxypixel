@@ -83,7 +83,7 @@ sudo apt remove oxypixel
 
 The v0.3.2 release on GitHub does not include that `.deb`. The download table above is the file that release published.
 
-The window needs an X11 display and these libraries: `libGL.so.1`, `libX11.so.6`, `libxkbcommon.so.0`, and `libxkbcommon-x11.so.0`. The `.deb` depends on the packages that provide them (`libgl1`, `libx11-6`, `libxkbcommon0`, `libxkbcommon-x11-0`, `libxcb1`). Export commands do not need a display:
+The window needs an X11 display and these libraries: `libGL.so.1`, `libX11.so.6`, `libxkbcommon.so.0`, and `libxkbcommon-x11.so.0`. Wayland copy and paste also loads `libwayland-client.so.0` when the compositor offers the data-control clipboard. The `.deb` depends on the packages that provide them (`libgl1`, `libx11-6`, `libxkbcommon0`, `libxkbcommon-x11-0`, `libxcb1`). Export commands do not need a display:
 
 ```bash
 oxypixel export-png drawing.oxypix frame.png
@@ -95,11 +95,11 @@ Help, then Check for updates, downloads the tar.gz for an unpacked copy and the 
 
 ## Features
 
-These are in 0.3.2. Planned work is listed in [docs/ROADMAP.md](docs/ROADMAP.md) and is not included here.
+These match this tree. The latest release tag is 0.3.2. Planned work is listed in [docs/ROADMAP.md](docs/ROADMAP.md) and is not included here.
 
 - Pixel canvas with nearest-neighbor zoom, pan, and an optional grid
 - Pencil, eraser, fill, eyedropper, line, rectangle, ellipse, and rectangular selection
-- Move and nudge a selection. Copy and paste stay inside the editor; they do not use the system clipboard
+- Move and nudge a selection. Copy publishes a straight-alpha image to the system clipboard and keeps an in-memory patch. Paste uses the system image, or that patch when the clipboard has no image
 - Canvas resize and crop
 - Horizontal and vertical mirror while drawing
 - Primary and secondary colors, hex entry, and the Ink palette
@@ -125,7 +125,7 @@ The maintainer develops OxyPixel with AI coding agents. The written rules for th
 | B, E, G, I | Pencil, eraser, fill, eyedropper |
 | L, R, O, M | Line, rectangle, ellipse, select |
 | Ctrl+Z / Ctrl+Y | Undo / redo |
-| Ctrl+C / Ctrl+V | Copy / paste the selection |
+| Ctrl+C / Ctrl+V | Copy / paste the selection image |
 | Arrow keys | Nudge the selection |
 | Comma / Period | Previous / next frame |
 | Ctrl+N / Ctrl+O / Ctrl+S | New, open, save |

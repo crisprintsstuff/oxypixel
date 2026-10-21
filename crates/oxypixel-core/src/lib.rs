@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 
 mod animation;
+mod clipboard;
 mod color;
 mod document;
 mod draw;

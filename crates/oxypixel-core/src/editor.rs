@@ -515,6 +515,49 @@ impl Editor {
         Ok(())
     }
 
+    /// Straight-alpha RGBA8 bytes of the in-memory clipboard, row-major.
+    ///
+    /// This does not read the operating-system clipboard.
+    pub fn clipboard_rgba(&self) -> Result<(u32, u32, Vec<u8>)> {
+        let clip = self.clipboard.as_ref().ok_or(Error::EmptyClipboard)?;
+        Ok((
+            clip.width,
+            clip.height,
+            crate::clipboard::pixels_to_rgba(&clip.pixels),
+        ))
+    }
+
+    /// PNG of the in-memory clipboard. The alpha channel is stored straight.
+    pub fn clipboard_png(&self) -> Result<Vec<u8>> {
+        let clip = self.clipboard.as_ref().ok_or(Error::EmptyClipboard)?;
+        crate::clipboard::encode_png(clip.width, clip.height, &clip.pixels)
+    }
+
+    /// Replace the in-memory clipboard from straight-alpha RGBA8.
+    ///
+    /// Does not paint. A rejected buffer leaves the previous patch in place.
+    pub fn set_clipboard_rgba(&mut self, width: u32, height: u32, rgba: &[u8]) -> Result<()> {
+        let pixels = crate::clipboard::pixels_from_rgba(width, height, rgba)?;
+        self.clipboard = Some(Clipboard {
+            width,
+            height,
+            pixels,
+        });
+        Ok(())
+    }
+
+    /// Replace the in-memory clipboard from a PNG. Same rejection rule as
+    /// [`Self::set_clipboard_rgba`].
+    pub fn set_clipboard_png(&mut self, bytes: &[u8]) -> Result<()> {
+        let (width, height, pixels) = crate::clipboard::decode_png(bytes)?;
+        self.clipboard = Some(Clipboard {
+            width,
+            height,
+            pixels,
+        });
+        Ok(())
+    }
+
     pub fn nudge_selection(&mut self, dx: i32, dy: i32) -> Result<()> {
         if dx == 0 && dy == 0 {
             return Ok(());
