@@ -47,7 +47,7 @@ Shipped in 0.3.2 and covered by tests or by the release workflow.
 | File dialogs | Windows system dialog. Linux XDG portal, then the path field | No macOS build |
 | Linux packages | The release archive is built and uploaded | `.deb`, RPM, AppImage, and Flatpak are only described in [LINUX-PACKAGING.md](LINUX-PACKAGING.md). See [OX-P2](#ox-p2) |
 | Code signing | `docs/BUILD-WINDOWS.md` tells a human how to run `signtool` | No certificate in the repo or in CI. See [OX-H1](#ox-h1) |
-| GUI checks | Canvas math, shortcuts, and the CLI have tests | Nothing clicks the window. See [OX-P3](#ox-p3) |
+| GUI checks | Canvas math, shortcuts, the CLI, and a headless hash of the built-in example's composite against `crates/oxypixel-core/tests/golden/` | Nothing clicks the window. Refresh that golden with the command in [OX-P3](#ox-p3) |
 
 ### Missing
 
@@ -103,7 +103,17 @@ Not scheduled. Start one only if a human asks.
 
 ### OX-P3
 
-**A window check that does not need a new control protocol.** CONTRIBUTING says to run the app after a UI change. A later task could render the built-in example through the existing composite and compare a hash. It should not add a command server.
+**A window check that does not need a new control protocol.** Status: done.
+
+`cargo test` composites the built-in example (`Editor::demo`) with `Document::composite`, the same path the canvas texture and PNG export use. Each frame is checked against a SHA-256 in `crates/oxypixel-core/tests/golden/demo-composite.txt` and the golden PNG beside it. The test runs on Ubuntu and Windows CI. It does not open a window, a dialog, or a command server.
+
+Refresh the fixtures after an intentional change to the example or the composite:
+
+```bash
+OXYPIXEL_UPDATE_DEMO_GOLDEN=1 cargo test -p oxypixel-core --test demo_composite -- --nocapture
+```
+
+Review the PNG diff, run the test again without the variable, and commit `crates/oxypixel-core/tests/golden/`. CI leaves the variable unset. If it is set there, the test fails instead of rewriting the golden.
 
 ## Human only
 
