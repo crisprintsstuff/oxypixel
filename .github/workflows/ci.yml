@@ -91,6 +91,17 @@ jobs:
           }
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+      # Host clippy skips #[cfg(windows)]. make check-windows type-checks that
+      # code with the MinGW target. A cold run is a second clippy, not a
+      # Windows runner, so a Windows-only lint fails here instead of on the
+      # minutes that count double. The windows-latest job still runs host clippy.
+      - name: Windows-target clippy
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-mingw-w64-x86-64
+          rustup target add x86_64-pc-windows-gnu
+          make check-windows
       - name: Test
         run: cargo test --workspace --all-targets
       - name: Release build
