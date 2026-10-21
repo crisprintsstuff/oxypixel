@@ -139,6 +139,8 @@ PNG, BMP, and GIF can be imported as a new document or as a layer. Export writes
 | Guide | What it covers |
 | --- | --- |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
+| [AGENTS.md](AGENTS.md) | Guide for contributors and coding agents |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Scorecard and the next task ids |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Core library and the egui window |
 | [docs/SHORTCUTS.md](docs/SHORTCUTS.md) | Keyboard and mouse shortcuts |
 | [docs/FORMAT.md](docs/FORMAT.md) | `.oxypix` layout and size limits |

@@ -1,0 +1,6 @@
+---
+description: OxyPixel agent guide
+alwaysApply: true
+---
+
+Read AGENTS.md before changing this repository. Pick work from docs/ROADMAP.md and follow that task loop. Do not push tags or dispatch the release workflow.
