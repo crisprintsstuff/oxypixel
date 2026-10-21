@@ -1663,6 +1663,10 @@ impl OxyApp {
                     update::replace_and_restart(&current, &program, reopen.as_deref())
                 })
             }
+            PackageKind::LinuxDeb => Err(
+                "This copy is the Debian package in /usr/bin. Install the downloaded package with your package manager."
+                    .to_string(),
+            ),
         };
         match result {
             Ok(()) => {
@@ -1976,14 +1980,19 @@ impl OxyApp {
                             } else if let Some(path) = &self.update_file {
                                 ui.label(format!("Checksum matched. Saved to {}.", path.display()));
                                 let action = match report.package {
-                                    PackageKind::WindowsInstaller => "Open installer",
-                                    PackageKind::WindowsPortable => "Restart and update",
-                                    PackageKind::LinuxArchive => "Replace this copy and restart",
+                                    PackageKind::WindowsInstaller => Some("Open installer"),
+                                    PackageKind::WindowsPortable => Some("Restart and update"),
+                                    PackageKind::LinuxArchive => Some("Replace this copy and restart"),
+                                    PackageKind::LinuxDeb => None,
                                 };
-                                if ui.button(action).clicked() {
-                                    install = true;
+                                if let Some(action) = action {
+                                    if ui.button(action).clicked() {
+                                        install = true;
+                                    }
+                                    ui.label("The installer is not silent. Windows builds are still unsigned.");
+                                } else {
+                                    ui.label("This copy is the Debian package in /usr/bin. Install the downloaded package with your package manager. OxyPixel leaves that file in place.");
                                 }
-                                ui.label("The installer is not silent. Windows builds are still unsigned.");
                             } else if !matches!(self.update_status, Some(UpdateStatus::Downloading))
                                 && ui.button("Download and verify").clicked()
                             {

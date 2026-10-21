@@ -1,0 +1,8 @@
+# SHA-256 of the built-in example after Document::composite.
+# One line per frame: index width height lowercase-sha256
+# The digest covers row-major RGBA8 bytes (r, g, b, a).
+# demo-frame-N.png is that same frame from export_png_bytes.
+# Update after an intentional change (leave this unset in CI):
+#   OXYPIXEL_UPDATE_DEMO_GOLDEN=1 cargo test -p oxypixel-core --test demo_composite -- --nocapture
+0 32 32 cb5ab85938940db91f76f9f4c521926e5cde78b7eb352e9f87379479d1b1d51c
+1 32 32 8d6f809eaa67f9bbd1a0836a09e70ffe2be6d95d02b874f1e011f730cb4aca08

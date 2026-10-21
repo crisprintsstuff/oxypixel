@@ -1,39 +1,62 @@
-# Linux packaging proposal
+# Linux packaging
 
-Release 0.3.2 ships `oxypixel-0.3.2-linux-x86_64.tar.gz`: the x86_64 executable, `LICENSE`, and a short run note. That is not a `.deb`, RPM, AppImage, or Flatpak. This document is still the plan for those packages.
+Release 0.3.2 ships `oxypixel-0.3.2-linux-x86_64.tar.gz`: the x86_64 executable, `LICENSE`, and a short run note. Tagged releases after that also upload `oxypixel-<version>-linux-x86_64.deb`, built by [scripts/package-deb.sh](../scripts/package-deb.sh). RPM, AppImage, and Flatpak are still only a plan.
 
-## What was checked on Ubuntu 24.04
+## Why cargo-deb
 
-On the machine that produced 0.1.0 (Ubuntu 24.04 under WSL2):
+`cargo-deb` 3.8.0 packs the `.deb`. `nfpm` does not.
 
-- `cargo test --workspace` passed (core, shortcuts, and the headless CLI).
-- `cargo clippy --workspace --all-targets -- -D warnings` passed.
-- `cargo build --release -p oxypixel` produced an ELF binary, and `oxypixel --help` ran.
-- The window was not opened. That session had no `DISPLAY`, so interactive Linux GUI use is unverified.
+The release job already builds the binary in `scripts/package-linux.sh`. `cargo deb --no-build` packs that binary, so the editor is not compiled a second time. `$auto` records the libraries the dynamic linker needs (`libc6` and the rest of the `DT_NEEDED` set). `libGL`, `libX11`, `libxkbcommon`, and `libxcb` are loaded with `dlopen`, so `$auto` does not see them. Those four packages are listed next to `$auto` in `crates/oxypixel/Cargo.toml`.
 
-That is a tested source build of the CLI and the library, not a supported desktop package.
+`nfpm` would need a separate `dpkg-shlibdeps` step for the linked libraries, and the package version would live in a second file. `scripts/package-deb.sh` downloads the cargo-deb 3.8.0 `.deb`, checks its SHA-256, and runs the binary from the cache. cargo-deb is a build tool only. It is not linked into `oxypixel`, and it is not a crate dependency.
 
-Interactive use needs a display and a driver that can load `libGL.so.1`. The binary dlopens `libX11.so.6` and `libxkbcommon.so.0` through winit. Those are runtime libraries, not libraries this repository vendors.
+## Runtime dependencies
 
-## Proposed runtime dependencies
+The window needs:
 
-- `libgl1`
-- `libx11-6`
-- `libxkbcommon0`
-- `libxcb1`
+- `libgl1` (`libGL.so.1`)
+- `libx11-6` (`libX11.so.6`)
+- `libxkbcommon0` (`libxkbcommon.so.0`)
+- `libxkbcommon-x11-0` (`libxkbcommon-x11.so.0`)
+- `libxcb1` (`libxcb.so.1`)
+
+`libxkbcommon-x11-0` is required as well as `libxkbcommon0`. Opening the installed binary on Ubuntu 24.04 without it panicked inside `xkbcommon-dl` (`Library libxkbcommon-x11.so could not be loaded`). That package depends on `libxkbcommon0` and `libxcb-xkb1`.
 
 No GTK package is required. Browse asks the XDG desktop portal for a file dialog. If no portal is running, type the path in the window.
 
-## Proposed `.deb`
+The `.deb` also depends on the libraries the binary links. On Ubuntu 24.04 that includes `libc6`.
 
-1. `cargo build --release -p oxypixel`
-2. Install the binary to `/usr/bin/oxypixel`
-3. Install `docs/linux/oxypixel.desktop` to `/usr/share/applications/`
-4. Install a 32×32 PNG icon (exported from `installer/oxypixel.ico`) to `/usr/share/icons/hicolor/32x32/apps/oxypixel.png`
-5. Add a shared-mime-info XML for the suffix `.oxypix` and the type `application/x-oxypix`
-6. Declare the libraries above as `Depends`
+## `.deb` layout
 
-`cargo-deb` or `nfpm` can pack that layout. Neither is configured in this repository yet.
+`scripts/package-deb.sh` writes `dist/oxypixel-<version>-linux-x86_64.deb`.
+
+| Path | Source |
+| --- | --- |
+| `/usr/bin/oxypixel` | `target/release/oxypixel` |
+| `/usr/share/applications/oxypixel.desktop` | `docs/linux/oxypixel.desktop` |
+| `/usr/share/icons/hicolor/32x32/apps/oxypixel.png` | `docs/linux/oxypixel.png`, the 32×32 image from `installer/oxypixel.ico` |
+| `/usr/share/mime/packages/oxypixel.xml` | `docs/linux/oxypixel-mime.xml` (`application/x-oxypix`, suffix `.oxypix`) |
+| `/usr/share/doc/oxypixel/copyright` | `LICENSE` |
+
+The Debian version is `<version>-1` (revision 1). The GitHub asset name matches `PackageKind::LinuxDeb`: `oxypixel-<version>-linux-x86_64.deb`.
+
+Install and remove:
+
+```bash
+sudo apt install ./oxypixel-<version>-linux-x86_64.deb
+sudo apt remove oxypixel
+```
+
+## Release workflow
+
+`.github/workflows/release.yml` runs `scripts/package-deb.sh` after the tar.gz on the Linux job. The publish job uploads the `.deb` with the existing files. `SHA256SUMS.txt` hashes, in order:
+
+1. `oxypixel-<version>-windows-x86_64.exe`
+2. `OxyPixel-<version>-Setup.exe`
+3. `oxypixel-<version>-linux-x86_64.tar.gz`
+4. `oxypixel-<version>-linux-x86_64.deb`
+
+Check for updates looks up a full asset name. The `.deb` line does not hide the tar.gz. An unpacked copy still downloads the tar.gz (`PackageKind::LinuxArchive`). A copy whose path is `/usr/bin/oxypixel` downloads the `.deb` (`PackageKind::LinuxDeb`) and does not replace that file itself.
 
 ## Proposed AppImage
 
@@ -46,7 +69,7 @@ Package the release binary with `linuxdeploy` and the desktop file above. Bundle
 - Finish args: `--share=ipc`, `--socket=fallback-x11`, `--socket=wayland`, `--device=dri`, `--filesystem=home` (home is required so people can open documents)
 - Build: a Cargo build of `-p oxypixel --release` inside the SDK, with the `x11` feature
 
-Wayland is not enabled in 0.1.0. A Flatpak would still want the X11 socket, plus Wayland later if the egui `wayland` feature is turned on and tested.
+Wayland is not enabled. A Flatpak would still want the X11 socket, plus Wayland later if the egui `wayland` feature is turned on and tested.
 
 ## What has to be true before calling Linux supported
 
@@ -55,4 +78,4 @@ Wayland is not enabled in 0.1.0. A Flatpak would still want the X11 socket, plus
 - The package installs and removes cleanly
 - The README states the distro and the package format that were actually tested
 
-Until those are done, point Linux users at the source build instructions in the README and at this document.
+The `.deb` from this tree was built on Ubuntu 24.04. `apt install` and `apt remove` were checked. `/usr/bin/oxypixel --help` ran, and `export-png` of a missing file printed an error and exited 1. With `libxkbcommon-x11-0` installed, the editor window opened as "OxyPixel - Untitled" and was then closed. A stroke, undo, save, and export from that window were not done, so this is not yet a full "Linux supported" check. The README still points at the tar.gz for the published 0.3.2 release and at this document for the `.deb`.
