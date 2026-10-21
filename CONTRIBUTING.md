@@ -25,7 +25,7 @@ cargo test --workspace
 
 ## Pull requests
 
-Use a focused branch. Describe the behavior change and how you tested it. Run the checks above before asking for review.
+Use a focused branch. Describe the behavior change and how you tested it. Run the checks above before asking for review. Coding agents follow [AGENTS.md](AGENTS.md) and take the next open id from [docs/ROADMAP.md](docs/ROADMAP.md).
 
 Do not commit signing keys, `.pfx` files, tokens, or built binaries. `dist/` is gitignored on purpose. Release artifacts come from the Windows release workflow or from `scripts/build-windows.sh`.
 
