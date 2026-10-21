@@ -8,7 +8,7 @@ Release builds pass `-C target-feature=+crt-static` for `x86_64-pc-windows-msvc`
 
 `crates/oxypixel/assets/oxypixel.rc` is the VERSIONINFO and icon script. `build.rs` embeds it when `llvm-rc`, `rc`, or `windres` is on `PATH`. If none of those exist, the build continues and prints a cargo warning. The installer still copies `oxypixel.ico` and uses it for the shortcut and the `.oxypix` icon.
 
-The cross-compiled `dist/oxypixel.exe` from a Linux machine without those tools has no embedded icon or VERSIONINFO. File Explorer shows a generic icon for the exe itself. The Start menu shortcut still uses `oxypixel.ico`. The GitHub Actions Windows job adds `rc.exe` to `PATH` when the Windows SDK provides it, so the tagged release build can embed the resource.
+The cross-compiled `dist/oxypixel.exe` from a Linux machine without those tools has no embedded icon or VERSIONINFO. File Explorer shows a generic icon for the exe itself. The Start menu shortcut still uses `oxypixel.ico`. The GitHub Actions Windows job adds `rc.exe` to `PATH` when the Windows SDK provides it, so the tagged release build embeds the resource. The published v0.3.2 portable exe does: it has an ICON, a GROUP_ICON, and a VERSION resource with `FileVersion` 0.3.2.
 
 ## Build on Windows
 

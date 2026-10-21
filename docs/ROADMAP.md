@@ -12,9 +12,8 @@ Infrastructure, then small fixes that already have a place in the code.
 
 1. [OX-001](#ox-001) — stop paying for two Windows CI runs on a pull request.
 2. [OX-002](#ox-002) — one command for the Windows-target clippy check.
-3. [OX-010](#ox-010) — make the portable-exe icon sentence match the release build.
-4. [OX-011](#ox-011) — test that update filenames stay tied to `PackageKind`.
-5. [OX-012](#ox-012) — test the recent-files directory on both platforms.
+3. [OX-011](#ox-011) — test that update filenames stay tied to `PackageKind`.
+4. [OX-012](#ox-012) — test the recent-files directory on both platforms.
 
 ## Scorecard
 
@@ -37,6 +36,7 @@ Shipped in 0.3.2 and covered by tests or by the release workflow.
 | Files UI | Recent list, drag and drop, Windows file dialog, Linux portal with a path field fallback | `recent.rs`, `native.rs` |
 | Updates | Help, then Check for updates. Download only after `SHA256SUMS.txt` matches. No network until that command | `update.rs` |
 | Windows package | Per-user NSIS installer and portable exe. Static CRT. Unsigned | `installer/oxypixel.nsi`, `release.yml` |
+| Portable exe resources | The v0.3.2 release exe embeds an icon and VERSIONINFO (`FileVersion` 0.3.2). A cross-build without `rc.exe`, `llvm-rc`, or `windres` does not | `build.rs`, [README.md](../README.md), [BUILD-WINDOWS.md](BUILD-WINDOWS.md) |
 | Linux package | `oxypixel-<version>-linux-x86_64.tar.gz` from `scripts/package-linux.sh` | `release.yml` |
 | CI | `ubuntu-latest` and `windows-latest`, fmt, clippy `-D warnings`, tests, release build. Job timeout 15 minutes | `.github/workflows/ci.yml` |
 
@@ -49,7 +49,6 @@ Shipped in 0.3.2 and covered by tests or by the release workflow.
 | File dialogs | Windows system dialog. Linux XDG portal, then the path field | No macOS build |
 | Linux packages | The release archive is built and uploaded | `.deb`, RPM, AppImage, and Flatpak are only described in [LINUX-PACKAGING.md](LINUX-PACKAGING.md). See [OX-P2](#ox-p2) |
 | Code signing | `docs/BUILD-WINDOWS.md` tells a human how to run `signtool` | No certificate in the repo or in CI. See [OX-H1](#ox-h1) |
-| Portable exe resources | The Windows release job puts `rc.exe` on `PATH` when the SDK has it, so a tagged build can embed an icon and `VERSIONINFO` | A Linux cross-build without a resource compiler does not. [README.md](../README.md) still says the portable copy has no embedded icon. See [OX-010](#ox-010) |
 | GUI checks | Canvas math, shortcuts, and the CLI have tests | Nothing clicks the window. See [OX-P3](#ox-p3) |
 | CI cost | Both OS jobs are required | A branch push and the pull request each start a Windows job. See [OX-001](#ox-001) |
 
@@ -77,11 +76,9 @@ Acceptance: `make check-windows` runs `cargo clippy --workspace --all-targets --
 
 ### OX-010
 
-**Reconcile the portable-exe icon sentence.** Status: open. Area: `README.md`, `docs/BUILD-WINDOWS.md`.
+**Reconcile the portable-exe icon sentence.** Status: done. Area: `README.md`, `docs/BUILD-WINDOWS.md`.
 
-The README says the portable Windows executable has no embedded icon or version resource. `docs/BUILD-WINDOWS.md` says the GitHub Actions job embeds them when `rc.exe` is on `PATH`. Both cannot describe the same 0.3.2 release file.
-
-Acceptance: both docs describe the same thing. If the release exe from the Actions job embeds the resource, the README says so and still says a cross-build without `rc.exe` does not. No new release is cut to find out. Use the existing 0.3.2 asset or the release-job log.
+The v0.3.2 portable exe on the releases page (`oxypixel-0.3.2-windows-x86_64.exe`) contains an ICON, a GROUP_ICON, and a VERSION resource. `FileVersion` and `ProductVersion` are 0.3.2. README and `docs/BUILD-WINDOWS.md` now say the same thing: that tagged Windows build embeds the icon and version resource, and a cross-build without `rc.exe`, `llvm-rc`, or `windres` does not. No new release was cut.
 
 ### OX-011
 
