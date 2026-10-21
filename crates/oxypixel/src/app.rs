@@ -100,6 +100,8 @@ pub struct OxyApp {
     /// The last copy did not reach the system clipboard, so paste must keep
     /// the in-memory patch even if an older system image is still readable.
     clipboard_local_only: bool,
+    /// Copy and paste chords that are still held. Key repeats must not run again.
+    clipboard_chord: shortcuts::ClipboardChord,
 }
 
 enum UpdateMessage {
@@ -151,6 +153,7 @@ impl OxyApp {
             update_file: None,
             update_rx: None,
             clipboard_local_only: false,
+            clipboard_chord: shortcuts::ClipboardChord::default(),
         };
         app.hex = app.editor.primary().to_hex();
         if let Some(path) = open {
@@ -322,6 +325,8 @@ impl OxyApp {
 
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
         if self.dialog.is_some() {
+            // Track chord releases while the dialog is up so the next copy still runs.
+            let _ = self.shortcut_commands(ctx);
             let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
             if escape {
                 self.dialog = None;
@@ -339,32 +344,23 @@ impl OxyApp {
                     }
                 });
             }
+            // Still track the copy chord so a key-up inside a text field cannot
+            // leave the next canvas copy stuck.
+            let _ = self.shortcut_commands(ctx);
             return;
         }
-        let commands: Vec<Command> = ctx.input(|input| {
-            let mut commands = Vec::new();
-            for event in &input.raw.events {
-                if let egui::Event::Key {
-                    key,
-                    pressed: true,
-                    repeat,
-                    modifiers,
-                    ..
-                } = event
-                {
-                    if let Some(command) = shortcuts::command_from(*modifiers, *key) {
-                        if *repeat && !shortcuts::allows_repeat(command) {
-                            continue;
-                        }
-                        commands.push(command);
-                    }
-                }
-            }
-            commands
-        });
+        let commands = self.shortcut_commands(ctx);
         for command in commands {
             self.run_command(ctx, command);
         }
+    }
+
+    fn shortcut_commands(&mut self, ctx: &egui::Context) -> Vec<Command> {
+        let mut chord = self.clipboard_chord;
+        let commands =
+            ctx.input(|input| shortcuts::commands_from_events(&input.raw.events, &mut chord));
+        self.clipboard_chord = chord;
+        commands
     }
 
     fn run_command(&mut self, ctx: &egui::Context, command: Command) {

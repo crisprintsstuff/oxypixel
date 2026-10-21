@@ -1,7 +1,10 @@
 //! Keyboard shortcut map. Plain letter shortcuts are ignored while a text field is focused.
-//! The UI checks that before calling [`command_from`].
+//! The UI checks that before it runs the commands from [`commands_from_events`].
+//!
+//! egui reports Ctrl+C as [`egui::Event::Copy`] and keeps that key-down. An image-only
+//! Ctrl+V still produces a key release. Paste runs on that release so the chord paints once.
 
-use eframe::egui::{Key, Modifiers};
+use eframe::egui::{self, Key, Modifiers};
 use oxypixel_core::Tool;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -197,6 +200,101 @@ pub fn allows_repeat(command: Command) -> bool {
     )
 }
 
+/// Which clipboard chord is held down. Key repeats must not copy or paste again.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ClipboardChord {
+    pub copy: bool,
+    pub paste: bool,
+}
+
+/// Shortcuts in one frame of egui events.
+///
+/// Copy is the copy event (or a copy key-down, when one arrives). Paste is the
+/// paste event when egui emits one, and otherwise the paste key-up. An image on
+/// the clipboard produces that key-up with no paste event.
+pub fn commands_from_events(events: &[egui::Event], chord: &mut ClipboardChord) -> Vec<Command> {
+    let mut commands = Vec::new();
+    for event in events {
+        match event {
+            egui::Event::Copy => note_copy(&mut commands, chord),
+            egui::Event::Paste(_) => note_paste(&mut commands, chord),
+            egui::Event::Key {
+                key,
+                pressed,
+                repeat,
+                modifiers,
+                ..
+            } => {
+                if *pressed {
+                    if let Some(command) = command_from(*modifiers, *key) {
+                        if command == Command::Copy {
+                            note_copy(&mut commands, chord);
+                            continue;
+                        }
+                        if command == Command::Paste {
+                            note_paste(&mut commands, chord);
+                            continue;
+                        }
+                        if *repeat && !allows_repeat(command) {
+                            continue;
+                        }
+                        commands.push(command);
+                    }
+                } else {
+                    if is_copy_key(*key) {
+                        chord.copy = false;
+                    }
+                    if is_paste_key(*key) {
+                        if !chord.paste && is_paste_release(*modifiers, *key) {
+                            commands.push(Command::Paste);
+                        }
+                        chord.paste = false;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    commands
+}
+
+fn note_copy(commands: &mut Vec<Command>, chord: &mut ClipboardChord) {
+    if !chord.copy {
+        commands.push(Command::Copy);
+    }
+    chord.copy = true;
+}
+
+fn note_paste(commands: &mut Vec<Command>, chord: &mut ClipboardChord) {
+    if !chord.paste {
+        commands.push(Command::Paste);
+    }
+    chord.paste = true;
+}
+
+fn is_copy_key(key: Key) -> bool {
+    matches!(key, Key::C | Key::Insert | Key::Copy)
+}
+
+fn is_paste_key(key: Key) -> bool {
+    matches!(key, Key::V | Key::Insert | Key::Paste)
+}
+
+/// Paste chords that egui may consume on the way down. The matching key-up still arrives.
+fn is_paste_release(modifiers: Modifiers, key: Key) -> bool {
+    if modifiers.alt {
+        return false;
+    }
+    let ctrl = modifiers.command || modifiers.ctrl;
+    if key == Key::Paste {
+        return true;
+    }
+    if ctrl && !modifiers.shift && key == Key::V {
+        return true;
+    }
+    !ctrl && modifiers.shift && key == Key::Insert
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -241,6 +339,93 @@ mod tests {
             command_from(Modifiers::NONE, Key::B),
             Some(Command::Tool(Tool::Pencil))
         );
+    }
+
+    #[test]
+    fn copy_and_paste_follow_the_events_egui_actually_emits() {
+        let ctrl = Modifiers::COMMAND;
+        let mut chord = ClipboardChord::default();
+        assert_eq!(
+            commands_from_events(&[egui::Event::Copy], &mut chord),
+            vec![Command::Copy]
+        );
+        assert!(chord.copy);
+        assert_eq!(
+            commands_from_events(&[egui::Event::Copy], &mut chord),
+            Vec::<Command>::new()
+        );
+        assert_eq!(
+            commands_from_events(&[key_event(Key::C, false, ctrl)], &mut chord),
+            Vec::<Command>::new()
+        );
+        assert!(!chord.copy);
+
+        let image_paste = commands_from_events(&[key_event(Key::V, false, ctrl)], &mut chord);
+        assert_eq!(image_paste, vec![Command::Paste]);
+        assert!(!chord.paste);
+
+        let text_and_release = commands_from_events(
+            &[
+                egui::Event::Paste("plain text".to_string()),
+                key_event(Key::V, false, ctrl),
+            ],
+            &mut chord,
+        );
+        assert_eq!(text_and_release, vec![Command::Paste]);
+        assert!(!chord.paste);
+
+        assert_eq!(
+            commands_from_events(&[egui::Event::Paste("again".to_string())], &mut chord),
+            vec![Command::Paste]
+        );
+        assert!(chord.paste);
+        assert_eq!(
+            commands_from_events(&[egui::Event::Paste("repeat".to_string())], &mut chord),
+            Vec::<Command>::new()
+        );
+        assert_eq!(
+            commands_from_events(&[key_event(Key::V, false, Modifiers::NONE)], &mut chord),
+            Vec::<Command>::new()
+        );
+        assert!(!chord.paste);
+
+        let mut shift_insert = Modifiers::NONE;
+        shift_insert.shift = true;
+        assert_eq!(
+            commands_from_events(
+                &[key_event(Key::Insert, false, shift_insert)],
+                &mut ClipboardChord::default()
+            ),
+            vec![Command::Paste]
+        );
+
+        let mut alt = ctrl;
+        alt.alt = true;
+        assert_eq!(
+            commands_from_events(
+                &[key_event(Key::V, false, alt)],
+                &mut ClipboardChord::default()
+            ),
+            Vec::<Command>::new()
+        );
+
+        assert_eq!(
+            commands_from_events(
+                &[key_event(Key::A, true, ctrl)],
+                &mut ClipboardChord::default()
+            ),
+            vec![Command::SelectAll]
+        );
+    }
+
+    fn key_event(key: Key, pressed: bool, modifiers: Modifiers) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers,
+        }
     }
 
     #[test]
