@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
-"""Generate the original OxyPixel icon (16 and 32 px) as ICO and raw RGBA."""
+"""Generate the original OxyPixel icon (16 and 32 px) as ICO and raw RGBA.
 
+The 32px image inside installer/oxypixel.ico is also written as the hicolor
+PNG the Linux .deb installs. `python3 scripts/gen_icon.py --check` compares
+that PNG to the ICO and does not write anything.
+"""
+
+import struct
+import sys
+import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -104,20 +112,145 @@ def ico(images):
     return bytes(blob + entries + payload)
 
 
+def write_png(path, rows):
+    width = len(rows[0])
+    height = len(rows)
+
+    def chunk(tag, data):
+        crc = zlib.crc32(tag + data) & 0xFFFFFFFF
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", crc)
+
+    raw = bytearray()
+    for row in rows:
+        raw.append(0)
+        for pixel in row:
+            raw.extend(pixel)
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    png = b"\x89PNG\r\n\x1a\n"
+    png += chunk(b"IHDR", ihdr)
+    png += chunk(b"IDAT", zlib.compress(bytes(raw), 9))
+    png += chunk(b"IEND", b"")
+    path.write_bytes(png)
+
+
+def icon_rows_32(path):
+    data = path.read_bytes()
+    if data[:4] != b"\x00\x00\x01\x00":
+        raise SystemExit(f"{path} is not an ICO")
+    count = int.from_bytes(data[4:6], "little")
+    for index in range(count):
+        base = 6 + 16 * index
+        width = data[base] or 256
+        height = data[base + 1] or 256
+        nbytes = int.from_bytes(data[base + 8 : base + 12], "little")
+        offset = int.from_bytes(data[base + 12 : base + 16], "little")
+        if width == 32 and height == 32:
+            return rows_from_dib(data[offset : offset + nbytes])
+    raise SystemExit(f"{path} has no 32x32 image")
+
+
+def rows_from_dib(blob):
+    if len(blob) < 40:
+        raise SystemExit("ICO image is truncated")
+    size = int.from_bytes(blob[4:8], "little", signed=True)
+    if size <= 0:
+        raise SystemExit("ICO image has no pixels")
+    xor_len = size * size * 4
+    xor = blob[40 : 40 + xor_len]
+    if len(xor) != xor_len:
+        raise SystemExit("ICO image is truncated")
+    rows = []
+    for y in range(size):
+        start = (size - 1 - y) * size * 4
+        row = []
+        for x in range(size):
+            blue, green, red, alpha = xor[start + x * 4 : start + x * 4 + 4]
+            row.append((red, green, blue, alpha))
+        rows.append(row)
+    return rows
+
+
+def read_png_rows(path):
+    data = path.read_bytes()
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        raise SystemExit(f"{path} is not a PNG")
+    pos = 8
+    width = height = None
+    idat = bytearray()
+    while pos + 8 <= len(data):
+        length = int.from_bytes(data[pos : pos + 4], "big")
+        tag = data[pos + 4 : pos + 8]
+        chunk = data[pos + 8 : pos + 8 + length]
+        if len(chunk) != length:
+            raise SystemExit(f"{path} is truncated")
+        if tag == b"IHDR":
+            width, height = struct.unpack(">II", chunk[:8])
+        elif tag == b"IDAT":
+            idat.extend(chunk)
+        elif tag == b"IEND":
+            break
+        pos += 12 + length
+    if width != 32 or height != 32:
+        raise SystemExit(f"{path} is {width}x{height}, expected 32x32")
+    raw = zlib.decompress(bytes(idat))
+    rows = []
+    cursor = 0
+    stride = width * 4
+    for _ in range(height):
+        if raw[cursor] != 0:
+            raise SystemExit(f"{path} uses a PNG filter this check does not read")
+        cursor += 1
+        row = []
+        for x in range(width):
+            row.append(tuple(raw[cursor + x * 4 : cursor + x * 4 + 4]))
+        cursor += stride
+        rows.append(row)
+    return rows
+
+
+def hicolor_png():
+    return ROOT / "docs" / "linux" / "oxypixel.png"
+
+
+def installer_ico():
+    return ROOT / "installer" / "oxypixel.ico"
+
+
+def export_hicolor():
+    destination = hicolor_png()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    write_png(destination, icon_rows_32(installer_ico()))
+
+
+def check_hicolor():
+    icon_rows = icon_rows_32(installer_ico())
+    png_rows = read_png_rows(hicolor_png())
+    if icon_rows != png_rows:
+        raise SystemExit(
+            "docs/linux/oxypixel.png does not match the 32px image in installer/oxypixel.ico"
+        )
+
+
 def main():
     small = pixels16()
     large = scale2(small)
     icon = ico([(16, dib(small)), (32, dib(large))])
     targets = [
-        ROOT / "installer" / "oxypixel.ico",
+        installer_ico(),
         ROOT / "crates" / "oxypixel" / "assets" / "oxypixel.ico",
     ]
     for path in targets:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(icon)
     (ROOT / "crates" / "oxypixel" / "assets" / "icon32.rgba").write_bytes(rgba_bytes(large))
+    export_hicolor()
+    check_hicolor()
     print(f"wrote {len(icon)} byte icon")
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 1 and sys.argv[1] == "--check":
+        check_hicolor()
+        print("hicolor icon matches installer/oxypixel.ico")
+    else:
+        main()

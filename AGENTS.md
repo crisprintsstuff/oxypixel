@@ -23,7 +23,7 @@ OxyPixel is not a Photoshop-style command shell. There is no command registry, c
 crates/oxypixel-core     document, tools, history, import/export. No GUI.
 crates/oxypixel          egui window, shortcuts, recent files, update check, CLI
 installer/               NSIS script and wizard art
-scripts/                 Windows cross-build, installer, Linux tar.gz
+scripts/                 Windows cross-build, installer, Linux tar.gz and .deb
 .github/workflows/       CI (ci.yml) and release (release.yml)
 ```
 

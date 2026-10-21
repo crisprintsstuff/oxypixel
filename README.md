@@ -29,7 +29,7 @@ The pictures above are screenshots of OxyPixel 0.3.2, taken from the running edi
 
 ## Status
 
-Version 0.3.2 is an early release. The Windows downloads are unsigned. The Linux download is a tar.gz, not a distro package. A canvas side is at most 1024 pixels. What works today, and the open task list, is in [docs/ROADMAP.md](docs/ROADMAP.md).
+Version 0.3.2 is an early release. The Windows downloads are unsigned. The Linux file on the v0.3.2 release is a tar.gz. Later tags also upload a `.deb`. A canvas side is at most 1024 pixels. What works today, and the open task list, is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Download
 
@@ -66,7 +66,7 @@ Help, then Check for updates, can download a newer release and restart into it a
 
 ## Linux
 
-`oxypixel-0.3.2-linux-x86_64.tar.gz` contains the x86_64 executable, `LICENSE`, and `README.txt`. It was built on Ubuntu 24.04. It is not a `.deb`, RPM, AppImage, or Flatpak. Packaging notes are in [docs/LINUX-PACKAGING.md](docs/LINUX-PACKAGING.md).
+Release 0.3.2 publishes `oxypixel-0.3.2-linux-x86_64.tar.gz`: the x86_64 executable, `LICENSE`, and `README.txt`, built on Ubuntu 24.04. Unpack it and run the program from that directory:
 
 ```bash
 tar -xzf oxypixel-0.3.2-linux-x86_64.tar.gz
@@ -74,11 +74,24 @@ cd oxypixel-0.3.2-linux-x86_64
 ./oxypixel
 ```
 
-The window needs an X11 display and these libraries: `libGL.so.1`, `libX11.so.6`, and `libxkbcommon.so.0`. Export commands do not need a display:
+Tagged releases after 0.3.2 also upload `oxypixel-<version>-linux-x86_64.deb`. That package installs `/usr/bin/oxypixel`, a desktop entry, a 32×32 icon, and the `.oxypix` mime type. On Ubuntu 24.04 the package from this tree was installed and removed with:
 
 ```bash
-./oxypixel export-png drawing.oxypix frame.png
+sudo apt install ./oxypixel-<version>-linux-x86_64.deb
+sudo apt remove oxypixel
 ```
+
+The v0.3.2 release on GitHub does not include that `.deb`. The download table above is the file that release published.
+
+The window needs an X11 display and these libraries: `libGL.so.1`, `libX11.so.6`, `libxkbcommon.so.0`, and `libxkbcommon-x11.so.0`. The `.deb` depends on the packages that provide them (`libgl1`, `libx11-6`, `libxkbcommon0`, `libxkbcommon-x11-0`, `libxcb1`). Export commands do not need a display:
+
+```bash
+oxypixel export-png drawing.oxypix frame.png
+```
+
+RPM, AppImage, and Flatpak are not built. Notes are in [docs/LINUX-PACKAGING.md](docs/LINUX-PACKAGING.md).
+
+Help, then Check for updates, downloads the tar.gz for an unpacked copy and the `.deb` when the running program is `/usr/bin/oxypixel`. A packaged copy stays in place. Install the downloaded `.deb` with the package manager.
 
 ## Features
 
@@ -145,6 +158,7 @@ oxypixel export-sheet sprite.oxypix sheet.png
 | [scripts/build-windows.sh](scripts/build-windows.sh) | Portable `oxypixel-<version>-windows-x86_64.exe` |
 | [scripts/build-installer.sh](scripts/build-installer.sh) | `OxyPixel-<version>-Setup.exe` |
 | [scripts/package-linux.sh](scripts/package-linux.sh) | `oxypixel-<version>-linux-x86_64.tar.gz` |
+| [scripts/package-deb.sh](scripts/package-deb.sh) | `oxypixel-<version>-linux-x86_64.deb` |
 
 `make test` runs the test suite. `make check` runs rustfmt, clippy, and the tests.
 
@@ -165,7 +179,7 @@ PNG, BMP, and GIF can be imported as a new document or as a layer. A GIF import 
 | [docs/SHORTCUTS.md](docs/SHORTCUTS.md) | Keyboard and mouse shortcuts |
 | [docs/FORMAT.md](docs/FORMAT.md) | `.oxypix` layout and size limits |
 | [docs/BUILD-WINDOWS.md](docs/BUILD-WINDOWS.md) | Windows build, installer, and code signing |
-| [docs/LINUX-PACKAGING.md](docs/LINUX-PACKAGING.md) | Linux archive and future packages |
+| [docs/LINUX-PACKAGING.md](docs/LINUX-PACKAGING.md) | Linux tar.gz, `.deb`, and packages that are still only a plan |
 | [docs/THIRD-PARTY.md](docs/THIRD-PARTY.md) | Direct dependency licenses |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Tests, pull requests, and version bumps |
 | [SECURITY.md](SECURITY.md) | File parsing limits and how to report a problem |

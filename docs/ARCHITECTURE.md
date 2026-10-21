@@ -33,4 +33,4 @@ The window is egui 0.31 with the `glow` OpenGL backend. The canvas is a nearest-
 
 The Windows release links the MSVC CRT statically (`target-feature=+crt-static`) and uses the GUI subsystem. A resource compiler, when present, embeds an icon and `VERSIONINFO`. The installer is NSIS and installs per user.
 
-Linux uses the same code with egui's X11 feature. Packaging is not produced. See [LINUX-PACKAGING.md](LINUX-PACKAGING.md).
+Linux uses the same code with egui's X11 feature. Tagged releases ship a tar.gz and a `.deb`. See [LINUX-PACKAGING.md](LINUX-PACKAGING.md).
