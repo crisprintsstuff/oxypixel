@@ -10,8 +10,7 @@ When you finish a task, change its status here in the same pull request.
 
 Infrastructure, then small fixes that already have a place in the code.
 
-1. [OX-011](#ox-011) — test that update filenames stay tied to `PackageKind`.
-2. [OX-012](#ox-012) — test the recent-files directory on both platforms.
+OX-002, OX-011, and OX-012 are done, so this list is empty.
 
 ## Scorecard
 
@@ -75,19 +74,15 @@ The v0.3.2 portable exe on the releases page (`oxypixel-0.3.2-windows-x86_64.exe
 
 ### OX-011
 
-**Lock update filenames to `PackageKind`.** Status: open. Area: `crates/oxypixel/src/update.rs`.
+**Lock update filenames to `PackageKind`.** Status: done. Area: `crates/oxypixel/src/update.rs`.
 
-Check for updates looks up `PackageKind::asset_name` and a file named `SHA256SUMS.txt`. The checksum test uses handwritten 0.3.2 names. Those strings can drift from `asset_name`.
-
-Acceptance: a unit test builds the three names with `asset_name` for version 0.3.2 and checks that `expected_hash` finds each of them in a sums list. The names stay `oxypixel-0.3.2-windows-x86_64.exe`, `OxyPixel-0.3.2-Setup.exe`, and `oxypixel-0.3.2-linux-x86_64.tar.gz`.
+`release_checksum_list_names_each_package` builds the three 0.3.2 names with `PackageKind::asset_name` and checks that `expected_hash` finds each of them. The names stay `oxypixel-0.3.2-windows-x86_64.exe`, `OxyPixel-0.3.2-Setup.exe`, and `oxypixel-0.3.2-linux-x86_64.tar.gz`.
 
 ### OX-012
 
-**Test the recent-files directory.** Status: open. Area: `crates/oxypixel/src/recent.rs`.
+**Test the recent-files directory.** Status: done. Area: `crates/oxypixel/src/recent.rs`.
 
-`push` is tested. `data_dir` is not. On Windows it is `%APPDATA%\OxyPixel`. Elsewhere it is `$XDG_DATA_HOME/oxypixel` when that value is set, otherwise `~/.local/share/oxypixel`.
-
-Acceptance: a unit test sets the relevant environment variable, calls the directory helper, and checks the last path component. It restores the variable before returning. No dialog and no disk write outside a temp dir.
+`data_dir_uses_the_platform_folder` sets `APPDATA` on Windows and `XDG_DATA_HOME` elsewhere, calls `data_dir`, and checks that the last path component is `OxyPixel` or `oxypixel`. The variable is restored when the test returns. The test does not open a dialog or write a file.
 
 ## Proposals
 
