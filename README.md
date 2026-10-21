@@ -1,20 +1,24 @@
 # OxyPixel
 
-![OxyPixel banner. Pixel-art editor in Rust and egui.](assets/banner.jpg)
+OxyPixel is a pixel-art editor for making sprites and short animations on Windows and Linux. You draw on a pixel canvas, stack layers, and step through frames, then save an `.oxypix` document or export PNG, BMP, or GIF. The editing rules live in the `oxypixel-core` library, and the window is an [egui](https://github.com/emilk/egui) app. OxyPixel is an original program. It is not affiliated with Pixelorama, Orama Interactive, Godot, or Aseprite.
 
-OxyPixel is a pixel-art editor for Windows and Linux. Draw on a pixel canvas, stack layers, animate frames, and import or export PNG, BMP, and GIF.
+**[Releases](https://github.com/crisprintsstuff/oxypixel/releases)** · **[Changelog](CHANGELOG.md)** · **[v0.3.2](https://github.com/crisprintsstuff/oxypixel/releases/tag/v0.3.2)** · **[Roadmap](docs/ROADMAP.md)**
 
-It is an original program written in Rust. The editing rules live in `oxypixel-core`. The window is an [egui](https://github.com/emilk/egui) app. OxyPixel is not affiliated with Pixelorama, Orama Interactive, Godot, or Aseprite.
+![The OxyPixel window editing a 64 by 64 drawing. Tools are on the left, the Ink palette and the Night and Cottage layers are on the right, and the frame strip is along the bottom.](docs/images/editor.png)
 
-**[Releases](https://github.com/crisprintsstuff/oxypixel/releases)** · **[Changelog](CHANGELOG.md)** · **[v0.3.2](https://github.com/crisprintsstuff/oxypixel/releases/tag/v0.3.2)**
+![The same drawing on frame 2, with onion skin showing the previous frame faintly. The cottage window is light and the smoke has moved.](docs/images/editor-frames.png)
+
+The pictures above are screenshots of OxyPixel 0.3.2, taken from the running editor. The drawing is a sample file opened for the capture. The images are in [docs/images/](docs/images/) and are covered by the repository MIT license.
 
 ## Contents
 
+- [Status](#status)
 - [Download](#download)
 - [Windows installer](#windows-installer)
 - [Portable Windows build](#portable-windows-build)
 - [Linux](#linux)
 - [Features](#features)
+- [How it's built](#how-its-built)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Build from source](#build-from-source)
 - [File formats](#file-formats)
@@ -22,6 +26,10 @@ It is an original program written in Rust. The editing rules live in `oxypixel-c
 - [Contributing](#contributing)
 - [Security](#security)
 - [License](#license)
+
+## Status
+
+Version 0.3.2 is an early release. The Windows downloads are unsigned. The Linux download is a tar.gz, not a distro package. A canvas side is at most 1024 pixels. What works today, and the open task list, is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Download
 
@@ -41,19 +49,24 @@ The Windows files are unsigned. SmartScreen can warn that the publisher is unkno
 `OxyPixel-0.3.2-Setup.exe` is a per-user NSIS setup.
 
 1. Run the installer. It does not need administrator rights.
-2. OxyPixel is installed under `%LOCALAPPDATA%\OxyPixel`.
-3. The Start menu gets a shortcut, and `.oxypix` files open in OxyPixel. A desktop shortcut is optional.
-4. Launch OxyPixel from the Start menu, or from the last page of setup.
+2. If SmartScreen says the publisher is unknown, use "More info" and then "Run anyway" after the checksum matches.
+3. OxyPixel is installed under `%LOCALAPPDATA%\OxyPixel`.
+4. The Start menu gets a shortcut, and `.oxypix` files open in OxyPixel. A desktop shortcut is optional.
+5. Launch OxyPixel from the Start menu, or from the last page of setup.
 
 The program needs OpenGL (`opengl32.dll`, which ships with Windows). The release executable links the C runtime statically, so the Visual C++ redistributable is not required.
 
 ## Portable Windows build
 
-`oxypixel-0.3.2-windows-x86_64.exe` is the same 64-bit program without an installer. Help, then Check for updates, can download a newer release and restart into it after the checksum matches. Put it in any folder and run it. This copy has no embedded icon or version resource. The installer shortcut uses `oxypixel.ico`.
+`oxypixel-0.3.2-windows-x86_64.exe` is the same 64-bit program without an installer. Put it in any folder and run it. SmartScreen can show the same unknown-publisher warning as the installer.
+
+The v0.3.2 file on the releases page embeds the application icon and a version resource (`FileVersion` 0.3.2). A cross-build made without `rc.exe`, `llvm-rc`, or `windres` on `PATH` does not embed those resources, and File Explorer then shows a generic icon for the exe. The installer shortcut and the `.oxypix` association use `oxypixel.ico` either way. See [docs/BUILD-WINDOWS.md](docs/BUILD-WINDOWS.md).
+
+Help, then Check for updates, can download a newer release and restart into it after the checksum matches.
 
 ## Linux
 
-`oxypixel-0.3.2-linux-x86_64.tar.gz` contains the x86_64 executable, `LICENSE`, and `README.txt`. It was built on Ubuntu 24.04. It is not a `.deb`, RPM, AppImage, or Flatpak. Packaging ideas are in [docs/LINUX-PACKAGING.md](docs/LINUX-PACKAGING.md).
+`oxypixel-0.3.2-linux-x86_64.tar.gz` contains the x86_64 executable, `LICENSE`, and `README.txt`. It was built on Ubuntu 24.04. It is not a `.deb`, RPM, AppImage, or Flatpak. Packaging notes are in [docs/LINUX-PACKAGING.md](docs/LINUX-PACKAGING.md).
 
 ```bash
 tar -xzf oxypixel-0.3.2-linux-x86_64.tar.gz
@@ -69,9 +82,11 @@ The window needs an X11 display and these libraries: `libGL.so.1`, `libX11.so.6`
 
 ## Features
 
+These are in 0.3.2. Planned work is listed in [docs/ROADMAP.md](docs/ROADMAP.md) and is not included here.
+
 - Pixel canvas with nearest-neighbor zoom, pan, and an optional grid
 - Pencil, eraser, fill, eyedropper, line, rectangle, ellipse, and rectangular selection
-- Move, nudge, copy, and paste a selection
+- Move and nudge a selection. Copy and paste stay inside the editor; they do not use the system clipboard
 - Canvas resize and crop
 - Horizontal and vertical mirror while drawing
 - Primary and secondary colors, hex entry, and the Ink palette
@@ -80,10 +95,15 @@ The window needs an X11 display and these libraries: `libGL.so.1`, `libX11.so.6`
 - Animation frames, playback, onion skin, GIF export, and a horizontal spritesheet
 - PNG and spritesheet export at 1×, 2×, or 4× nearest-neighbor
 - `.oxypix` documents, plus PNG, BMP, and GIF import and export
-- Recent files, drag-and-drop, and system file dialogs on Windows and Linux
+- Recent files, drag-and-drop, a Windows file dialog, and a Linux portal dialog with a path field if the portal is unavailable
+- Headless `export-png`, `export-bmp`, `export-gif`, and `export-sheet` commands
 - Keyboard shortcuts
 
 A canvas side is at most 1024 pixels. One cel holds at most 1,048,576 pixels. The whole document holds at most 16,777,216 pixels across frames and layers. Details are in [docs/FORMAT.md](docs/FORMAT.md).
+
+## How it's built
+
+The maintainer develops OxyPixel with AI coding agents. The written rules for that work are in [AGENTS.md](AGENTS.md): which crate owns which behavior, errors instead of panics on bad input, and no modal dialogs on headless, CLI, or test paths. Changes are expected to include tests. GitHub Actions runs rustfmt, clippy with warnings denied, and the test suite on Linux and Windows. The maintainer reviews and merges pull requests.
 
 ## Keyboard shortcuts
 
@@ -132,15 +152,15 @@ oxypixel export-sheet sprite.oxypix sheet.png
 
 `.oxypix` is the editor's own little-endian document. Version 1 stores the canvas, shared layer stack, frame durations, pixels, and palette. The byte layout is [docs/FORMAT.md](docs/FORMAT.md).
 
-PNG, BMP, and GIF can be imported as a new document or as a layer. Export writes the composited frame, a GIF animation, a BMP, or a horizontal PNG spritesheet.
+PNG, BMP, and GIF can be imported as a new document or as a layer. A GIF import becomes one composited layer named Imported. Export writes the composited frame, a GIF animation, a BMP, or a horizontal PNG spritesheet.
 
 ## Documentation
 
 | Guide | What it covers |
 | --- | --- |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
-| [AGENTS.md](AGENTS.md) | Guide for contributors and coding agents |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | Scorecard and the next task ids |
+| [AGENTS.md](AGENTS.md) | Rules for contributors and coding agents |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Scorecard and the open task ids |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Core library and the egui window |
 | [docs/SHORTCUTS.md](docs/SHORTCUTS.md) | Keyboard and mouse shortcuts |
 | [docs/FORMAT.md](docs/FORMAT.md) | `.oxypix` layout and size limits |
@@ -152,7 +172,9 @@ PNG, BMP, and GIF can be imported as a new document or as a layer. Export writes
 
 ## Contributing
 
-Use a focused branch. Run `make check` before asking for review. Do not copy code or artwork from other pixel editors. The full notes are in [CONTRIBUTING.md](CONTRIBUTING.md).
+Bug reports and small pull requests are welcome. Open a [GitHub issue](https://github.com/crisprintsstuff/oxypixel/issues) for a defect, and use the path in [SECURITY.md](SECURITY.md) for a security problem. Use a focused branch. Run `make check` before asking for review. Do not copy code or artwork from other pixel editors.
+
+People and coding agents working in the tree should read [AGENTS.md](AGENTS.md) and take the next open id from [docs/ROADMAP.md](docs/ROADMAP.md). The full notes are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Security
 
