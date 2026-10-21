@@ -1,4 +1,4 @@
-.PHONY: test check check-windows release windows installer fmt
+.PHONY: test check check-windows release windows installer deb fmt
 
 test:
 	cargo test --workspace
@@ -48,3 +48,6 @@ windows:
 
 installer:
 	./scripts/build-installer.sh
+
+deb:
+	./scripts/package-deb.sh

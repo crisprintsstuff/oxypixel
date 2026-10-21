@@ -35,7 +35,7 @@ Shipped in 0.3.2 and covered by tests or by the release workflow.
 | Updates | Help, then Check for updates. Download only after `SHA256SUMS.txt` matches. No network until that command | `update.rs` |
 | Windows package | Per-user NSIS installer and portable exe. Static CRT. Unsigned | `installer/oxypixel.nsi`, `release.yml` |
 | Portable exe resources | The v0.3.2 release exe embeds an icon and VERSIONINFO (`FileVersion` 0.3.2). A cross-build without `rc.exe`, `llvm-rc`, or `windres` does not | `build.rs`, [README.md](../README.md), [BUILD-WINDOWS.md](BUILD-WINDOWS.md) |
-| Linux package | `oxypixel-<version>-linux-x86_64.tar.gz` from `scripts/package-linux.sh` | `release.yml` |
+| Linux package | `oxypixel-<version>-linux-x86_64.tar.gz` and `oxypixel-<version>-linux-x86_64.deb` | `scripts/package-linux.sh`, `scripts/package-deb.sh`, `release.yml` |
 | CI | One Windows job per pull request. `push` is `main` only; tags stay on `release.yml`. Docs-only changes skip the matrix. Ubuntu also runs `make check-windows`. `ubuntu-latest` and `windows-latest`, fmt, clippy `-D warnings`, tests, release build. Job timeout 15 minutes | `.github/workflows/ci.yml`, `Makefile` |
 
 ### Partial
@@ -45,7 +45,7 @@ Shipped in 0.3.2 and covered by tests or by the release workflow.
 | Clipboard | Copy and paste use an in-memory patch inside the editor | Not the system clipboard. See [OX-P1](#ox-p1) |
 | GIF import | Every frame becomes a cel on one layer named Imported | Source layers are not in the GIF. This matches [docs/FORMAT.md](FORMAT.md) |
 | File dialogs | Windows system dialog. Linux XDG portal, then the path field | No macOS build |
-| Linux packages | The release archive is built and uploaded | `.deb`, RPM, AppImage, and Flatpak are only described in [LINUX-PACKAGING.md](LINUX-PACKAGING.md). See [OX-P2](#ox-p2) |
+| Linux packages | The release archive and a `.deb` (desktop entry, 32×32 icon, `.oxypix` mime type) are built and uploaded. See [OX-P2](#ox-p2) | RPM, AppImage, and Flatpak are only described in [LINUX-PACKAGING.md](LINUX-PACKAGING.md) |
 | Code signing | `docs/BUILD-WINDOWS.md` tells a human how to run `signtool` | No certificate in the repo or in CI. See [OX-H1](#ox-h1) |
 | GUI checks | Canvas math, shortcuts, and the CLI have tests | Nothing clicks the window. See [OX-P3](#ox-p3) |
 
@@ -99,7 +99,9 @@ Not scheduled. Start one only if a human asks.
 
 ### OX-P2
 
-**A `.deb` as written in LINUX-PACKAGING.md.** `cargo-deb` and `nfpm` are not configured. The release artifact remains the tar.gz until this is chosen.
+**A `.deb` as written in LINUX-PACKAGING.md.** Status: done. Area: `scripts/package-deb.sh`, `.github/workflows/release.yml`, `crates/oxypixel/src/update.rs`.
+
+`cargo-deb` 3.8.0 packs the release binary (`cargo deb --no-build`). Tagged releases upload `oxypixel-<version>-linux-x86_64.deb` beside the tar.gz and list it in `SHA256SUMS.txt`. The package installs `/usr/bin/oxypixel`, `docs/linux/oxypixel.desktop`, a 32×32 icon exported from `installer/oxypixel.ico`, and an `application/x-oxypix` mime file. Depends includes `libgl1`, `libx11-6`, `libxkbcommon0`, `libxkbcommon-x11-0`, and `libxcb1`, plus the libraries the binary links. `libxkbcommon-x11-0` is required: without it the window panics while loading `libxkbcommon-x11.so.0`. `PackageKind::LinuxDeb` is that asset when the running program is `/usr/bin/oxypixel`. `LinuxArchive` stays `oxypixel-<version>-linux-x86_64.tar.gz`, so the extra release file does not change the portable update. The names `oxypixel-0.3.2-windows-x86_64.exe`, `OxyPixel-0.3.2-Setup.exe`, and `oxypixel-0.3.2-linux-x86_64.tar.gz` are unchanged. RPM, AppImage, and Flatpak are still only described. The release workflow was not dispatched.
 
 ### OX-P3
 

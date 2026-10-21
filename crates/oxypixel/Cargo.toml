@@ -39,3 +39,22 @@ oxypixel-core = { path = "../oxypixel-core" }
 
 [lints.rust]
 unsafe_code = "forbid"
+
+# cargo-deb packs the release binary. `$auto` records libraries the dynamic
+# linker needs. libGL, libX11, libxkbcommon, libxkbcommon-x11, and libxcb are
+# dlopened, so they are named beside `$auto`. Paths other than target/release
+# are relative to this crate. See docs/LINUX-PACKAGING.md.
+[package.metadata.deb]
+maintainer = "OxyPixel contributors"
+copyright = "2026 OxyPixel contributors"
+section = "graphics"
+priority = "optional"
+depends = "$auto, libgl1, libx11-6, libxkbcommon0, libxcb1, libxkbcommon-x11-0"
+extended-description = "Draw on a pixel canvas, stack layers, animate frames, and import or export PNG, BMP, and GIF."
+assets = [
+    ["target/release/oxypixel", "usr/bin/", "755"],
+    ["../../docs/linux/oxypixel.desktop", "usr/share/applications/oxypixel.desktop", "644"],
+    ["../../docs/linux/oxypixel.png", "usr/share/icons/hicolor/32x32/apps/oxypixel.png", "644"],
+    ["../../docs/linux/oxypixel-mime.xml", "usr/share/mime/packages/oxypixel.xml", "644"],
+    ["../../LICENSE", "usr/share/doc/oxypixel/copyright", "644"],
+]
