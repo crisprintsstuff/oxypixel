@@ -41,11 +41,18 @@ pub enum Relation {
     Ahead,
 }
 
+/// Which release file Check for updates downloads.
+///
+/// Lookup uses the full asset name. The Linux `.deb` is its own kind, so a
+/// release that also publishes `oxypixel-<version>-linux-x86_64.deb` is not
+/// treated as the portable tar.gz.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PackageKind {
     WindowsPortable,
     WindowsInstaller,
     LinuxArchive,
+    /// The `.deb` copy installed at `/usr/bin/oxypixel`.
+    LinuxDeb,
 }
 
 impl PackageKind {
@@ -57,6 +64,18 @@ impl PackageKind {
                 Self::WindowsPortable
             }
         } else {
+            match std::env::current_exe() {
+                Ok(path) => Self::for_linux_exe(&path),
+                Err(_) => Self::LinuxArchive,
+            }
+        }
+    }
+
+    /// `/usr/bin/oxypixel` is the `.deb`. Any other path is the portable archive.
+    fn for_linux_exe(path: &Path) -> Self {
+        if is_deb_install(path) {
+            Self::LinuxDeb
+        } else {
             Self::LinuxArchive
         }
     }
@@ -66,8 +85,29 @@ impl PackageKind {
             Self::WindowsPortable => format!("oxypixel-{version}-windows-x86_64.exe"),
             Self::WindowsInstaller => format!("OxyPixel-{version}-Setup.exe"),
             Self::LinuxArchive => format!("oxypixel-{version}-linux-x86_64.tar.gz"),
+            Self::LinuxDeb => format!("oxypixel-{version}-linux-x86_64.deb"),
         }
     }
+}
+
+fn is_deb_install(path: &Path) -> bool {
+    let packaged = Path::new("/usr/bin/oxypixel");
+    if path == packaged {
+        return true;
+    }
+    match path.canonicalize() {
+        Ok(canonical) => canonical == packaged,
+        Err(_) => false,
+    }
+}
+
+fn asset_for(release: &ReleaseInfo, kind: PackageKind) -> Option<ReleaseAsset> {
+    let name = kind.asset_name(release.version);
+    release
+        .assets
+        .iter()
+        .find(|asset| asset.name == name)
+        .cloned()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -180,11 +220,7 @@ pub fn parse_release(json: &str) -> Result<ReleaseInfo, String> {
 pub fn report_from_release(release: ReleaseInfo) -> UpdateReport {
     let current = Version::current();
     let package = PackageKind::for_current_process();
-    let asset = release
-        .assets
-        .iter()
-        .find(|asset| asset.name == package.asset_name(release.version))
-        .cloned();
+    let asset = asset_for(&release, package);
     let checksums = release
         .assets
         .iter()
@@ -537,6 +573,7 @@ mod tests {
             PackageKind::WindowsPortable => "oxypixel-0.2.1-windows-x86_64.exe",
             PackageKind::WindowsInstaller => "OxyPixel-0.2.1-Setup.exe",
             PackageKind::LinuxArchive => "oxypixel-0.2.1-linux-x86_64.tar.gz",
+            PackageKind::LinuxDeb => "oxypixel-0.2.1-linux-x86_64.deb",
         };
         assert_eq!(report.asset.unwrap().name, expected);
     }
@@ -633,5 +670,99 @@ mod tests {
             encoder.finish().unwrap();
         }
         assert_eq!(linux_binary_from_archive(&gz).unwrap(), raw);
+    }
+
+    #[test]
+    fn deb_asset_does_not_replace_the_linux_archive() {
+        let version = Version {
+            major: 0,
+            minor: 3,
+            patch: 2,
+        };
+        assert_eq!(
+            PackageKind::WindowsPortable.asset_name(version),
+            "oxypixel-0.3.2-windows-x86_64.exe"
+        );
+        assert_eq!(
+            PackageKind::WindowsInstaller.asset_name(version),
+            "OxyPixel-0.3.2-Setup.exe"
+        );
+        assert_eq!(
+            PackageKind::LinuxArchive.asset_name(version),
+            "oxypixel-0.3.2-linux-x86_64.tar.gz"
+        );
+        assert_eq!(
+            PackageKind::LinuxDeb.asset_name(version),
+            "oxypixel-0.3.2-linux-x86_64.deb"
+        );
+
+        let sums = "\
+            aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  oxypixel-0.3.2-windows-x86_64.exe\n\
+            bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  OxyPixel-0.3.2-Setup.exe\n\
+            dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd  oxypixel-0.3.2-linux-x86_64.deb\n\
+            cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc  oxypixel-0.3.2-linux-x86_64.tar.gz\n";
+        assert_eq!(
+            expected_hash(sums, &PackageKind::LinuxArchive.asset_name(version)).as_deref(),
+            Some("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+        );
+        assert_eq!(
+            expected_hash(sums, &PackageKind::LinuxDeb.asset_name(version)).as_deref(),
+            Some("dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+        );
+        assert_eq!(
+            expected_hash(sums, &PackageKind::WindowsPortable.asset_name(version)).as_deref(),
+            Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        );
+        assert_eq!(
+            expected_hash(sums, &PackageKind::WindowsInstaller.asset_name(version)).as_deref(),
+            Some("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+        );
+
+        let release = parse_release(
+            r#"{
+              "tag_name": "v0.3.2",
+              "html_url": "https://github.com/crisprintsstuff/oxypixel/releases/tag/v0.3.2",
+              "body": "Adds a deb.",
+              "assets": [
+                {
+                  "name": "oxypixel-0.3.2-linux-x86_64.deb",
+                  "browser_download_url": "https://github.com/crisprintsstuff/oxypixel/releases/download/v0.3.2/oxypixel-0.3.2-linux-x86_64.deb",
+                  "size": 14
+                },
+                {
+                  "name": "oxypixel-0.3.2-linux-x86_64.tar.gz",
+                  "browser_download_url": "https://github.com/crisprintsstuff/oxypixel/releases/download/v0.3.2/oxypixel-0.3.2-linux-x86_64.tar.gz",
+                  "size": 12
+                },
+                {
+                  "name": "SHA256SUMS.txt",
+                  "browser_download_url": "https://github.com/crisprintsstuff/oxypixel/releases/download/v0.3.2/SHA256SUMS.txt",
+                  "size": 13
+                }
+              ]
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            asset_for(&release, PackageKind::LinuxArchive).unwrap().name,
+            "oxypixel-0.3.2-linux-x86_64.tar.gz"
+        );
+        assert_eq!(
+            asset_for(&release, PackageKind::LinuxDeb).unwrap().name,
+            "oxypixel-0.3.2-linux-x86_64.deb"
+        );
+        assert!(release
+            .assets
+            .iter()
+            .any(|asset| asset.name == "SHA256SUMS.txt"));
+
+        assert_eq!(
+            PackageKind::for_linux_exe(Path::new("/usr/bin/oxypixel")),
+            PackageKind::LinuxDeb
+        );
+        assert_eq!(
+            PackageKind::for_linux_exe(Path::new("/home/me/oxypixel-0.3.2-linux-x86_64/oxypixel")),
+            PackageKind::LinuxArchive
+        );
     }
 }

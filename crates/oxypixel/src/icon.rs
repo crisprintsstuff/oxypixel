@@ -18,4 +18,15 @@ mod tests {
         let rgba = include_bytes!("../assets/icon32.rgba");
         assert_eq!(rgba.len(), 32 * 32 * 4);
     }
+
+    #[test]
+    fn hicolor_png_matches_runtime_icon() {
+        let rgba = include_bytes!("../assets/icon32.rgba");
+        let png = include_bytes!("../../../docs/linux/oxypixel.png");
+        let image = image::load_from_memory(png)
+            .expect("hicolor icon is a png")
+            .to_rgba8();
+        assert_eq!(image.dimensions(), (32, 32));
+        assert_eq!(image.as_raw().as_slice(), rgba.as_slice());
+    }
 }

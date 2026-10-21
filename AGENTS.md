@@ -23,7 +23,7 @@ OxyPixel is not a Photoshop-style command shell. There is no command registry, c
 crates/oxypixel-core     document, tools, history, import/export. No GUI.
 crates/oxypixel          egui window, shortcuts, recent files, update check, CLI
 installer/               NSIS script and wizard art
-scripts/                 Windows cross-build, installer, Linux tar.gz
+scripts/                 Windows cross-build, installer, Linux tar.gz and .deb
 .github/workflows/       CI (ci.yml) and release (release.yml)
 ```
 
@@ -45,13 +45,7 @@ Both crates set `unsafe_code = "forbid"`.
 
 **Every bug fix gets a regression test.** Prefer `oxypixel-core` unit tests for editing and file behavior. CLI failures belong in `crates/oxypixel/tests/cli.rs`. The missing-file export test must keep a deadline and kill a hung process.
 
-**Windows and Linux both matter.** CI runs `ubuntu-latest` and `windows-latest`. A change that is `#[cfg(windows)]` is invisible to Linux clippy. When the diff touches `cfg(windows)`, `cfg!(windows)`, or a Windows-only module, also run:
-
-```bash
-cargo clippy --workspace --all-targets --target x86_64-pc-windows-gnu -- -D warnings
-```
-
-That needs a MinGW cross compiler on Linux (`x86_64-w64-mingw32-gcc`). The MSVC target is what CI and the release build use. `cargo test` on Linux does not execute the Windows-only branches.
+**Windows and Linux both matter.** CI runs `ubuntu-latest` and `windows-latest`. A change that is `#[cfg(windows)]` is invisible to Linux clippy. When the diff touches `cfg(windows)`, `cfg!(windows)`, or a Windows-only module, run `make check-windows` before pushing. That runs `cargo clippy --workspace --all-targets --target x86_64-pc-windows-gnu -- -D warnings`. It needs the MinGW compiler `x86_64-w64-mingw32-gcc` (Debian/Ubuntu: `gcc-mingw-w64-x86-64`) and `rustup target add x86_64-pc-windows-gnu`. If either is missing, the target prints the install command and exits 1. The MSVC target is what the Windows CI job and the release build use. `cargo test` on Linux does not execute the Windows-only branches. The Ubuntu CI job runs `make check-windows` as well.
 
 **Clean-room.** Do not copy code, artwork, palettes, icons, or wording from Pixelorama, Aseprite, or other editors. Behavior ideas such as a pencil or a layer stack are fine. Implementations are written in this repository.
 
@@ -74,7 +68,7 @@ That needs a MinGW cross compiler on Linux (`x86_64-w64-mingw32-gcc`). The MSVC 
    cargo test --workspace
    ```
 
-   `make check` is the same three commands. Add the Windows-target clippy command above when the change is Windows-only.
+   `make check` is the same three commands. When the change touches Windows-only code, also run `make check-windows`.
 5. **UI.** If the change is visible, run `cargo run -p oxypixel` on a display and exercise the control. Say what you clicked. If no display is available, say that and rely on the core or CLI test. There is no screenshot harness in this repo yet.
 6. **Record.** Update the task row in [docs/ROADMAP.md](docs/ROADMAP.md) and any user-facing doc the behavior changed (`README.md`, `docs/SHORTCUTS.md`, `docs/FORMAT.md`, `CHANGELOG.md` only when cutting a release).
 7. **Commit.** The message names the task id, for example `OX-001: run CI once per pull request`.
