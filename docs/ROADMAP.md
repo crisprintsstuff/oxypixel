@@ -43,7 +43,7 @@ Shipped in 0.3.2 and covered by tests or by the release workflow.
 
 | Area | What is true now | Gap |
 | --- | --- | --- |
-| Clipboard | Copy and paste use an in-memory patch inside the editor | Not the system clipboard. See [OX-P1](#ox-p1) |
+| Clipboard | Copy publishes a straight-alpha image and keeps the in-memory patch. Paste uses a system image when one is present | A Wayland session with neither the data-control protocol nor X11 has no system clipboard. On Linux the image is served while OxyPixel is open. See [OX-P1](#ox-p1) |
 | GIF import | Every frame becomes a cel on one layer named Imported | Source layers are not in the GIF. This matches [docs/FORMAT.md](FORMAT.md) |
 | File dialogs | Windows system dialog. Linux XDG portal, then the path field | No macOS build |
 | Linux packages | The release archive is built and uploaded | `.deb`, RPM, AppImage, and Flatpak are only described in [LINUX-PACKAGING.md](LINUX-PACKAGING.md). See [OX-P2](#ox-p2) |
@@ -98,7 +98,11 @@ Not scheduled. Start one only if a human asks.
 
 ### OX-P1
 
-**System clipboard for the selection.** The editor clipboard is a private pixel patch so paste works with no OS clipboard crate. A follow-up could copy that patch to the system clipboard and still round-trip inside `oxypixel-core` without one.
+**System clipboard for the selection.** Status: done.
+
+Copy stores the selection in the in-memory patch and publishes that patch as a straight-alpha image when the OS clipboard answers. Paste loads a system image into the patch and paints it on the active cel. A missing clipboard, a clipboard with no image, or a call that does not answer in time pastes the patch already in memory. A rejected image leaves the previous patch in place. `oxypixel-core` does not depend on a clipboard crate. The window uses `arboard`.
+
+Windows writes a PNG clipboard format and a 32-bit DIB, so a program that reads PNG keeps transparency. Linux writes `image/png` on X11, and on Wayland when the compositor offers the data-control protocol. If that Wayland setup fails and `DISPLAY` is set, the X11 clipboard is used. No display and no usable Wayland clipboard does not block and does not panic. The Linux image stays available to other programs while OxyPixel is open; after quit it remains only if a clipboard manager saved it.
 
 ### OX-P2
 

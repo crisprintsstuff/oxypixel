@@ -26,8 +26,8 @@ Letter shortcuts are ignored while a text field is focused. Escape leaves the te
 | Ctrl+D | Deselect |
 | Esc | Stop playback, cancel a shape preview, or deselect |
 | Delete, Backspace | Clear pixels in the selection |
-| Ctrl+C | Copy the selection |
-| Ctrl+V | Paste the selection on the active frame |
+| Ctrl+C | Copy the selection to the system clipboard and the in-memory patch |
+| Ctrl+V | Paste a system image on the active frame, or the in-memory patch when the clipboard has no image |
 | Arrow keys | Nudge the selection by one pixel |
 | Ctrl+Plus, Ctrl+Minus | Zoom |
 | Ctrl+0 | Fit the canvas |

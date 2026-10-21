@@ -110,7 +110,7 @@ pub const BINDINGS: &[Binding] = &[
     },
     Binding {
         keys: "Ctrl+C / Ctrl+V",
-        action: "Copy or paste the selection",
+        action: "Copy or paste the selection image",
     },
     Binding {
         keys: "Arrow keys",

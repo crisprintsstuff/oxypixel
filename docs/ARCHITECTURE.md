@@ -19,7 +19,7 @@ Undo stores a clone of the document and the selection rectangle, capped at 50 st
 
 Geometry (line, rectangle, ellipse, flood fill, brush stamps) is pure and tested in `draw.rs`. The editor clamps pointer coordinates to a margin around the canvas before generating a shape, so a drag from `i32::MIN` cannot allocate a huge point list.
 
-Shape tools preview until pointer release, then commit one undo step. Pencil commits during the drag as a single undo step. A selection, when present, clips stamps and flood fill. Dragging inside the selection moves those pixels on the active cel, and arrow keys nudge them. Copy and paste use an in-memory clipboard, not the system clipboard. No selection means the whole canvas is editable. Mirror stamps the same point across the canvas center.
+Shape tools preview until pointer release, then commit one undo step. Pencil commits during the drag as a single undo step. A selection, when present, clips stamps and flood fill. Dragging inside the selection moves those pixels on the active cel, and arrow keys nudge them. Copy stores the selection in an in-memory patch and publishes it as a straight-alpha image on the system clipboard. Paste uses that image when the clipboard has one. When the clipboard is missing, holds no image, or does not answer in time, paste uses the in-memory patch. Image conversion lives in `oxypixel-core`. The window publishes and reads the system clipboard, and it keeps the patch when that call fails. No selection means the whole canvas is editable. Mirror stamps the same point across the canvas center.
 
 ## Files
 

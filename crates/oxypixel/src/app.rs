@@ -6,11 +6,12 @@ use std::sync::mpsc::{self, Receiver};
 use eframe::egui::{self, Color32, RichText, ViewportCommand};
 use oxypixel_core::{
     advance, decode_first_rgba, export_bmp, export_gif, export_png_scaled,
-    export_spritesheet_scaled, fit_into, import_image, load_oxypix, save_oxypix, Editor, Fit, Rgba,
-    Tool,
+    export_spritesheet_scaled, fit_into, import_image, load_oxypix, save_oxypix, Editor, Error,
+    Fit, Rgba, Tool, MAX_DIMENSION,
 };
 
 use crate::canvas::{self, ViewState};
+use crate::clipboard::{self, ClipboardRead};
 use crate::native;
 use crate::recent;
 use crate::shortcuts::{self, Command};
@@ -96,6 +97,9 @@ pub struct OxyApp {
     update_report: Option<UpdateReport>,
     update_file: Option<PathBuf>,
     update_rx: Option<Receiver<UpdateMessage>>,
+    /// The last copy did not reach the system clipboard, so paste must keep
+    /// the in-memory patch even if an older system image is still readable.
+    clipboard_local_only: bool,
 }
 
 enum UpdateMessage {
@@ -146,6 +150,7 @@ impl OxyApp {
             update_report: None,
             update_file: None,
             update_rx: None,
+            clipboard_local_only: false,
         };
         app.hex = app.editor.primary().to_hex();
         if let Some(path) = open {
@@ -174,6 +179,52 @@ impl OxyApp {
 
     fn note_err(&mut self, err: impl std::fmt::Display) {
         self.note = Some(Note::Error(err.to_string()));
+    }
+
+    fn copy_selection(&mut self) {
+        if !self.editor.copy_selection() {
+            self.note_err("Nothing is selected.");
+            return;
+        }
+        match self.editor.clipboard_rgba() {
+            Ok((width, height, rgba)) => {
+                self.clipboard_local_only = !clipboard::publish_image(width, height, rgba);
+                if self.clipboard_local_only {
+                    self.note_ok("Copied in OxyPixel only.");
+                }
+            }
+            Err(err) => {
+                self.clipboard_local_only = true;
+                self.note_err(err);
+            }
+        }
+    }
+
+    fn paste_selection(&mut self) {
+        if !self.clipboard_local_only {
+            match clipboard::read_image() {
+                ClipboardRead::Image {
+                    width,
+                    height,
+                    rgba,
+                } => {
+                    if let Err(err) = self.editor.set_clipboard_rgba(width, height, &rgba) {
+                        self.note_err(err);
+                        return;
+                    }
+                }
+                ClipboardRead::Oversize { width, height } => {
+                    self.note_err(Error::Dimensions {
+                        width,
+                        height,
+                        max: MAX_DIMENSION,
+                    });
+                    return;
+                }
+                ClipboardRead::Empty => {}
+            }
+        }
+        self.apply(|editor| editor.paste_clipboard());
     }
 
     fn apply<T>(
@@ -365,14 +416,8 @@ impl OxyApp {
             Command::DeleteSelection => {
                 self.apply(|editor| editor.clear_selection_pixels());
             }
-            Command::Copy => {
-                if !self.editor.copy_selection() {
-                    self.note_err("Nothing is selected.");
-                }
-            }
-            Command::Paste => {
-                self.apply(|editor| editor.paste_clipboard());
-            }
+            Command::Copy => self.copy_selection(),
+            Command::Paste => self.paste_selection(),
             Command::Nudge(dx, dy) => {
                 if self.editor.selection().is_some() {
                     self.apply(|editor| editor.nudge_selection(dx, dy));
@@ -937,13 +982,11 @@ impl OxyApp {
                         ui.close_menu();
                     }
                     if menu_item(ui, "Copy", "Ctrl+C") {
-                        if !self.editor.copy_selection() {
-                            self.note_err("Nothing is selected.");
-                        }
+                        self.copy_selection();
                         ui.close_menu();
                     }
                     if menu_item(ui, "Paste", "Ctrl+V") {
-                        self.apply(|editor| editor.paste_clipboard());
+                        self.paste_selection();
                         ui.close_menu();
                     }
                     ui.separator();

@@ -10,3 +10,4 @@ pub use raster::{
     export_spritesheet_bytes, export_spritesheet_scaled, fit_into, import_image,
     import_image_bytes, Fit,
 };
+pub(crate) use raster::{decode_png_rgba, encode_rgba_png};

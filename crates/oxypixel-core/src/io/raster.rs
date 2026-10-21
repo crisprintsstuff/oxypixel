@@ -350,6 +350,25 @@ fn guess(bytes: &[u8]) -> Result<ImageFormat> {
     image::guess_format(bytes).map_err(|_| Error::UnsupportedFormat)
 }
 
+pub(crate) fn encode_rgba_png(width: u32, height: u32, pixels: &[Rgba]) -> Result<Vec<u8>> {
+    check_canvas(width, height)?;
+    let count = (width as usize)
+        .checked_mul(height as usize)
+        .ok_or(Error::Truncated)?;
+    if pixels.len() != count {
+        return Err(Error::Truncated);
+    }
+    encode_still(&pack(pixels), width, height, ImageFormat::Png)
+}
+
+pub(crate) fn decode_png_rgba(bytes: &[u8]) -> Result<(u32, u32, Vec<Rgba>)> {
+    check_len(bytes)?;
+    if guess(bytes)? != ImageFormat::Png {
+        return Err(Error::UnsupportedFormat);
+    }
+    decode_still(bytes)
+}
+
 fn check_len(bytes: &[u8]) -> Result<()> {
     if bytes.len() as u64 > MAX_FILE_BYTES {
         return Err(Error::Limit {
