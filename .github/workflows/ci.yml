@@ -1,12 +1,68 @@
 name: CI
 
+# A pull-request branch used to start this workflow twice, once for `push`
+# and once for `pull_request`. Windows minutes count double, so `push` is
+# limited to `main`. Pull requests use `pull_request` only. Tag pushes are
+# not listed here: `.github/workflows/release.yml` already tests and
+# packages on `v*` tags and on workflow_dispatch.
+#
+# A newer push on the same ref cancels the run it replaces. Pull requests
+# use the head branch name, so they do not cancel a `main` run.
+#
+# Docs-only changes (`*.md` and `docs/**`) skip the test matrix with a job
+# `if`, not with `paths-ignore`. A workflow that path filters skip never
+# reports its checks, and a required check then stays pending. A job skipped
+# by `if` reports success, so the pull request is not blocked.
 on:
   push:
+    branches: [main]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: filter
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          # Missing history, a new repository, or an empty diff still runs
+          # the suite. Skipping those would hide a bad base.
+          code=true
+          if [ -n "${BASE_SHA}" ] && [ "${BASE_SHA}" != "0000000000000000000000000000000000000000" ] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            code=false
+            saw_file=false
+            while IFS= read -r path; do
+              [ -z "${path}" ] && continue
+              saw_file=true
+              case "${path}" in
+                docs/*|*.md) ;;
+                *) code=true ;;
+              esac
+            done < <(git diff --name-only "${BASE_SHA}" HEAD)
+            if [ "${saw_file}" = false ]; then
+              code=true
+            fi
+          fi
+          echo "code=${code}" >> "${GITHUB_OUTPUT}"
+          echo "Run the test matrix: ${code}"
+
   test:
     name: ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ${{ matrix.os }}
     # Ubuntu finishes in about 5 minutes. Windows clippy was ~80s and the
     # release compile is a separate profile, so a healthy Windows run is
