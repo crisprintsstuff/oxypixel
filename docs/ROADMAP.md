@@ -16,7 +16,7 @@ OX-002, OX-011, and OX-012 are done, so this list is empty.
 
 ### Done
 
-Shipped in 0.3.2 and covered by tests or by the release workflow.
+In this tree and covered by tests or by the release workflow. The latest release tag is 0.3.2.
 
 | Area | What exists | Where |
 | --- | --- | --- |
@@ -28,7 +28,8 @@ Shipped in 0.3.2 and covered by tests or by the release workflow.
 | Undo | Up to 50 steps and 256 MiB, including the selection rectangle. Slider drags coalesce | `history.rs` |
 | `.oxypix` | Version 1, little-endian, caps before allocation, trailing bytes rejected | `io/oxypix.rs`, `docs/FORMAT.md` |
 | Raster | PNG, BMP, and GIF import and export. GIF import is one composited layer. Spritesheet and 2×/4× nearest PNG | `io/raster.rs` |
-| CLI | `export-png`, `export-bmp`, `export-gif`, `export-sheet`. Failures print and exit. Missing file must not hang | `cli.rs`, `tests/cli.rs` |
+| CLI | `export-png`, `export-bmp`, `export-gif`, `export-sheet`, `export-palette`, and `import-palette`. Failures print and exit. Missing file must not hang | `cli.rs`, `tests/cli.rs` |
+| Palette files | GIMP `.gpl`, hex `.hex` (one `RRGGBB` per line, `RRGGBBAA` when alpha is not 255), and JASC `.pal`. Import replaces the palette and is one undo step. More than 256 colors is an error | `io/palette.rs`, `editor.rs`, `app.rs` |
 | Window | egui 0.31 glow, nearest-neighbor canvas, grid, zoom, pan, shortcuts, in-code tool icons | `app.rs`, `canvas.rs` |
 | Files UI | Recent list, drag and drop, Windows file dialog, Linux portal with a path field fallback | `recent.rs`, `native.rs` |
 | Updates | Help, then Check for updates. Download only after `SHA256SUMS.txt` matches. No network until that command | `update.rs` |
@@ -115,6 +116,20 @@ OXYPIXEL_UPDATE_DEMO_GOLDEN=1 cargo test -p oxypixel-core --test demo_composite 
 ```
 
 Review the PNG diff, run the test again without the variable, and commit `crates/oxypixel-core/tests/golden/`. CI leaves the variable unset. If it is set there, the test fails instead of rewriting the golden.
+
+### OX-P4
+
+**Palette import and export.** Status: done.
+
+The document palette can be replaced from a file and written back out. GIMP `.gpl`, Lospec-style `.hex` (one `RRGGBB` per line, or `RRGGBBAA` when the color has alpha), and JASC `.pal` are parsed in `oxypixel-core`. A `.txt` file is the same hex list. Comments and blank lines are skipped. A file with no colors, a bad line, or more than 256 colors returns an error and does not change the document. Import is one undo step. The palette panel and the File menu use the same path dialog as other files. `export-palette` and `import-palette` print failures and exit. They do not open a window or a modal dialog.
+
+### OX-P5
+
+**A crash and error log in the app data directory.** Panics and errors are only printed today. A later task could append them to a log under the same directory recent files already use. Headless failures would stay on stderr, with no dialog.
+
+### OX-P6
+
+**A Windows launch smoke test in CI.** The Windows job builds the app but never starts it. A later task could launch that build, confirm the process starts, and close it without a modal dialog. It should not add a control socket.
 
 ## Human only
 

@@ -35,6 +35,8 @@ pub enum Error {
     EmptyPalette,
     #[error("the palette already has {0} colors")]
     PaletteFull(usize),
+    #[error("{0}")]
+    BadPalette(String),
     #[error("nothing is selected")]
     NoSelection,
     #[error("the clipboard is empty")]

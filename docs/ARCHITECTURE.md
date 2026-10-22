@@ -23,7 +23,7 @@ Shape tools preview until pointer release, then commit one undo step. Pencil com
 
 ## Files
 
-`.oxypix` is a little-endian versioned blob. Version 1 is described in [FORMAT.md](FORMAT.md). Raster IO uses the `image` crate. GIF import uses that crate's composited frames. GIF export loops forever.
+`.oxypix` is a little-endian versioned blob. Version 1 is described in [FORMAT.md](FORMAT.md). Raster IO uses the `image` crate. GIF import uses that crate's composited frames. GIF export loops forever. Palette files are text, parsed in `io/palette.rs`: GIMP `.gpl`, a hex list (`.hex`), and JASC `.pal`. Import replaces the document palette and is one undo step.
 
 ## GUI
 

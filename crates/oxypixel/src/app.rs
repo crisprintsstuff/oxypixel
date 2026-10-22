@@ -5,9 +5,9 @@ use std::sync::mpsc::{self, Receiver};
 
 use eframe::egui::{self, Color32, RichText, ViewportCommand};
 use oxypixel_core::{
-    advance, decode_first_rgba, export_bmp, export_gif, export_png_scaled,
-    export_spritesheet_scaled, fit_into, import_image, load_oxypix, save_oxypix, Editor, Error,
-    Fit, Rgba, Tool, MAX_DIMENSION,
+    advance, decode_first_rgba, export_bmp, export_gif, export_palette, export_png_scaled,
+    export_spritesheet_scaled, fit_into, import_image, import_palette, load_oxypix, save_oxypix,
+    Editor, Error, Fit, PaletteFormat, Rgba, Tool, MAX_DIMENSION,
 };
 
 use crate::canvas::{self, ViewState};
@@ -53,6 +53,8 @@ enum PathKind {
     ExportBmp,
     ExportGif,
     ExportSheet,
+    ImportPalette,
+    ExportPalette,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -82,6 +84,7 @@ pub struct OxyApp {
     canvas_x: String,
     canvas_y: String,
     export_scale: u32,
+    palette_format: PaletteFormat,
     recent: Vec<PathBuf>,
     last_dir: Option<PathBuf>,
     pending_path: Option<PathBuf>,
@@ -137,6 +140,7 @@ impl OxyApp {
             canvas_x: "0".to_string(),
             canvas_y: "0".to_string(),
             export_scale: 1,
+            palette_format: PaletteFormat::Gpl,
             recent: recent_files,
             last_dir,
             pending_path: None,
@@ -615,7 +619,10 @@ impl OxyApp {
 
     fn suggest_path(&self, kind: PathKind) -> String {
         let name = match kind {
-            PathKind::Open | PathKind::ImportDocument | PathKind::ImportLayer => String::new(),
+            PathKind::Open
+            | PathKind::ImportDocument
+            | PathKind::ImportLayer
+            | PathKind::ImportPalette => String::new(),
             PathKind::Save => self
                 .save_path
                 .as_ref()
@@ -625,6 +632,7 @@ impl OxyApp {
             PathKind::ExportBmp => "frame.bmp".to_string(),
             PathKind::ExportGif => "animation.gif".to_string(),
             PathKind::ExportSheet => "sheet.png".to_string(),
+            PathKind::ExportPalette => format!("palette.{}", self.palette_format.extension()),
         };
         if let Some(parent) = self.save_path.as_ref().and_then(|p| p.parent()) {
             if !name.is_empty() && kind != PathKind::Save {
@@ -654,6 +662,8 @@ impl OxyApp {
             PathKind::ExportBmp => self.export_frame(&path, export_bmp),
             PathKind::ExportGif => self.export_doc(&path, export_gif),
             PathKind::ExportSheet => self.export_scaled(&path, false),
+            PathKind::ImportPalette => self.import_palette_file(&path),
+            PathKind::ExportPalette => self.export_palette_file(path),
         };
         if ok {
             self.dialog = None;
@@ -806,6 +816,54 @@ impl OxyApp {
         }
     }
 
+    fn import_palette_file(&mut self, path: &Path) -> bool {
+        match import_palette(path) {
+            Ok(colors) => {
+                let count = colors.len();
+                if self.apply(|editor| editor.set_palette(colors)).is_none() {
+                    return false;
+                }
+                let len = self.editor.document().palette().len();
+                self.swatch = self.swatch.min(len.saturating_sub(1));
+                self.note_dir(path);
+                self.note_ok(format!(
+                    "Imported {count} palette colors from {}.",
+                    path.display()
+                ));
+                true
+            }
+            Err(err) => {
+                self.dialog_error = Some(err.to_string());
+                false
+            }
+        }
+    }
+
+    fn export_palette_file(&mut self, mut path: PathBuf) -> bool {
+        let ext = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if ext.is_empty() {
+            path.set_extension(self.palette_format.extension());
+        } else if PaletteFormat::from_extension(&ext).is_none() {
+            self.dialog_error = Some("Use a .gpl, .hex, .txt, or .pal file name.".to_string());
+            return false;
+        }
+        match export_palette(self.editor.document().palette(), &path) {
+            Ok(()) => {
+                self.note_dir(&path);
+                self.note_ok(format!("Exported {}.", path.display()));
+                true
+            }
+            Err(err) => {
+                self.dialog_error = Some(err.to_string());
+                false
+            }
+        }
+    }
+
     fn apply_canvas_size(&mut self) {
         let width = match parse_u32(&self.canvas_w, "Width") {
             Ok(value) => value,
@@ -947,6 +1005,14 @@ impl OxyApp {
                     }
                     if menu_item(ui, "Export spritesheet…", "") {
                         self.open_path_dialog(PathKind::ExportSheet);
+                        ui.close_menu();
+                    }
+                    if menu_item(ui, "Import palette…", "") {
+                        self.open_path_dialog(PathKind::ImportPalette);
+                        ui.close_menu();
+                    }
+                    if menu_item(ui, "Export palette…", "") {
+                        self.open_path_dialog(PathKind::ExportPalette);
                         ui.close_menu();
                     }
                     ui.separator();
@@ -1280,7 +1346,7 @@ impl OxyApp {
                 ui.label(
                     egui::RichText::new("Right-click a swatch to set the second color.").small(),
                 );
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     if ui.button("Add").clicked() {
                         let color = self.editor.primary();
                         self.apply(|editor| editor.add_palette_color(color));
@@ -1291,6 +1357,22 @@ impl OxyApp {
                         self.swatch = self
                             .swatch
                             .min(self.editor.document().palette().len().saturating_sub(1));
+                    }
+                    if ui
+                        .button("Import")
+                        .on_hover_text(
+                            "Replace the palette from a GIMP .gpl, hex .hex, or JASC .pal file.",
+                        )
+                        .clicked()
+                    {
+                        self.open_path_dialog(PathKind::ImportPalette);
+                    }
+                    if ui
+                        .button("Export")
+                        .on_hover_text("Save the palette as GIMP .gpl, hex .hex, or JASC .pal.")
+                        .clicked()
+                    {
+                        self.open_path_dialog(PathKind::ExportPalette);
                     }
                 });
                 ui.separator();
@@ -1827,6 +1909,8 @@ impl OxyApp {
             PathKind::ExportBmp => "Export BMP",
             PathKind::ExportGif => "Export GIF",
             PathKind::ExportSheet => "Export spritesheet",
+            PathKind::ImportPalette => "Import palette",
+            PathKind::ExportPalette => "Export palette",
         };
         let save = matches!(
             self.path_kind,
@@ -1835,6 +1919,7 @@ impl OxyApp {
                 | PathKind::ExportBmp
                 | PathKind::ExportGif
                 | PathKind::ExportSheet
+                | PathKind::ExportPalette
         );
         let mut close = false;
         let mut confirm = false;
@@ -1856,13 +1941,35 @@ impl OxyApp {
                     });
                     ui.label("Nearest neighbor. Each pixel stays a hard square.");
                 }
+                if self.path_kind == PathKind::ExportPalette {
+                    ui.horizontal(|ui| {
+                        ui.label("Format");
+                        let current = self.palette_format;
+                        for (label, format) in [
+                            ("GIMP .gpl", PaletteFormat::Gpl),
+                            ("Hex .hex", PaletteFormat::Hex),
+                            ("JASC .pal", PaletteFormat::Pal),
+                        ] {
+                            if ui
+                                .selectable_value(&mut self.palette_format, format, label)
+                                .clicked()
+                                && format != current
+                            {
+                                let next =
+                                    replace_palette_extension(&self.path_buf, format.extension());
+                                self.path_buf = next;
+                            }
+                        }
+                    });
+                    ui.label("GIMP .gpl, one RRGGBB per line in .hex, or JASC .pal.");
+                }
                 ui.horizontal(|ui| {
                     if ui.button("Browse…").clicked() {
                         browsed = native::pick_path(
                             save,
                             title,
-                            filter_name(self.path_kind),
-                            filter_ext(self.path_kind),
+                            filter_name(self.path_kind, self.palette_format),
+                            filter_ext(self.path_kind, self.palette_format),
                             self.last_dir.as_deref(),
                         );
                     }
@@ -1880,6 +1987,11 @@ impl OxyApp {
             });
         if let Some(path) = browsed {
             self.note_dir(&path);
+            if self.path_kind == PathKind::ExportPalette {
+                if let Some(format) = PaletteFormat::from_path(&path) {
+                    self.palette_format = format;
+                }
+            }
             self.path_buf = path.display().to_string();
         }
         if confirm {
@@ -2119,22 +2231,44 @@ fn parse_i32(text: &str, label: &str) -> Result<i32, String> {
         .map_err(|_| format!("{label} must be a whole number."))
 }
 
-fn filter_name(kind: PathKind) -> &'static str {
+fn filter_name(kind: PathKind, format: PaletteFormat) -> &'static str {
     match kind {
         PathKind::Open | PathKind::Save => "OxyPixel document",
         PathKind::ImportDocument | PathKind::ImportLayer => "Image",
         PathKind::ExportPng | PathKind::ExportSheet => "PNG",
         PathKind::ExportBmp => "BMP",
         PathKind::ExportGif => "GIF",
+        PathKind::ImportPalette => "Palette",
+        PathKind::ExportPalette => match format {
+            PaletteFormat::Gpl => "GIMP palette",
+            PaletteFormat::Hex => "Hex palette",
+            PaletteFormat::Pal => "JASC palette",
+        },
     }
 }
 
-fn filter_ext(kind: PathKind) -> &'static [&'static str] {
+fn filter_ext(kind: PathKind, format: PaletteFormat) -> &'static [&'static str] {
     match kind {
         PathKind::Open | PathKind::Save => &["oxypix"],
         PathKind::ImportDocument | PathKind::ImportLayer => &["png", "bmp", "gif"],
         PathKind::ExportPng | PathKind::ExportSheet => &["png"],
         PathKind::ExportBmp => &["bmp"],
         PathKind::ExportGif => &["gif"],
+        PathKind::ImportPalette => &["gpl", "hex", "pal", "txt"],
+        PathKind::ExportPalette => match format {
+            PaletteFormat::Gpl => &["gpl"],
+            PaletteFormat::Hex => &["hex"],
+            PaletteFormat::Pal => &["pal"],
+        },
     }
+}
+
+fn replace_palette_extension(path: &str, ext: &str) -> String {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return format!("palette.{ext}");
+    }
+    let mut next = PathBuf::from(trimmed);
+    next.set_extension(ext);
+    next.display().to_string()
 }

@@ -822,6 +822,11 @@ impl Editor {
         self.structural(|doc| doc.remove_palette_color(index))
     }
 
+    /// Replace the palette and record one undo step.
+    pub fn set_palette(&mut self, colors: Vec<Rgba>) -> Result<()> {
+        self.structural(|doc| doc.set_palette(colors))
+    }
+
     /// Add a layer on the active frame and copy `pixels` into it.
     /// `pixels` must already match the document size.
     pub fn insert_layer_pixels(&mut self, name: &str, pixels: &[Rgba]) -> Result<()> {
@@ -1058,6 +1063,34 @@ mod tests {
 
     fn editor() -> Editor {
         Editor::new(8, 8).unwrap()
+    }
+
+    #[test]
+    fn palette_replace_is_one_undo() {
+        let mut ed = editor();
+        let before = ed.document().palette().to_vec();
+        let colors = vec![Rgba::new(9, 8, 7, 255), Rgba::new(1, 2, 3, 128)];
+        ed.set_palette(colors.clone()).unwrap();
+        assert_eq!(ed.document().palette(), colors.as_slice());
+        assert!(ed.is_dirty());
+        assert!(ed.undo());
+        assert_eq!(ed.document().palette(), before.as_slice());
+        assert!(ed.redo());
+        assert_eq!(ed.document().palette(), colors.as_slice());
+
+        assert!(ed.set_palette(Vec::new()).is_err());
+        assert_eq!(ed.document().palette(), colors.as_slice());
+        assert!(matches!(
+            ed.set_palette(vec![Rgba::new(0, 0, 0, 255); 257]),
+            Err(Error::Limit {
+                what: "palette colors",
+                ..
+            })
+        ));
+        assert_eq!(ed.document().palette(), colors.as_slice());
+        assert!(ed.undo());
+        assert_eq!(ed.document().palette(), before.as_slice());
+        assert!(!ed.can_undo());
     }
 
     #[test]
