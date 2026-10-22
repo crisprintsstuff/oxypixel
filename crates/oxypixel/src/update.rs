@@ -601,17 +601,15 @@ mod tests {
 
     #[test]
     fn release_checksum_list_names_each_package() {
-        let version = Version {
-            major: 0,
-            minor: 3,
-            patch: 2,
-        };
+        // PackageKind::asset_name is checked against this package version.
+        // A later bump does not have to edit version strings in this test.
+        let version = Version::current();
         let portable = PackageKind::WindowsPortable.asset_name(version);
         let installer = PackageKind::WindowsInstaller.asset_name(version);
         let archive = PackageKind::LinuxArchive.asset_name(version);
-        assert_eq!(portable, "oxypixel-0.3.2-windows-x86_64.exe");
-        assert_eq!(installer, "OxyPixel-0.3.2-Setup.exe");
-        assert_eq!(archive, "oxypixel-0.3.2-linux-x86_64.tar.gz");
+        assert_eq!(portable, format!("oxypixel-{version}-windows-x86_64.exe"));
+        assert_eq!(installer, format!("OxyPixel-{version}-Setup.exe"));
+        assert_eq!(archive, format!("oxypixel-{version}-linux-x86_64.tar.gz"));
         let sums = format!(
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  {portable}\r\n\
              bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  {installer}\n\
@@ -629,7 +627,7 @@ mod tests {
             expected_hash(&sums, &archive).as_deref(),
             Some("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
         );
-        assert!(expected_hash(&sums, "dist/OxyPixel-0.3.2-Setup.exe").is_none());
+        assert!(expected_hash(&sums, &format!("dist/{installer}")).is_none());
     }
 
     #[test]
@@ -674,6 +672,8 @@ mod tests {
 
     #[test]
     fn deb_asset_does_not_replace_the_linux_archive() {
+        // Fixed v0.3.2 release payload. The names are the sample GitHub
+        // response, not Version::current().
         let version = Version {
             major: 0,
             minor: 3,
