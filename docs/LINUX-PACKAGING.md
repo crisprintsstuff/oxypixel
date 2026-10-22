@@ -1,6 +1,6 @@
 # Linux packaging
 
-Release 0.4.0 ships `oxypixel-0.4.0-linux-x86_64.tar.gz` (the x86_64 executable, `LICENSE`, and a short run note) and `oxypixel-0.4.0-linux-x86_64.deb`, built by [scripts/package-deb.sh](../scripts/package-deb.sh). The `.deb` version is the workspace package version plus Debian revision 1 (`0.4.0-1`). RPM, AppImage, and Flatpak are still only a plan.
+A tagged release ships `oxypixel-<version>-linux-x86_64.tar.gz` (the x86_64 executable, `LICENSE`, and a short run note) and `oxypixel-<version>-linux-x86_64.deb`, built by [scripts/package-deb.sh](../scripts/package-deb.sh). The `.deb` version is the workspace package version plus Debian revision 1 (`<version>-1`). RPM, AppImage, and Flatpak are still only a plan.
 
 ## Why cargo-deb
 
@@ -78,4 +78,4 @@ Wayland is not enabled. A Flatpak would still want the X11 socket, plus Wayland 
 - The package installs and removes cleanly
 - The README states the distro and the package format that were actually tested
 
-The `.deb` from this tree was built on Ubuntu 24.04. `apt install` and `apt remove` were checked. `/usr/bin/oxypixel --help` ran, and `export-png` of a missing file printed an error and exited 1. With `libxkbcommon-x11-0` installed, the editor window opened as "OxyPixel - Untitled" and was then closed. A stroke, undo, save, and export from that window were not done, so this is not yet a full "Linux supported" check. Release 0.4.0 publishes that `.deb` next to the tar.gz. Release 0.3.2 published the tar.gz only.
+The `.deb` from this tree was built on Ubuntu 24.04. `apt install` and `apt remove` were checked. `/usr/bin/oxypixel --help` ran, and `export-png` of a missing file printed an error and exited 1. With `libxkbcommon-x11-0` installed, the editor window opened as "OxyPixel - Untitled" and was then closed. A stroke, undo, save, and export from that window were not done, so this is not yet a full "Linux supported" check. Tagged releases publish that `.deb` next to the tar.gz. Earlier tags published the tar.gz only.

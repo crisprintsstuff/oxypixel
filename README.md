@@ -2,13 +2,13 @@
 
 OxyPixel is a pixel-art editor for making sprites and short animations on Windows and Linux. You draw on a pixel canvas, stack layers, and step through frames, then save an `.oxypix` document or export PNG, BMP, or GIF. The editing rules live in the `oxypixel-core` library, and the window is an [egui](https://github.com/emilk/egui) app. OxyPixel is an original program. It is not affiliated with Pixelorama, Orama Interactive, Godot, or Aseprite.
 
-**[Releases](https://github.com/crisprintsstuff/oxypixel/releases)** · **[Changelog](CHANGELOG.md)** · **[v0.4.0](https://github.com/crisprintsstuff/oxypixel/releases/tag/v0.4.0)** · **[Roadmap](docs/ROADMAP.md)**
+**[Releases](https://github.com/crisprintsstuff/oxypixel/releases)** · **[Changelog](CHANGELOG.md)** · **[Latest](https://github.com/crisprintsstuff/oxypixel/releases/latest)** · **[Roadmap](docs/ROADMAP.md)**
 
 ![The OxyPixel window editing a 64 by 64 drawing. Tools are on the left, the Ink palette and the Night and Cottage layers are on the right, and the frame strip is along the bottom.](docs/images/editor.png)
 
 ![The same drawing on frame 2, with onion skin showing the previous frame faintly. The cottage window is light and the smoke has moved.](docs/images/editor-frames.png)
 
-The pictures above are screenshots of OxyPixel 0.3.2, taken from the running editor. The drawing is a sample file opened for the capture. The images are in [docs/images/](docs/images/) and are covered by the repository MIT license.
+The pictures above are screenshots of the running editor. The drawing is a sample file opened for the capture. The images are in [docs/images/](docs/images/) and are covered by the repository MIT license.
 
 ## Contents
 
@@ -29,25 +29,25 @@ The pictures above are screenshots of OxyPixel 0.3.2, taken from the running edi
 
 ## Status
 
-Version 0.4.0 is an early release. The Windows downloads are unsigned. Linux publishes a tar.gz and a `.deb`. A canvas side is at most 1024 pixels. What works today, and the open task list, is in [docs/ROADMAP.md](docs/ROADMAP.md).
+OxyPixel is an early release. The Windows downloads are unsigned. Linux publishes a tar.gz and a `.deb`. A canvas side is at most 1024 pixels. What works today, and the open task list, is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Download
 
-Current release: [v0.4.0](https://github.com/crisprintsstuff/oxypixel/releases/tag/v0.4.0). Older builds are on the [releases page](https://github.com/crisprintsstuff/oxypixel/releases). What changed is in the [changelog](CHANGELOG.md).
+The files for the current release are on the [latest release](https://github.com/crisprintsstuff/oxypixel/releases/latest). Older builds are on the [releases page](https://github.com/crisprintsstuff/oxypixel/releases). What changed is in the [changelog](CHANGELOG.md).
 
 | File | Use |
 | --- | --- |
-| [OxyPixel-0.4.0-Setup.exe](https://github.com/crisprintsstuff/oxypixel/releases/download/v0.4.0/OxyPixel-0.4.0-Setup.exe) | Windows installer |
-| [oxypixel-0.4.0-windows-x86_64.exe](https://github.com/crisprintsstuff/oxypixel/releases/download/v0.4.0/oxypixel-0.4.0-windows-x86_64.exe) | Portable Windows executable |
-| [oxypixel-0.4.0-linux-x86_64.tar.gz](https://github.com/crisprintsstuff/oxypixel/releases/download/v0.4.0/oxypixel-0.4.0-linux-x86_64.tar.gz) | Linux x86_64 archive |
-| [oxypixel-0.4.0-linux-x86_64.deb](https://github.com/crisprintsstuff/oxypixel/releases/download/v0.4.0/oxypixel-0.4.0-linux-x86_64.deb) | Linux Debian package |
-| [SHA256SUMS.txt](https://github.com/crisprintsstuff/oxypixel/releases/download/v0.4.0/SHA256SUMS.txt) | Checksums |
+| `OxyPixel-<version>-Setup.exe` | Windows installer |
+| `oxypixel-<version>-windows-x86_64.exe` | Portable Windows executable |
+| `oxypixel-<version>-linux-x86_64.tar.gz` | Linux x86_64 archive |
+| `oxypixel-<version>-linux-x86_64.deb` | Linux Debian package |
+| [`SHA256SUMS.txt`](https://github.com/crisprintsstuff/oxypixel/releases/latest/download/SHA256SUMS.txt) | Checksums |
 
 The Windows files are unsigned. SmartScreen can warn that the publisher is unknown. Check `SHA256SUMS.txt` before you install. Signing steps are in [docs/BUILD-WINDOWS.md](docs/BUILD-WINDOWS.md).
 
 ## Windows installer
 
-`OxyPixel-0.4.0-Setup.exe` is a per-user NSIS setup.
+`OxyPixel-<version>-Setup.exe` is a per-user NSIS setup.
 
 1. Run the installer. It does not need administrator rights.
 2. If SmartScreen says the publisher is unknown, use "More info" and then "Run anyway" after the checksum matches.
@@ -59,17 +59,17 @@ The program needs OpenGL (`opengl32.dll`, which ships with Windows). The release
 
 ## Portable Windows build
 
-`oxypixel-0.4.0-windows-x86_64.exe` is the same 64-bit program without an installer. Put it in any folder and run it. SmartScreen can show the same unknown-publisher warning as the installer.
+`oxypixel-<version>-windows-x86_64.exe` is the same 64-bit program without an installer. Put it in any folder and run it. SmartScreen can show the same unknown-publisher warning as the installer.
 
-The tagged Windows build embeds the application icon and a version resource (`FileVersion` 0.4.0) when `rc.exe` is on `PATH`. The release workflow adds that compiler from the Windows SDK. A cross-build made without `rc.exe`, `llvm-rc`, or `windres` on `PATH` does not embed those resources, and File Explorer then shows a generic icon for the exe. The installer shortcut and the `.oxypix` association use `oxypixel.ico` either way. See [docs/BUILD-WINDOWS.md](docs/BUILD-WINDOWS.md).
+The tagged Windows build embeds the application icon and a version resource when `rc.exe` is on `PATH`. The release workflow adds that compiler from the Windows SDK. A cross-build made without `rc.exe`, `llvm-rc`, or `windres` on `PATH` does not embed those resources, and File Explorer then shows a generic icon for the exe. The installer shortcut and the `.oxypix` association use `oxypixel.ico` either way. See [docs/BUILD-WINDOWS.md](docs/BUILD-WINDOWS.md).
 
 Help, then Check for updates, can download a newer release and restart into it after the checksum matches.
 
 ## Linux
 
-Release 0.4.0 publishes two Linux files.
+Each release publishes two Linux files.
 
-`oxypixel-0.4.0-linux-x86_64.tar.gz` is the x86_64 executable, `LICENSE`, and `README.txt`. Unpack it and run the program from that directory:
+`oxypixel-<version>-linux-x86_64.tar.gz` is the x86_64 executable, `LICENSE`, and `README.txt`. Unpack it and run the program from that directory. For 0.4.0:
 
 ```bash
 tar -xzf oxypixel-0.4.0-linux-x86_64.tar.gz
@@ -77,14 +77,14 @@ cd oxypixel-0.4.0-linux-x86_64
 ./oxypixel
 ```
 
-`oxypixel-0.4.0-linux-x86_64.deb` installs `/usr/bin/oxypixel`, a desktop entry, a 32×32 icon, and the `.oxypix` mime type.
+`oxypixel-<version>-linux-x86_64.deb` installs `/usr/bin/oxypixel`, a desktop entry, a 32×32 icon, and the `.oxypix` mime type. For 0.4.0:
 
 ```bash
 sudo apt install ./oxypixel-0.4.0-linux-x86_64.deb
 sudo apt remove oxypixel
 ```
 
-On Ubuntu 24.04, `apt install` and `apt remove` were checked for a package built from this tree. Release 0.3.2 published the tar.gz only.
+On Ubuntu 24.04, `apt install` and `apt remove` were checked for a package built from this tree. Releases before the `.deb` was added published the tar.gz only.
 
 The window needs an X11 display and these libraries: `libGL.so.1`, `libX11.so.6`, `libxkbcommon.so.0`, and `libxkbcommon-x11.so.0`. Wayland copy and paste also loads `libwayland-client.so.0` when the compositor offers the data-control clipboard. The `.deb` depends on the packages that provide them (`libgl1`, `libx11-6`, `libxkbcommon0`, `libxkbcommon-x11-0`, `libxcb1`). Export commands do not need a display:
 
@@ -98,7 +98,7 @@ Help, then Check for updates, downloads the tar.gz for an unpacked copy and the 
 
 ## Features
 
-These match version 0.4.0. Planned work is listed in [docs/ROADMAP.md](docs/ROADMAP.md) and is not included here.
+These match the current editor. Planned work is listed in [docs/ROADMAP.md](docs/ROADMAP.md) and is not included here.
 
 - Pixel canvas with nearest-neighbor zoom, pan, and an optional grid
 - Pencil, eraser, fill, eyedropper, line, rectangle, ellipse, and rectangular selection

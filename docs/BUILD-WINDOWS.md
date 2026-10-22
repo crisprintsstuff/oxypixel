@@ -1,6 +1,6 @@
 # Windows build and installer
 
-The packaged artifacts are a 64-bit `oxypixel-0.4.0-windows-x86_64.exe` plus `OxyPixel-0.4.0-Setup.exe`. Both are **unsigned** unless you add a certificate yourself. They are normal PE files, so `signtool` can sign them later. This repository does not contain a certificate and the build scripts never look for one.
+The packaged artifacts are a 64-bit `oxypixel-<version>-windows-x86_64.exe` plus `OxyPixel-<version>-Setup.exe`. Both are **unsigned** unless you add a certificate yourself. They are normal PE files, so `signtool` can sign them later. This repository does not contain a certificate and the build scripts never look for one.
 
 ## What the executable links
 
@@ -8,7 +8,7 @@ Release builds pass `-C target-feature=+crt-static` for `x86_64-pc-windows-msvc`
 
 `crates/oxypixel/assets/oxypixel.rc` is the VERSIONINFO and icon script. `build.rs` embeds it when `llvm-rc`, `rc`, or `windres` is on `PATH`. If none of those exist, the build continues and prints a cargo warning. The installer still copies `oxypixel.ico` and uses it for the shortcut and the `.oxypix` icon.
 
-The cross-compiled `dist/oxypixel.exe` from a Linux machine without those tools has no embedded icon or VERSIONINFO. File Explorer shows a generic icon for the exe itself. The Start menu shortcut still uses `oxypixel.ico`. The GitHub Actions Windows job adds `rc.exe` to `PATH` when the Windows SDK provides it, so the tagged release build embeds the resource. `oxypixel.rc` in this tree is `FileVersion` 0.4.0. The published v0.3.2 portable exe has an ICON, a GROUP_ICON, and a VERSION resource with `FileVersion` 0.3.2.
+The cross-compiled `dist/oxypixel.exe` from a Linux machine without those tools has no embedded icon or VERSIONINFO. File Explorer shows a generic icon for the exe itself. The Start menu shortcut still uses `oxypixel.ico`. The GitHub Actions Windows job adds `rc.exe` to `PATH` when the Windows SDK provides it, so the tagged release build embeds the icon and the version resource from `oxypixel.rc`. A cross-build without `rc.exe`, `llvm-rc`, or `windres` does not.
 
 ## Build on Windows
 
@@ -32,7 +32,7 @@ copy /Y installer\oxypixel.ico dist\oxypixel.ico
 makensis installer\oxypixel.nsi
 ```
 
-The installer is `dist\OxyPixel-0.4.0-Setup.exe`. It is a per-user install (`RequestExecutionLevel user`) into `%LOCALAPPDATA%\OxyPixel`, with an uninstaller, Start menu entries, an optional desktop shortcut, and an HKCU `.oxypix` association. Add/Remove Programs reads the uninstall key under `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\OxyPixel`.
+The installer is `dist\OxyPixel-<version>-Setup.exe`. It is a per-user install (`RequestExecutionLevel user`) into `%LOCALAPPDATA%\OxyPixel`, with an uninstaller, Start menu entries, an optional desktop shortcut, and an HKCU `.oxypix` association. Add/Remove Programs reads the uninstall key under `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\OxyPixel`.
 
 ## Cross-compile from Linux
 
