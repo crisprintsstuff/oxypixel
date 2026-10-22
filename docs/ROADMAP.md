@@ -1,6 +1,6 @@
 # Roadmap and scorecard
 
-Status date: 2026-10-21. Version in tree: 0.3.2 (`Cargo.toml`). GitHub issues: none open. This file is the work list for [AGENTS.md](../AGENTS.md).
+Status date: 2026-10-21. Version in tree: 0.4.0 (`Cargo.toml`). GitHub issues: none open. This file is the work list for [AGENTS.md](../AGENTS.md).
 
 Rows are taken from the code and the docs. **Proposal** means the item is a reasonable next step, not a commitment and not an open issue. Do not start a proposal unless a human asks for it.
 
@@ -16,12 +16,12 @@ OX-002, OX-011, and OX-012 are done, so this list is empty.
 
 ### Done
 
-In this tree and covered by tests or by the release workflow. The latest release tag is 0.3.2.
+In the 0.4.0 tree and covered by tests or by the release workflow.
 
 | Area | What exists | Where |
 | --- | --- | --- |
 | Tools | Pencil, eraser, fill, eyedropper, line, rectangle, ellipse, rectangular select. Brush 1–16. Filled or outline shapes. | `editor.rs`, `draw.rs` |
-| Selection | Drag to move, arrow nudge, in-memory copy and paste, clear, select all | `editor.rs` |
+| Selection | Drag to move, arrow nudge, system-clipboard and in-memory copy and paste, clear, select all | `editor.rs`, `clipboard.rs` |
 | Canvas | Resize and crop. Mirror horizontal and vertical while stamping | `document.rs`, `editor.rs` |
 | Layers | Add, delete, duplicate, reorder, rename, visibility, opacity, merge down. At most 32 | `document.rs` |
 | Frames | Add, duplicate, duration 20–10000 ms, playback clock, onion skin in the view | `animation.rs`, `canvas.rs` |
@@ -34,7 +34,7 @@ In this tree and covered by tests or by the release workflow. The latest release
 | Files UI | Recent list, drag and drop, Windows file dialog, Linux portal with a path field fallback | `recent.rs`, `native.rs` |
 | Updates | Help, then Check for updates. Download only after `SHA256SUMS.txt` matches. No network until that command | `update.rs` |
 | Windows package | Per-user NSIS installer and portable exe. Static CRT. Unsigned | `installer/oxypixel.nsi`, `release.yml` |
-| Portable exe resources | The v0.3.2 release exe embeds an icon and VERSIONINFO (`FileVersion` 0.3.2). A cross-build without `rc.exe`, `llvm-rc`, or `windres` does not | `build.rs`, [README.md](../README.md), [BUILD-WINDOWS.md](BUILD-WINDOWS.md) |
+| Portable exe resources | `oxypixel.rc` is FileVersion 0.4.0. The published v0.3.2 exe embeds an icon and VERSIONINFO (`FileVersion` 0.3.2). A cross-build without `rc.exe`, `llvm-rc`, or `windres` does not | `build.rs`, [README.md](../README.md), [BUILD-WINDOWS.md](BUILD-WINDOWS.md) |
 | Linux package | `oxypixel-<version>-linux-x86_64.tar.gz` and `oxypixel-<version>-linux-x86_64.deb` | `scripts/package-linux.sh`, `scripts/package-deb.sh`, `release.yml` |
 | CI | One Windows job per pull request. `push` is `main` only; tags stay on `release.yml`. Docs-only changes skip the matrix. Ubuntu also runs `make check-windows`. `ubuntu-latest` and `windows-latest`, fmt, clippy `-D warnings`, tests, release build. Job timeout 15 minutes | `.github/workflows/ci.yml`, `Makefile` |
 
@@ -77,7 +77,7 @@ The v0.3.2 portable exe on the releases page (`oxypixel-0.3.2-windows-x86_64.exe
 
 **Lock update filenames to `PackageKind`.** Status: done. Area: `crates/oxypixel/src/update.rs`.
 
-`release_checksum_list_names_each_package` builds the three 0.3.2 names with `PackageKind::asset_name` and checks that `expected_hash` finds each of them. The names stay `oxypixel-0.3.2-windows-x86_64.exe`, `OxyPixel-0.3.2-Setup.exe`, and `oxypixel-0.3.2-linux-x86_64.tar.gz`.
+`release_checksum_list_names_each_package` builds the portable exe, installer, and Linux archive names from `Version::current()` and `PackageKind::asset_name`, then checks that `expected_hash` finds each of them. A `dist/` prefix is not a match. `deb_asset_does_not_replace_the_linux_archive` keeps a fixed v0.3.2 release payload, including `oxypixel-0.3.2-linux-x86_64.deb`, so that sample does not follow the package version.
 
 ### OX-012
 

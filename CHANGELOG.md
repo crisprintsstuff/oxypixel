@@ -1,5 +1,26 @@
 # Changelog
 
+All notable changes to this project are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.4.0] - 2026-10-21
+
+### Added
+
+- Copy puts the selection on the system clipboard as a straight-alpha image and keeps the in-memory patch. Paste paints a system image when one is present, or that patch when the clipboard has none. Ctrl+C and Ctrl+V still run when the text clipboard is empty. On Windows the image is a PNG and a 32-bit DIB. On Linux it is `image/png` while OxyPixel is open.
+- Linux releases include `oxypixel-0.4.0-linux-x86_64.deb` beside the tar.gz. The package installs `/usr/bin/oxypixel`, a desktop entry, a 32×32 icon, and the `.oxypix` file type. Check for updates downloads that package when the program is `/usr/bin/oxypixel`, and still downloads the tar.gz for an unpacked copy. Install the downloaded package with the package manager.
+- The palette can be imported and exported as GIMP `.gpl`, a hex list (`.hex` or `.txt`, one `RRGGBB` per line, or `RRGGBBAA` when the color has alpha), and JASC `.pal`. Import replaces the palette and is one undo step. `export-palette` and `import-palette` do the same from the command line.
+- `cargo test` compares the built-in example's composited frames with a stored image hash. It does not open a window.
+
+### Changed
+
+- The README is written for people downloading and running the editor, with screenshots of the window.
+- Tests lock the update filenames to the version of this copy, and check that recent files use the platform data directory.
+- `make check-windows` runs clippy for the Windows build, and the Ubuntu CI job runs that check.
+- A pull request runs CI once. A newer push on the same branch cancels the run it replaces. Documentation-only changes skip the test jobs. Tag pushes stay on the release workflow.
+
 ## 0.3.2
 
 - Help, then Check for updates, can move an existing install to this release. The download is kept only when its SHA-256 matches `SHA256SUMS.txt` from the same release.

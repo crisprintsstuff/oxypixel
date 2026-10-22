@@ -147,9 +147,24 @@ jobs:
             { seen[$2] = 1 }
             END { if (!seen[p] || !seen[s] || !seen[l] || !seen[d]) exit 1 }
           ' dist/SHA256SUMS.txt
+          # Accept "## 0.4.0" and Keep a Changelog "## [0.4.0] - 2026-10-21".
           awk -v ver="$version" '
-            $0 == "## " ver { show = 1; next }
-            show && $0 ~ /^## / { exit }
+            function section_version(line,    v) {
+              if (match(line, /^## \[[0-9]+\.[0-9]+\.[0-9]+\]/)) {
+                return substr(line, RSTART + 4, RLENGTH - 5)
+              }
+              if (match(line, /^## [0-9]+\.[0-9]+\.[0-9]+$/)) {
+                return substr(line, 4)
+              }
+              if (match(line, /^## [0-9]+\.[0-9]+\.[0-9]+[^0-9.]/)) {
+                v = substr(line, 4)
+                sub(/[^0-9.].*$/, "", v)
+                return v
+              }
+              return ""
+            }
+            section_version($0) == ver { show = 1; next }
+            show && /^## / { exit }
             show { print }
           ' CHANGELOG.md > dist/release-notes.txt
           test -s dist/release-notes.txt
