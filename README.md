@@ -103,13 +103,14 @@ These match this tree. The latest release tag is 0.3.2. Planned work is listed i
 - Canvas resize and crop
 - Horizontal and vertical mirror while drawing
 - Primary and secondary colors, hex entry, and the Ink palette
+- Import and export the palette as GIMP `.gpl`, hex `.hex` (one `RRGGBB` per line), or JASC `.pal`. Import replaces the palette and can be undone
 - Layers with visibility, opacity, rename, reorder, duplicate, and merge down
 - Undo and redo, including the selection rectangle
 - Animation frames, playback, onion skin, GIF export, and a horizontal spritesheet
 - PNG and spritesheet export at 1×, 2×, or 4× nearest-neighbor
 - `.oxypix` documents, plus PNG, BMP, and GIF import and export
 - Recent files, drag-and-drop, a Windows file dialog, and a Linux portal dialog with a path field if the portal is unavailable
-- Headless `export-png`, `export-bmp`, `export-gif`, and `export-sheet` commands
+- Headless `export-png`, `export-bmp`, `export-gif`, `export-sheet`, `export-palette`, and `import-palette` commands
 - Keyboard shortcuts
 
 A canvas side is at most 1024 pixels. One cel holds at most 1,048,576 pixels. The whole document holds at most 16,777,216 pixels across frames and layers. Details are in [docs/FORMAT.md](docs/FORMAT.md).
@@ -151,6 +152,8 @@ oxypixel export-png sprite.oxypix frame.png
 oxypixel export-bmp sprite.oxypix frame.bmp
 oxypixel export-gif sprite.oxypix animation.gif
 oxypixel export-sheet sprite.oxypix sheet.png
+oxypixel export-palette sprite.oxypix palette.gpl
+oxypixel import-palette sprite.oxypix palette.gpl recolored.oxypix
 ```
 
 | Script | Result |
@@ -167,6 +170,8 @@ oxypixel export-sheet sprite.oxypix sheet.png
 `.oxypix` is the editor's own little-endian document. Version 1 stores the canvas, shared layer stack, frame durations, pixels, and palette. The byte layout is [docs/FORMAT.md](docs/FORMAT.md).
 
 PNG, BMP, and GIF can be imported as a new document or as a layer. A GIF import becomes one composited layer named Imported. Export writes the composited frame, a GIF animation, a BMP, or a horizontal PNG spritesheet.
+
+Palette import and export use GIMP `.gpl`, a hex list (`.hex`, one `RRGGBB` per line, or `RRGGBBAA` when the color has alpha), and JASC `.pal`. A `.txt` file is read as that hex list. Import replaces the document palette. JASC files store opaque colors, so alpha becomes 255.
 
 ## Documentation
 

@@ -382,6 +382,22 @@ impl Document {
         Ok(())
     }
 
+    /// Replace the palette. An empty list, or one past the palette cap, is an error.
+    pub fn set_palette(&mut self, colors: Vec<Rgba>) -> Result<()> {
+        if colors.is_empty() {
+            return Err(Error::EmptyPalette);
+        }
+        if colors.len() > MAX_PALETTE {
+            return Err(Error::Limit {
+                what: "palette colors",
+                value: colors.len() as u64,
+                max: MAX_PALETTE as u64,
+            });
+        }
+        self.palette = colors;
+        Ok(())
+    }
+
     /// Change the canvas size. Existing pixels land at `(x + shift_x, y + shift_y)`.
     ///
     /// A positive shift adds transparent margin on the left or top. Pixels that

@@ -2,7 +2,10 @@
 
 use std::path::Path;
 
-use oxypixel_core::{export_bmp, export_gif, export_png, export_spritesheet, Document, Error};
+use oxypixel_core::{
+    export_bmp, export_gif, export_palette, export_png, export_spritesheet, import_palette,
+    Document, Error,
+};
 
 pub fn dispatch(args: &[String]) -> Option<i32> {
     let command = args.first().map(String::as_str)?;
@@ -19,6 +22,8 @@ pub fn dispatch(args: &[String]) -> Option<i32> {
         "export-bmp" => export_frame(args, export_bmp),
         "export-gif" => export_doc(args, export_gif),
         "export-sheet" => export_doc(args, export_spritesheet),
+        "export-palette" => export_palette_cmd(args),
+        "import-palette" => import_palette_cmd(args),
         _ => return None,
     };
     Some(i32::from(code))
@@ -63,6 +68,51 @@ fn export_doc(args: &[String], write: fn(&Document, &Path) -> Result<(), Error>)
     }
 }
 
+fn export_palette_cmd(args: &[String]) -> u8 {
+    let Some(input) = args.get(1) else {
+        return usage("export-palette needs an input .oxypix and an output palette");
+    };
+    let Some(output) = args.get(2) else {
+        return usage("export-palette needs an output .gpl, .hex, or .pal path");
+    };
+    match oxypixel_core::load_oxypix(Path::new(input)) {
+        Ok(doc) => match export_palette(doc.palette(), Path::new(output)) {
+            Ok(()) => 0,
+            Err(err) => fail(&err.to_string()),
+        },
+        Err(err) => fail(&err.to_string()),
+    }
+}
+
+fn import_palette_cmd(args: &[String]) -> u8 {
+    let Some(input) = args.get(1) else {
+        return usage(
+            "import-palette needs an input .oxypix, a palette file, and an output .oxypix",
+        );
+    };
+    let Some(palette) = args.get(2) else {
+        return usage("import-palette needs a palette file and an output .oxypix");
+    };
+    let Some(output) = args.get(3) else {
+        return usage("import-palette needs an output .oxypix");
+    };
+    let mut doc = match oxypixel_core::load_oxypix(Path::new(input)) {
+        Ok(doc) => doc,
+        Err(err) => return fail(&err.to_string()),
+    };
+    let colors = match import_palette(Path::new(palette)) {
+        Ok(colors) => colors,
+        Err(err) => return fail(&err.to_string()),
+    };
+    if let Err(err) = doc.set_palette(colors) {
+        return fail(&err.to_string());
+    }
+    match oxypixel_core::save_oxypix(&doc, Path::new(output)) {
+        Ok(()) => 0,
+        Err(err) => fail(&err.to_string()),
+    }
+}
+
 fn usage(message: &str) -> u8 {
     eprintln!("oxypixel: {message}");
     eprintln!("Run `oxypixel --help` for usage.");
@@ -91,10 +141,14 @@ Usage:
   oxypixel export-bmp INPUT.oxypix OUTPUT.bmp [FRAME]
   oxypixel export-gif INPUT.oxypix OUTPUT.gif
   oxypixel export-sheet INPUT.oxypix OUTPUT.png
+  oxypixel export-palette INPUT.oxypix OUTPUT.gpl
+  oxypixel import-palette INPUT.oxypix PALETTE.gpl OUTPUT.oxypix
   oxypixel --help
   oxypixel --version
 
 With no command, OxyPixel opens the editor. A file argument opens that .oxypix document.
 Export commands do not open a window. FRAME is the zero-based frame index and defaults to 0.
+export-palette writes the document palette as GIMP .gpl, hex .hex, or JASC .pal.
+import-palette replaces that palette and writes a new .oxypix. A .txt palette is read as hex.
 "
 );
