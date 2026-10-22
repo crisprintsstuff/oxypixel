@@ -22,6 +22,7 @@ cargo test --workspace
 - New file-format fields need a version bump in `FORMAT_VERSION` and a note in [docs/FORMAT.md](docs/FORMAT.md).
 - Keep user-facing errors as `oxypixel_core::Error` values with a sentence that says what failed. Do not panic on bad input.
 - The Windows installer version is duplicated in `installer/oxypixel.nsi` (`!define VERSION`) and the workspace `Cargo.toml` version. Update both together, and the `VERSIONINFO` in `crates/oxypixel/assets/oxypixel.rc`.
+- README download links stay on the latest release. Describe files as `oxypixel-<version>-...`. Example commands that need a real filename use the version being released.
 
 ## Pull requests
 

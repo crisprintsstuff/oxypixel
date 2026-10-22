@@ -51,7 +51,7 @@ Both crates set `unsafe_code = "forbid"`.
 
 **Assets and licenses.** The program is MIT. See [LICENSE](LICENSE). The Ink palette, the application icon, the tool icons (drawn in code), and the `.oxypix` layout were made for this project. Installer bitmaps are project art. Direct crate licenses are listed in [docs/THIRD-PARTY.md](docs/THIRD-PARTY.md). A new third-party image, font, or snippet needs its license noted in that file in the same change. NSIS is a build tool only. It is not linked into `oxypixel.exe`.
 
-**Version trio.** A version bump updates `Cargo.toml`, `installer/oxypixel.nsi` (`!define VERSION`, `VIProductVersion`, `VIFileVersion`), and `crates/oxypixel/assets/oxypixel.rc` together.
+**Version trio.** A version bump updates `Cargo.toml`, `installer/oxypixel.nsi` (`!define VERSION`, `VIProductVersion`, `VIFileVersion`), and `crates/oxypixel/assets/oxypixel.rc` together. The README links to `releases/latest` and names download files as `oxypixel-<version>-...`. Do not pin a release number in those links. A command that needs a real filename, such as `tar` or `apt install`, uses the version being released.
 
 **Actions minutes.** The owner is short on GitHub Actions minutes, and Windows minutes count double. CI runs on pull requests and on pushes to `main`. It does not also run for the pull-request branch push, and it does not run on tags. A docs-only change (`*.md`, `docs/**`) skips the test matrix. Do not push tags and do not dispatch `.github/workflows/release.yml` to test. Do not rerun a green workflow. One PR is enough.
 
