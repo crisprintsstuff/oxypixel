@@ -29,7 +29,7 @@ In the 0.5.0 tree and covered by tests or by the release workflow.
 | `.oxypix` | Version 1, little-endian, caps before allocation, trailing bytes rejected | `io/oxypix.rs`, `docs/FORMAT.md` |
 | Raster | PNG, BMP, and GIF import and export. GIF import is one composited layer. Spritesheet and 2×/4× nearest PNG | `io/raster.rs` |
 | CLI | `export-png`, `export-bmp`, `export-gif`, `export-sheet`, `export-palette`, and `import-palette`. Failures print and exit. Missing file must not hang | `cli.rs`, `tests/cli.rs` |
-| Palette files | GIMP `.gpl`, hex `.hex` (one `RRGGBB` per line, `RRGGBBAA` when alpha is not 255), and JASC `.pal`. Import replaces the palette and is one undo step. More than 256 colors is an error | `io/palette.rs`, `editor.rs`, `app.rs` |
+| Palette files | GIMP `.gpl`, hex `.hex` (one `RRGGBB` per line, `RRGGBBAA` when alpha is not 255), and JASC `.pal`. Import replaces the palette and is one undo step. Swatches drag to a new index. A ramp of N steps can fill the span between two swatches. Snap (S) makes pencil, fill, and shapes use the nearest palette color. More than 256 colors is an error | `io/palette.rs`, `editor.rs`, `color.rs`, `app.rs` |
 | Window | egui 0.31 glow, nearest-neighbor canvas, whole-pixel zoom, a grid when the cells are readable, pan, shortcuts, tool icons with their shortcut letter | `app.rs`, `canvas.rs` |
 | Files UI | Recent list of ten paths, a folder hint when names match, a missing-file mark, and Clear recent. Drag and drop, Windows file dialog, Linux portal with a path field fallback | `recent.rs`, `native.rs` |
 | Recovery | Autosave writes a `.oxypix` in the data directory about once a minute and after 30 edits. Startup can restore or discard it. A save, a discard, or a clean close removes it | `recovery.rs`, `app.rs` |
@@ -186,7 +186,9 @@ Open recent keeps ten paths. A repeated file name shows the parent folder, and a
 
 ### OX-P16
 
-**Reorder swatches, and optionally snap strokes to the palette.** The palette holds up to 256 colors. A click sets the primary color, a right-click sets the secondary color, and import replaces the list in one undo step. Swatches have no drag order, and a stroke may use any RGBA color. A later task should let a swatch be dragged to a new index, fill a ramp between two swatches, and offer a session toggle that snaps the pencil, the fill, and the shape tools to the nearest palette color. The `.oxypix` version stays 1, and the document stays RGBA.
+**Reorder swatches, and optionally snap strokes to the palette.** Status: done. Area: `crates/oxypixel-core/src/color.rs`, `crates/oxypixel-core/src/editor.rs`, `crates/oxypixel/src/app.rs`.
+
+Drag a swatch to a new index. That move is one undo step. Shift-click a second swatch and Ramp fills the inclusive span with N steps, including both ends, also one undo step. Snap (S) is off until the user turns it on. Pencil, fill, line, rectangle, and ellipse then stamp the nearest palette color. The eraser still clears, and the eyedropper still picks the pixel. The chosen color is unchanged. `.gpl`, `.hex`, and `.pal` round-trip the new order (JASC still stores opaque colors). The `.oxypix` version stays 1, and the document stays RGBA. Ramp generation and nearest-color snapping are tested in `color.rs`.
 
 ### OX-P17
 

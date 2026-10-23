@@ -1,6 +1,6 @@
 //! Editing session: tools, selection, colors, and undo on top of a [`Document`].
 
-use crate::color::Rgba;
+use crate::color::{color_ramp, nearest_palette_color, Rgba};
 use crate::document::Document;
 use crate::draw::{
     brush_offsets, clamp_to_margin, constrain_line, constrain_square, ellipse_points, flood_fill,
@@ -83,6 +83,7 @@ pub struct Editor {
     mirror_y: bool,
     pixel_perfect: bool,
     wrap: bool,
+    snap_palette: bool,
     /// Cel pixels from before the current pixel-perfect stroke.
     pencil_base: Option<Vec<Rgba>>,
     selection: Option<PixelRect>,
@@ -133,6 +134,7 @@ impl Editor {
             mirror_y: false,
             pixel_perfect: false,
             wrap: false,
+            snap_palette: false,
             pencil_base: None,
             selection: None,
             clipboard: None,
@@ -231,6 +233,15 @@ impl Editor {
 
     pub fn set_wrap(&mut self, enabled: bool) {
         self.wrap = enabled;
+    }
+
+    /// Pencil, fill, and shapes stamp the nearest palette color. Off until the user turns it on.
+    pub fn snaps_to_palette(&self) -> bool {
+        self.snap_palette
+    }
+
+    pub fn set_snap_to_palette(&mut self, enabled: bool) {
+        self.snap_palette = enabled;
     }
 
     /// The canvas pixel a tiled-view coordinate paints, when wrap is on.
@@ -960,6 +971,64 @@ impl Editor {
         self.structural(|doc| doc.set_palette(colors))
     }
 
+    /// Move one swatch. The same index is not an undo step.
+    pub fn move_palette_color(&mut self, from: usize, to: usize) -> Result<()> {
+        let len = self.doc.palette().len();
+        if from >= len || to >= len {
+            return Err(Error::Index {
+                what: "palette color",
+            });
+        }
+        if from == to {
+            return Ok(());
+        }
+        self.structural(|doc| doc.move_palette_color(from, to))
+    }
+
+    /// Replace the inclusive span between two swatches with a ramp of `steps` colors.
+    ///
+    /// `steps` counts both ends. The earlier index stays the start color. One undo step.
+    pub fn fill_palette_ramp(&mut self, from: usize, to: usize, steps: usize) -> Result<()> {
+        if !(2..=crate::limits::MAX_PALETTE).contains(&steps) {
+            return Err(Error::Limit {
+                what: "ramp steps",
+                value: steps as u64,
+                max: crate::limits::MAX_PALETTE as u64,
+            });
+        }
+        let len = self.doc.palette().len();
+        if from >= len || to >= len || from == to {
+            return Err(Error::Index {
+                what: "palette color",
+            });
+        }
+        let lo = from.min(to);
+        let hi = from.max(to);
+        let start = self.doc.palette()[lo];
+        let end = self.doc.palette()[hi];
+        let Some(ramp) = color_ramp(start, end, steps) else {
+            return Err(Error::Limit {
+                what: "ramp steps",
+                value: steps as u64,
+                max: crate::limits::MAX_PALETTE as u64,
+            });
+        };
+        let replaced = hi - lo + 1;
+        let new_len = len - replaced + ramp.len();
+        if new_len > crate::limits::MAX_PALETTE {
+            return Err(Error::Limit {
+                what: "palette colors",
+                value: new_len as u64,
+                max: crate::limits::MAX_PALETTE as u64,
+            });
+        }
+        let mut colors = Vec::with_capacity(new_len);
+        colors.extend_from_slice(&self.doc.palette()[..lo]);
+        colors.extend(ramp);
+        colors.extend_from_slice(&self.doc.palette()[hi + 1..]);
+        self.structural(|doc| doc.set_palette(colors))
+    }
+
     /// Add a layer on the active frame and copy `pixels` into it.
     /// `pixels` must already match the document size.
     pub fn insert_layer_pixels(&mut self, name: &str, pixels: &[Rgba]) -> Result<()> {
@@ -1028,9 +1097,28 @@ impl Editor {
     }
 
     fn button_color(&self, button: MouseButton) -> Rgba {
-        match button {
+        let color = match button {
             MouseButton::Primary => self.primary,
             MouseButton::Secondary => self.secondary,
+        };
+        self.color_for_tool(color)
+    }
+
+    /// Color shown under the pointer. Snap applies only to tools that stamp a color.
+    pub fn hover_color(&self, secondary: bool) -> Rgba {
+        let color = if secondary {
+            self.secondary
+        } else {
+            self.primary
+        };
+        self.color_for_tool(color)
+    }
+
+    fn color_for_tool(&self, color: Rgba) -> Rgba {
+        if self.snap_palette && tool_snaps_to_palette(self.tool) {
+            nearest_palette_color(color, self.doc.palette())
+        } else {
+            color
         }
     }
 
@@ -1277,6 +1365,13 @@ impl Editor {
         self.dirty = true;
         self.generation += 1;
     }
+}
+
+fn tool_snaps_to_palette(tool: Tool) -> bool {
+    matches!(
+        tool,
+        Tool::Pencil | Tool::Bucket | Tool::Line | Tool::Rectangle | Tool::Ellipse
+    )
 }
 
 /// Connect pointer samples with the same line the ordinary pencil uses.
@@ -1919,5 +2014,145 @@ mod tests {
         assert_eq!(cel_pixel(&tile, 2, 0), ink);
         assert_eq!(cel_pixel(&tile, 3, 0), ink);
         assert_eq!(tile.document().width(), 4);
+    }
+
+    #[test]
+    fn moving_a_swatch_is_one_undo_and_exports_in_the_new_order() {
+        let mut ed = Editor::new(4, 4).unwrap();
+        let colors = vec![
+            Rgba::new(10, 0, 0, 255),
+            Rgba::new(0, 20, 0, 255),
+            Rgba::new(0, 0, 30, 128),
+            Rgba::new(40, 50, 60, 255),
+        ];
+        ed.set_palette(colors.clone()).unwrap();
+        assert!(ed.move_palette_color(0, 0).is_ok());
+        assert!(ed.undo());
+        assert_ne!(ed.document().palette(), colors.as_slice());
+        assert!(ed.redo());
+        assert_eq!(ed.document().palette(), colors.as_slice());
+        ed.move_palette_color(0, 3).unwrap();
+        let moved = ed.document().palette().to_vec();
+        assert_eq!(
+            moved,
+            vec![
+                Rgba::new(0, 20, 0, 255),
+                Rgba::new(0, 0, 30, 128),
+                Rgba::new(40, 50, 60, 255),
+                Rgba::new(10, 0, 0, 255),
+            ]
+        );
+        ed.undo();
+        assert_eq!(ed.document().palette(), colors.as_slice());
+        ed.redo();
+        assert_eq!(ed.document().palette(), moved.as_slice());
+        assert!(ed.move_palette_color(9, 0).is_err());
+        assert_eq!(ed.document().palette(), moved.as_slice());
+
+        for format in [
+            crate::PaletteFormat::Gpl,
+            crate::PaletteFormat::Hex,
+            crate::PaletteFormat::Pal,
+        ] {
+            let text = crate::export_palette_string(&moved, format).unwrap();
+            let back =
+                crate::import_palette_bytes(text.as_bytes(), Some(format.extension())).unwrap();
+            if format == crate::PaletteFormat::Pal {
+                let opaque: Vec<_> = moved
+                    .iter()
+                    .map(|color| Rgba::new(color.r, color.g, color.b, 255))
+                    .collect();
+                assert_eq!(back, opaque);
+            } else {
+                assert_eq!(back, moved);
+            }
+        }
+    }
+
+    #[test]
+    fn a_ramp_replaces_the_span_in_one_undo() {
+        let mut ed = Editor::new(4, 4).unwrap();
+        let colors = vec![
+            Rgba::new(0, 0, 0, 255),
+            Rgba::new(1, 1, 1, 255),
+            Rgba::new(2, 2, 2, 255),
+            Rgba::new(255, 0, 0, 255),
+        ];
+        ed.set_palette(colors.clone()).unwrap();
+        ed.fill_palette_ramp(3, 0, 3).unwrap();
+        assert_eq!(
+            ed.document().palette(),
+            &[
+                Rgba::new(0, 0, 0, 255),
+                Rgba::new(128, 0, 0, 255),
+                Rgba::new(255, 0, 0, 255),
+            ]
+        );
+        ed.undo();
+        assert_eq!(ed.document().palette(), colors.as_slice());
+        ed.redo();
+        assert_eq!(ed.document().palette().len(), 3);
+
+        let before = ed.document().palette().to_vec();
+        let err = ed.fill_palette_ramp(0, 1, 256).unwrap_err();
+        assert!(matches!(
+            err,
+            Error::Limit {
+                what: "palette colors",
+                ..
+            }
+        ));
+        assert_eq!(ed.document().palette(), before.as_slice());
+        assert!(ed.fill_palette_ramp(0, 0, 4).is_err());
+        assert!(ed.fill_palette_ramp(0, 1, 1).is_err());
+        assert_eq!(ed.document().palette(), before.as_slice());
+    }
+
+    #[test]
+    fn snap_uses_the_nearest_swatch_for_pencil_fill_and_shapes() {
+        let mut ed = Editor::new(4, 4).unwrap();
+        let red = Rgba::new(255, 0, 0, 255);
+        let green = Rgba::new(0, 255, 0, 255);
+        ed.set_palette(vec![red, green]).unwrap();
+        let chosen = Rgba::new(0, 200, 40, 255);
+        ed.set_primary(chosen);
+        ed.set_snap_to_palette(true);
+        assert!(!ed.snaps_to_palette() || ed.hover_color(false) == green);
+
+        ed.pointer_down(0, 0, MouseButton::Primary, false);
+        ed.pointer_up(0, 0, false);
+        assert_eq!(cel_pixel(&ed, 0, 0), green);
+        assert_eq!(ed.primary(), chosen);
+        assert!(ed.undo());
+        assert_eq!(cel_pixel(&ed, 0, 0), Rgba::CLEAR);
+
+        ed.set_tool(Tool::Bucket);
+        ed.pointer_down(1, 1, MouseButton::Primary, false);
+        assert_eq!(cel_pixel(&ed, 1, 1), green);
+        assert_eq!(cel_pixel(&ed, 3, 3), green);
+
+        ed.set_tool(Tool::Line);
+        ed.set_primary(Rgba::new(240, 10, 10, 255));
+        ed.pointer_down(0, 2, MouseButton::Primary, false);
+        ed.pointer_up(2, 2, false);
+        assert_eq!(cel_pixel(&ed, 0, 2), red);
+        assert_eq!(cel_pixel(&ed, 2, 2), red);
+
+        ed.set_tool(Tool::Eraser);
+        ed.pointer_down(0, 2, MouseButton::Primary, false);
+        ed.pointer_up(0, 2, false);
+        assert_eq!(cel_pixel(&ed, 0, 2), Rgba::CLEAR);
+
+        ed.set_snap_to_palette(false);
+        ed.set_tool(Tool::Pencil);
+        ed.set_primary(chosen);
+        ed.pointer_down(0, 3, MouseButton::Primary, false);
+        ed.pointer_up(0, 3, false);
+        assert_eq!(cel_pixel(&ed, 0, 3), chosen);
+
+        ed.set_tool(Tool::Eyedropper);
+        ed.set_snap_to_palette(true);
+        ed.pointer_down(0, 3, MouseButton::Primary, false);
+        assert_eq!(ed.primary(), chosen);
     }
 }

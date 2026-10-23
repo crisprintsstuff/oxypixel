@@ -112,6 +112,78 @@ pub(crate) fn pack(pixels: &[Rgba]) -> Vec<u8> {
     out
 }
 
+/// Linear RGBA ramp of `steps` colors, including both ends.
+///
+/// `steps` must be from 2 through the palette cap. The first color is `start`
+/// and the last is `end`. Channels round to the nearest value.
+pub(crate) fn color_ramp(start: Rgba, end: Rgba, steps: usize) -> Option<Vec<Rgba>> {
+    if !(2..=crate::limits::MAX_PALETTE).contains(&steps) {
+        return None;
+    }
+    let span = steps - 1;
+    let mut colors = Vec::with_capacity(steps);
+    for i in 0..steps {
+        colors.push(Rgba::new(
+            lerp_channel(start.r, end.r, i, span),
+            lerp_channel(start.g, end.g, i, span),
+            lerp_channel(start.b, end.b, i, span),
+            lerp_channel(start.a, end.a, i, span),
+        ));
+    }
+    if let Some(first) = colors.first_mut() {
+        *first = start;
+    }
+    if let Some(last) = colors.last_mut() {
+        *last = end;
+    }
+    Some(colors)
+}
+
+/// Closest swatch in squared RGBA distance. Equal distances keep the earlier index.
+/// An empty palette returns `color`.
+pub(crate) fn nearest_palette_color(color: Rgba, palette: &[Rgba]) -> Rgba {
+    let mut best = color;
+    let mut best_distance = u32::MAX;
+    let mut found = false;
+    for swatch in palette {
+        let distance = color_distance_sq(color, *swatch);
+        if !found || distance < best_distance {
+            best = *swatch;
+            best_distance = distance;
+            found = true;
+        }
+    }
+    best
+}
+
+fn lerp_channel(start: u8, end: u8, index: usize, span: usize) -> u8 {
+    if index == 0 {
+        return start;
+    }
+    if index == span {
+        return end;
+    }
+    let start = i32::from(start);
+    let delta = i32::from(end) - start;
+    let span = span as i32;
+    let numer = delta * index as i32;
+    let half = span / 2;
+    let rounded = if numer >= 0 {
+        numer + half
+    } else {
+        numer - half
+    };
+    (start + rounded / span) as u8
+}
+
+fn color_distance_sq(a: Rgba, b: Rgba) -> u32 {
+    let channel = |left: u8, right: u8| {
+        let delta = i32::from(left) - i32::from(right);
+        (delta * delta) as u32
+    };
+    channel(a.r, b.r) + channel(a.g, b.g) + channel(a.b, b.b) + channel(a.a, b.a)
+}
+
 pub(crate) fn unpack(bytes: &[u8]) -> Option<Vec<Rgba>> {
     if bytes.len() % 4 != 0 {
         return None;
@@ -152,5 +224,57 @@ mod tests {
             source_over(black, white, 128),
             Rgba::new(128, 128, 128, 255)
         );
+    }
+
+    #[test]
+    fn color_ramp_keeps_the_ends_and_steps_evenly() {
+        let start = Rgba::new(0, 0, 0, 0);
+        let end = Rgba::new(10, 20, 30, 40);
+        assert!(color_ramp(start, end, 0).is_none());
+        assert!(color_ramp(start, end, 1).is_none());
+        assert!(color_ramp(start, end, crate::limits::MAX_PALETTE + 1).is_none());
+        assert_eq!(color_ramp(start, end, 2).unwrap(), vec![start, end]);
+        assert_eq!(
+            color_ramp(start, end, 3).unwrap(),
+            vec![start, Rgba::new(5, 10, 15, 20), end]
+        );
+        let reds = color_ramp(Rgba::new(0, 0, 0, 255), Rgba::new(255, 0, 0, 255), 4).unwrap();
+        assert_eq!(
+            reds,
+            vec![
+                Rgba::new(0, 0, 0, 255),
+                Rgba::new(85, 0, 0, 255),
+                Rgba::new(170, 0, 0, 255),
+                Rgba::new(255, 0, 0, 255),
+            ]
+        );
+        let down = color_ramp(Rgba::new(10, 0, 0, 255), Rgba::new(0, 0, 0, 255), 3).unwrap();
+        assert_eq!(down[1], Rgba::new(5, 0, 0, 255));
+        assert_eq!(*down.first().unwrap(), Rgba::new(10, 0, 0, 255));
+        assert_eq!(*down.last().unwrap(), Rgba::new(0, 0, 0, 255));
+    }
+
+    #[test]
+    fn nearest_palette_color_breaks_ties_toward_the_earlier_swatch() {
+        let red = Rgba::new(255, 0, 0, 255);
+        let blue = Rgba::new(0, 0, 255, 255);
+        let palette = [red, blue];
+        assert_eq!(nearest_palette_color(red, &palette), red);
+        assert_eq!(
+            nearest_palette_color(Rgba::new(0, 200, 0, 255), &[red, Rgba::new(0, 255, 0, 255)]),
+            Rgba::new(0, 255, 0, 255)
+        );
+        // (0, 255, 0) is the same distance from red and from blue. The earlier swatch wins.
+        assert_eq!(
+            nearest_palette_color(Rgba::new(0, 255, 0, 255), &palette),
+            red
+        );
+        let clear = Rgba::CLEAR;
+        let opaque = Rgba::new(0, 0, 0, 255);
+        assert_eq!(
+            nearest_palette_color(Rgba::new(0, 0, 0, 10), &[opaque, clear]),
+            clear
+        );
+        assert_eq!(nearest_palette_color(red, &[]), red);
     }
 }

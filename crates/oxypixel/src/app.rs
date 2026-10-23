@@ -94,6 +94,8 @@ pub struct OxyApp {
     tool_icons: Option<Vec<(Tool, egui::TextureHandle)>>,
     hex: String,
     swatch: usize,
+    ramp_end: Option<usize>,
+    ramp_steps: usize,
     hover: Option<(i32, i32)>,
     playing: bool,
     play_acc: u32,
@@ -165,6 +167,8 @@ impl OxyApp {
             tool_icons: None,
             hex: String::new(),
             swatch: 5,
+            ramp_end: None,
+            ramp_steps: 5,
             hover: None,
             playing: false,
             play_acc: 0,
@@ -483,6 +487,10 @@ impl OxyApp {
                 self.editor.set_wrap(!self.editor.wraps());
             }
             Command::ToggleTiled => self.set_tiled_view(!self.view.tiled),
+            Command::ToggleSnap => {
+                self.editor
+                    .set_snap_to_palette(!self.editor.snaps_to_palette());
+            }
         }
     }
 
@@ -898,9 +906,9 @@ impl OxyApp {
                 if self.apply(|editor| editor.set_palette(colors)).is_none() {
                     return false;
                 }
-                let len = self.editor.document().palette().len();
-                self.swatch = self.swatch.min(len.saturating_sub(1));
                 self.note_dir(path);
+                self.swatch = 0;
+                self.ramp_end = None;
                 self.note_ok(format!(
                     "Imported {count} palette colors from {}.",
                     path.display()
@@ -1459,11 +1467,15 @@ impl OxyApp {
                     self.hex = self.editor.primary().to_hex();
                 }
                 ui.label("Palette");
+                self.clamp_palette_marks();
                 let colors: Vec<Rgba> = self.editor.document().palette().to_vec();
                 ui.horizontal_wrapped(|ui| {
                     for (index, color) in colors.iter().copied().enumerate() {
-                        let (rect, response) =
-                            ui.allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::click());
+                        let (rect, response) = ui.allocate_exact_size(
+                            egui::vec2(22.0, 22.0),
+                            egui::Sense::click_and_drag(),
+                        );
+                        response.dnd_set_drag_payload(SwatchDrag(index));
                         ui.painter().rect_filled(
                             rect,
                             2.0,
@@ -1477,22 +1489,62 @@ impl OxyApp {
                                 egui::StrokeKind::Inside,
                             );
                         }
+                        if self.ramp_end == Some(index) && index != self.swatch {
+                            ui.painter().rect_stroke(
+                                rect,
+                                2.0,
+                                egui::Stroke::new(1.0_f32, Color32::WHITE),
+                                egui::StrokeKind::Outside,
+                            );
+                        }
+                        let dropping = response
+                            .dnd_hover_payload::<SwatchDrag>()
+                            .is_some_and(|drag| drag.0 != index);
+                        if dropping {
+                            ui.painter().rect_stroke(
+                                rect,
+                                2.0,
+                                egui::Stroke::new(2.0_f32, AMBER),
+                                egui::StrokeKind::Outside,
+                            );
+                        }
                         let response = response.on_hover_text(format!(
-                            "{}\nClick for the primary color. Right-click for the secondary color.",
+                            "{}\nClick for the primary color. Right-click for the secondary color.\nDrag to reorder. Shift-click to choose the other ramp end.",
                             color.to_hex()
                         ));
                         if response.clicked() {
-                            self.editor.set_primary(color);
-                            self.swatch = index;
-                            self.hex = color.to_hex();
+                            let shift = ui.input(|i| i.modifiers.shift);
+                            if shift && index != self.swatch {
+                                self.ramp_end = Some(index);
+                            } else {
+                                self.editor.set_primary(color);
+                                self.swatch = index;
+                                self.hex = color.to_hex();
+                            }
                         }
                         if response.secondary_clicked() {
                             self.editor.set_secondary(color);
                         }
+                        if let Some(drag) = response.dnd_release_payload::<SwatchDrag>() {
+                            let from = drag.0;
+                            if from != index
+                                && self
+                                    .apply(|editor| editor.move_palette_color(from, index))
+                                    .is_some()
+                            {
+                                self.swatch = palette_index_after_move(from, index, self.swatch);
+                                self.ramp_end = self
+                                    .ramp_end
+                                    .map(|end| palette_index_after_move(from, index, end));
+                            }
+                        }
                     }
                 });
                 ui.label(
-                    egui::RichText::new("Right-click a swatch to set the second color.").small(),
+                    egui::RichText::new(
+                        "Drag a swatch to reorder it. Shift-click a second swatch, then Ramp.",
+                    )
+                    .small(),
                 );
                 ui.horizontal_wrapped(|ui| {
                     if ui.button("Add").clicked() {
@@ -1501,10 +1553,18 @@ impl OxyApp {
                     }
                     if ui.button("Remove").clicked() {
                         let swatch = self.swatch;
-                        self.apply(|editor| editor.remove_palette_color(swatch));
-                        self.swatch = self
-                            .swatch
-                            .min(self.editor.document().palette().len().saturating_sub(1));
+                        if self
+                            .apply(|editor| editor.remove_palette_color(swatch))
+                            .is_some()
+                        {
+                            if self.ramp_end == Some(swatch) {
+                                self.ramp_end = None;
+                            } else if let Some(end) = self.ramp_end.filter(|end| *end > swatch) {
+                                self.ramp_end = Some(end - 1);
+                            }
+                            let len = self.editor.document().palette().len();
+                            self.swatch = swatch.min(len.saturating_sub(1));
+                        }
                     }
                     if ui
                         .button("Import")
@@ -1521,6 +1581,46 @@ impl OxyApp {
                         .clicked()
                     {
                         self.open_path_dialog(PathKind::ExportPalette);
+                    }
+                });
+                ui.horizontal_wrapped(|ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut self.ramp_steps)
+                            .range(2..=oxypixel_core::MAX_PALETTE)
+                            .prefix("Steps "),
+                    );
+                    let ends = self.ramp_end.filter(|end| *end != self.swatch);
+                    let ramp = ui
+                        .add_enabled(ends.is_some(), egui::Button::new("Ramp"))
+                        .on_hover_text(
+                            "Fill the colors between the two marked swatches with this many steps, including both ends.",
+                        )
+                        .on_disabled_hover_text(
+                            "Shift-click a second swatch. Steps include both ends.",
+                        );
+                    if ramp.clicked() {
+                        if let Some(end) = ends {
+                            let steps = self.ramp_steps;
+                            let start = self.swatch;
+                            if self
+                                .apply(|editor| editor.fill_palette_ramp(start, end, steps))
+                                .is_some()
+                            {
+                                let lo = start.min(end);
+                                self.swatch = lo;
+                                self.ramp_end = Some(lo + steps - 1);
+                            }
+                        }
+                    }
+                    let mut snap = self.editor.snaps_to_palette();
+                    if ui
+                        .checkbox(&mut snap, "Snap (S)")
+                        .on_hover_text(
+                            "Pencil, fill, and shapes stamp the nearest palette color. The eraser still clears.",
+                        )
+                        .changed()
+                    {
+                        self.editor.set_snap_to_palette(snap);
                     }
                 });
                 ui.separator();
@@ -2707,6 +2807,41 @@ impl OxyApp {
             self.discard_recovery_at(index);
         }
     }
+
+    fn clamp_palette_marks(&mut self) {
+        let len = self.editor.document().palette().len();
+        if len == 0 {
+            self.ramp_end = None;
+            return;
+        }
+        self.swatch = self.swatch.min(len - 1);
+        if self.ramp_steps < 2 {
+            self.ramp_steps = 2;
+        }
+        self.ramp_steps = self.ramp_steps.min(oxypixel_core::MAX_PALETTE);
+        if self.ramp_end.is_some_and(|end| end >= len) {
+            self.ramp_end = None;
+        }
+    }
+}
+
+/// Drag payload for one palette swatch.
+#[derive(Clone, Copy)]
+struct SwatchDrag(usize);
+
+/// Where `index` lands after the swatch at `from` moves to `to`.
+fn palette_index_after_move(from: usize, to: usize, index: usize) -> usize {
+    if index == from {
+        return to;
+    }
+    let mut next = index;
+    if next > from {
+        next -= 1;
+    }
+    if next >= to {
+        next += 1;
+    }
+    next
 }
 
 fn recovery_row(entry: &recovery::RecoveryEntry) -> (String, String, String) {

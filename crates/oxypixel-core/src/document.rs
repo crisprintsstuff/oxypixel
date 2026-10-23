@@ -382,6 +382,22 @@ impl Document {
         Ok(())
     }
 
+    /// Move the swatch at `from` so it occupies `to` afterwards.
+    pub fn move_palette_color(&mut self, from: usize, to: usize) -> Result<()> {
+        let len = self.palette.len();
+        if from >= len || to >= len {
+            return Err(Error::Index {
+                what: "palette color",
+            });
+        }
+        if from == to {
+            return Ok(());
+        }
+        let color = self.palette.remove(from);
+        self.palette.insert(to, color);
+        Ok(())
+    }
+
     /// Replace the palette. An empty list, or one past the palette cap, is an error.
     pub fn set_palette(&mut self, colors: Vec<Rgba>) -> Result<()> {
         if colors.is_empty() {

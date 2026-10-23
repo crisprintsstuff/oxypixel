@@ -300,11 +300,7 @@ pub fn show_canvas(
     if let Some((x, y)) = raw_hover.filter(|_| hover.is_some()) {
         if let Some(mark) = hover_rect(editor.tool(), editor.brush(), x, y, origin, view.zoom) {
             let secondary = ui.input(|i| i.pointer.button_down(PointerButton::Secondary));
-            let color = if secondary {
-                editor.secondary()
-            } else {
-                editor.primary()
-            };
+            let color = editor.hover_color(secondary);
             let paint = hover_paint(editor.tool(), color);
             if let Some(fill) = paint.fill {
                 painter.rect_filled(mark, 0.0, fill);

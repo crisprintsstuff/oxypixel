@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Pixel-perfect pencil, off until you turn it on (P), drops the extra corner of a one-pixel diagonal step. A larger brush and the line tool are unchanged. Mirror follows the cleaned stroke, and the stroke is still one undo step.
 - Wrap (T) continues pencil, eraser, fill, lines, and shapes that leave an edge on the opposite edge, including the shape preview. Tiled view (Shift+T) draws the canvas 3 by 3 so the seam is visible. Export still writes one copy.
+- Palette swatches can be dragged into a new order, one undo step. Ramp fills the span between two swatches with N steps, including both ends. Snap (S), off until you turn it on, makes pencil, fill, and shapes stamp the nearest palette color. The eraser still clears. GIMP `.gpl`, hex `.hex`, and JASC `.pal` keep that order.
 
 ## [0.5.0] - 2026-10-23
 
