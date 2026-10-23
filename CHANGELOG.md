@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Autosave keeps a recovery `.oxypix` in the app data folder, about once a minute and after a run of edits. It does not overwrite the open file. The next launch can restore or discard that copy, including a drawing that was never saved. File can turn autosave off. Saving, or discarding changes, removes the recovery copy.
 - Each tool button shows its shortcut letter.
 - File → Open recent keeps ten documents. A repeated file name shows the parent folder, a missing file is marked, and Clear recent empties the list.
 - Edit can flip the selection horizontally or vertically, or turn it 90° clockwise, counter-clockwise, or 180°. With nothing selected the same commands change the active cel. Each one is a single undo step. Shortcuts are Shift+H, Shift+V, Shift+., Shift+,, and Ctrl+Shift+.. A 90° turn of a non-square rectangle swaps its sides and stays centered; pixels that do not fit on the cel are dropped.

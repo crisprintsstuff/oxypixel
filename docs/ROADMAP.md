@@ -32,6 +32,7 @@ In the 0.4.0 tree and covered by tests or by the release workflow.
 | Palette files | GIMP `.gpl`, hex `.hex` (one `RRGGBB` per line, `RRGGBBAA` when alpha is not 255), and JASC `.pal`. Import replaces the palette and is one undo step. More than 256 colors is an error | `io/palette.rs`, `editor.rs`, `app.rs` |
 | Window | egui 0.31 glow, nearest-neighbor canvas, whole-pixel zoom, a grid when the cells are readable, pan, shortcuts, tool icons with their shortcut letter | `app.rs`, `canvas.rs` |
 | Files UI | Recent list of ten paths, a folder hint when names match, a missing-file mark, and Clear recent. Drag and drop, Windows file dialog, Linux portal with a path field fallback | `recent.rs`, `native.rs` |
+| Recovery | Autosave writes a `.oxypix` in the data directory about once a minute and after 30 edits. Startup can restore or discard it. A save, a discard, or a clean close removes it | `recovery.rs`, `app.rs` |
 | Updates | Help, then Check for updates. Download only after `SHA256SUMS.txt` matches. No network until that command | `update.rs` |
 | Windows package | Per-user NSIS installer and portable exe. Static CRT. Unsigned | `installer/oxypixel.nsi`, `release.yml` |
 | Portable exe resources | The tagged Windows build embeds an icon and VERSIONINFO from `oxypixel.rc` when `rc.exe` is on `PATH`. A cross-build without `rc.exe`, `llvm-rc`, or `windres` does not | `build.rs`, [README.md](../README.md), [BUILD-WINDOWS.md](BUILD-WINDOWS.md) |
@@ -161,7 +162,9 @@ Each tool button draws its letter (B, E, G, I, L, R, O, M) in the corner of the 
 
 ### OX-P12
 
-**A recovery file after a crash.** Closing the window with unsaved edits already asks before discarding them. A killed process keeps only the last successful save. Recent files store a path, and [OX-P5](#ox-p5) would store a text log. A later task should write a recovery `.oxypix` on a timer next to `recent.txt`, and on the next launch ask whether to open it. Export commands, unit tests, and a headless run do not write that file and do not open a dialog.
+**A recovery file after a crash.** Status: done. Area: `crates/oxypixel/src/recovery.rs`, `crates/oxypixel/src/app.rs`.
+
+A dirty document is copied to a recovery `.oxypix` in the app data directory, next to `recent.txt`, about once a minute and after 30 edits. The copy is written on a background thread as a temp file plus a rename, after the stroke or slider drag has finished, and it never uses the user's own path. An untitled drawing is included. The next launch lists each copy with its name and the time it was saved, and asks to restore or discard it. A successful save, Discard on the unsaved-changes dialog, or a close with a clean document removes that copy. File → Turn off autosave recovery stores the choice in the same data directory. Export commands, unit tests, and a headless run do not write a recovery file and do not open a dialog.
 
 ### OX-P13
 
