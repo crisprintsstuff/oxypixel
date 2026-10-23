@@ -39,6 +39,8 @@ pub struct ViewState {
     pub pan: Vec2,
     pub grid: bool,
     pub onion: OnionSkin,
+    /// Draw the canvas again on each side so a wrapped seam is visible. Export ignores this.
+    pub tiled: bool,
     pub fit_next: bool,
     pub panel: Rect,
     texture: Option<TextureHandle>,
@@ -60,6 +62,7 @@ impl Default for ViewState {
             pan: Vec2::ZERO,
             grid: true,
             onion: OnionSkin::default(),
+            tiled: false,
             fit_next: true,
             panel: Rect::ZERO,
             texture: None,
@@ -88,6 +91,29 @@ impl ViewState {
             (self.panel.height() - size.y) * 0.5,
         );
         self.fit_next = false;
+    }
+
+    /// Fit a 3 by 3 repeat and keep the real canvas in the middle.
+    pub fn fit_tiled(&mut self, width: u32, height: u32) {
+        if self.panel.width() < 8.0 || self.panel.height() < 8.0 || width == 0 || height == 0 {
+            self.tiled = true;
+            return;
+        }
+        self.zoom = fit_zoom(
+            self.panel.width(),
+            self.panel.height(),
+            width.saturating_mul(3),
+            height.saturating_mul(3),
+        );
+        let tile = Vec2::new(width as f32 * self.zoom, height as f32 * self.zoom);
+        let span = tile * 3.0;
+        let span_origin = Vec2::new(
+            (self.panel.width() - span.x) * 0.5,
+            (self.panel.height() - span.y) * 0.5,
+        );
+        self.pan = span_origin + tile;
+        self.fit_next = false;
+        self.tiled = true;
     }
 
     /// One clean zoom step, keeping `pointer` over the same document pixel.
@@ -216,11 +242,35 @@ pub fn show_canvas(
     let doc_rect = Rect::from_min_size(origin, screen);
     let painter = ui.painter_at(rect);
     if let Some(texture) = &view.texture {
-        painter.image(
-            texture.id(),
+        let uv = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0));
+        if view.tiled {
+            for ty in -1..=1 {
+                for tx in -1..=1 {
+                    if tx == 0 && ty == 0 {
+                        continue;
+                    }
+                    let corner = origin
+                        + Vec2::new(
+                            tx as f32 * width as f32 * view.zoom,
+                            ty as f32 * height as f32 * view.zoom,
+                        );
+                    painter.image(
+                        texture.id(),
+                        Rect::from_min_size(corner, screen),
+                        uv,
+                        Color32::WHITE,
+                    );
+                }
+            }
+        }
+        painter.image(texture.id(), doc_rect, uv, Color32::WHITE);
+    }
+    if view.tiled {
+        painter.rect_stroke(
             doc_rect,
-            Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
-            Color32::WHITE,
+            0.0,
+            Stroke::new(1.0_f32, AMBER),
+            StrokeKind::Outside,
         );
     }
     draw_grid(&painter, view, origin, rect, width, height);
@@ -242,9 +292,18 @@ pub fn show_canvas(
         painter.rect_stroke(r, 0.0, Stroke::new(1.0_f32, AMBER), StrokeKind::Inside);
     }
 
-    let hover = response
+    let raw_hover = response
         .hover_pos()
-        .and_then(|pos| pixel_inside(origin, view.zoom, width, height, pos));
+        .map(|pos| pixel_at(origin, view.zoom, pos));
+    let hover = raw_hover.and_then(|(x, y)| {
+        if x >= 0 && y >= 0 && (x as u32) < width && (y as u32) < height {
+            Some((x, y))
+        } else if view.tiled && editor.wraps() {
+            Some(editor.wrap_point(x, y))
+        } else {
+            None
+        }
+    });
     if response.hovered() {
         let space = ui.input(|i| i.key_down(egui::Key::Space));
         let icon = if view.panning {
@@ -265,7 +324,7 @@ pub fn show_canvas(
             }
         }
     }
-    if let Some((x, y)) = hover {
+    if let Some((x, y)) = raw_hover.filter(|_| hover.is_some()) {
         if let Some(mark) = hover_rect(editor.tool(), editor.brush(), x, y, origin, view.zoom) {
             let secondary = ui.input(|i| i.pointer.button_down(PointerButton::Secondary));
             let color = if secondary {
@@ -824,15 +883,6 @@ fn pixel_at(origin: Pos2, zoom: f32, pos: Pos2) -> (i32, i32) {
     ((rel.x / zoom).floor() as i32, (rel.y / zoom).floor() as i32)
 }
 
-fn pixel_inside(origin: Pos2, zoom: f32, width: u32, height: u32, pos: Pos2) -> Option<(i32, i32)> {
-    let (x, y) = pixel_at(origin, zoom, pos);
-    if x >= 0 && y >= 0 && (x as u32) < width && (y as u32) < height {
-        Some((x, y))
-    } else {
-        None
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -975,5 +1025,23 @@ mod tests {
         let visible = visible_document_bounds(&view, 32, 32);
         assert!(visible.min.x < 16.0 && visible.max.x > 16.0);
         assert!(visible.min.y < 4.0 && visible.max.y > 4.0);
+    }
+
+    #[test]
+    fn a_fitted_tiled_view_marks_one_tile_for_the_preview() {
+        let mut view = ViewState {
+            panel: Rect::from_min_size(Pos2::ZERO, Vec2::new(600.0, 600.0)),
+            ..Default::default()
+        };
+        view.fit_tiled(32, 32);
+        assert!(view.tiled);
+        let visible = visible_document_bounds(&view, 32, 32);
+        assert!(visible.min.x >= 0.0 && visible.min.y >= 0.0);
+        assert!(visible.max.x <= 32.0 && visible.max.y <= 32.0);
+        let span = visible.max - visible.min;
+        assert!(span.x <= 32.0 + 1e-3 && span.y <= 32.0 + 1e-3);
+        assert!((visible.min.x).abs() < 1e-3 && (visible.min.y).abs() < 1e-3);
+        assert!((visible.max.x - 32.0).abs() < 1e-3);
+        assert!((visible.max.y - 32.0).abs() < 1e-3);
     }
 }

@@ -20,9 +20,9 @@ In the 0.5.0 tree and covered by tests or by the release workflow.
 
 | Area | What exists | Where |
 | --- | --- | --- |
-| Tools | Pencil, eraser, fill, eyedropper, line, rectangle, ellipse, rectangular select. Brush 1–16. Filled or outline shapes. | `editor.rs`, `draw.rs` |
+| Tools | Pencil, eraser, fill, eyedropper, line, rectangle, ellipse, rectangular select. Brush 1–16. Filled or outline shapes. Optional one-pixel pixel-perfect pencil | `editor.rs`, `draw.rs` |
 | Selection | Drag to move, arrow nudge, flip, rotate, system-clipboard and in-memory copy and paste, clear, select all. The status line shows the selection size | `editor.rs`, `clipboard.rs`, `app.rs` |
-| Canvas | Resize and crop. Mirror horizontal and vertical while stamping | `document.rs`, `editor.rs` |
+| Canvas | Resize and crop. Mirror horizontal and vertical while stamping. Optional wrap, and a 3×3 tiled view that export ignores | `document.rs`, `editor.rs`, `canvas.rs` |
 | Layers | Add, delete, duplicate, reorder, rename, visibility, opacity, merge down. At most 32 | `document.rs` |
 | Frames | Add, duplicate, duration 20–10000 ms on the slider, playback clock, thumbnails, onion skin for earlier and later frames | `animation.rs`, `canvas.rs`, `framestrip.rs` |
 | Undo | Up to 50 steps and 256 MiB, including the selection rectangle. Slider drags coalesce | `history.rs` |
@@ -166,7 +166,7 @@ Each frame button shows a small composite of that frame and its number. The hove
 
 **A preview of the whole image beside the canvas.** Status: done. Area: `crates/oxypixel/src/preview.rs`, `crates/oxypixel/src/session.rs`.
 
-View → Show preview opens a resizable panel between the canvas and the layer list. It draws the composited frame at the largest integer scale that fits, or one screen pixel for several document pixels when the frame is larger than the panel. The picture updates as you draw. With more than one frame, Play walks the durations inside the panel and leaves the edited frame where it is; Pause shows the frame you are on. A click or drag pans the main canvas so that spot is centered, and an amber rectangle marks the canvas viewport. Hide preview closes the panel. The choice is stored in `view.txt` next to recent files and is restored on the next launch. A composite is built once per frame until the pixels change. A stroke rebuilds only the active frame. Playback reuses the frames it already built.
+View → Show preview opens a resizable panel between the canvas and the layer list. It draws the composited frame at the largest integer scale that fits, or one screen pixel for several document pixels when the frame is larger than the panel. The picture updates as you draw. With more than one frame, Play walks the durations inside the panel and leaves the edited frame where it is; Pause shows the frame you are on. A click or drag pans the main canvas so that spot is centered, and an amber rectangle marks the canvas viewport. Tiled view repeats that canvas 3 by 3 on the main view; the preview stays one composite, and the amber rectangle stays inside that single tile. Hide preview closes the panel. The choice is stored in `view.txt` next to recent files and is restored on the next launch. A composite is built once per frame until the pixels change. A stroke rebuilds only the active frame. Playback reuses the frames it already built.
 
 ### OX-P12
 
@@ -176,11 +176,15 @@ A dirty document is copied to a recovery `.oxypix` in the app data directory, ne
 
 ### OX-P13
 
-**Drop the extra corner on a one-pixel pencil stroke.** The pencil keeps every pixel the pointer visits, so a diagonal step leaves a doubled corner. A later task should add a checkbox, off by default, that removes that corner while the brush is one pixel. The stroke is still one undo step. The rule is tested in `draw.rs`. The line tool is unchanged.
+**Drop the extra corner on a one-pixel pencil stroke.** Status: done. Area: `crates/oxypixel-core/src/draw.rs`, `crates/oxypixel-core/src/editor.rs`, `crates/oxypixel/src/app.rs`.
+
+Pixel-perfect is off until the user turns it on (checkbox, or P). A one-pixel pencil stroke that visits both pixels of a diagonal step drops the corner. A larger brush keeps every pixel. The line tool is unchanged. Mirror stamps follow the same cleaned path. The stroke is still one undo step. The rule is tested in `draw.rs`.
 
 ### OX-P14
 
-**Wrap a stroke around the canvas for a tile.** Mirror H and Mirror V repeat a stamp across the center. A stroke that leaves the left edge stops there, so a seamless tile border takes more than one drag. A later task should add a tile mode that wraps pencil, eraser, and shape stamps on both axes, including the shape preview. The center mirrors stay as they are.
+**Wrap a stroke around the canvas for a tile.** Status: done. Area: `crates/oxypixel-core/src/draw.rs`, `crates/oxypixel-core/src/editor.rs`, `crates/oxypixel/src/canvas.rs`.
+
+Wrap is off until the user turns it on (checkbox, or T). Pencil, eraser, line, rectangle, ellipse, and fill that leave an edge continue on the opposite edge, including the shape preview. Mirror still reflects across the canvas center. Tiled view (checkbox, or Shift+T) draws the same cel 3 by 3 so the seam is visible. Export writes that one cel. The wrap math is tested in `draw.rs`.
 
 ### OX-P15
 
