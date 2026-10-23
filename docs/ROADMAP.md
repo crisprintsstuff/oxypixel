@@ -131,6 +131,54 @@ The document palette can be replaced from a file and written back out. GIMP `.gp
 
 **A Windows launch smoke test in CI.** The Windows job builds the app but never starts it. A later task could launch that build, confirm the process starts, and close it without a modal dialog. It should not add a control socket.
 
+### OX-P7
+
+**Snap zoom to whole pixels, and keep the grid visible at Fit.** The wheel and the status-bar buttons multiply the scale by 1.1, so a fitted canvas lands on percents such as 1952, and a few clicks later on 514. Nearest-neighbor drawing then gives neighboring pixels different screen sizes. The grid is skipped when zoom is below 6 (the status line is under 600%) and when more than 400 cells are in view, so Fit on a canvas larger than about 64×64 leaves the Grid checkbox with nothing on screen. A later task should step zoom through whole-pixel scales, still inside the current clamp, with the wheel centered on the pointer. Fit (Ctrl+0) stays. The grid should still draw at that fitted scale, lighter when many cells are visible.
+
+### OX-P8
+
+**Preview the brush in the color that will be painted.** Pencil, eraser, line, rectangle, and ellipse already stroke a one-pixel teal rectangle the size of the brush. The rectangle is empty, so the stamp appears only after the drag starts. A later task should fill that hover mark with the color the next stamp will use, including the secondary color while the right button is down. The eyedropper and the selection keep a one-pixel outline.
+
+### OX-P9
+
+**Show the selection, then flip it or turn it by 90 degrees.** The marquee is a one-pixel amber rectangle, and the status line does not report its width and height. Dragging inside the rectangle moves those pixels, the arrow keys nudge them, and copy and paste already work. Paste paints immediately at the selection origin, or at (0, 0) when nothing is selected. Mirror H and Mirror V repeat a new stroke across the center. Edit has no command that flips or rotates pixels already on the cel. A later task should draw a marquee that stays easy to see, print the selection size on the status line, and add flip horizontal, flip vertical, and rotate 90 degrees. Each change is one undo step, applied to the selection, or to the active cel when nothing is selected. Resampling a selection to a new size is a separate task.
+
+### OX-P10
+
+**Print the shortcut on each tool button.** The eight tools are 16×16 icons. The letter and the name show up on hover, in the status line, and under Help → Shortcuts. A later task should draw the shortcut that already exists (B, E, G, I, L, R, O, M) on the button. Until the first stroke, one line on the empty canvas can point at File → Open example and Help → Shortcuts. The shortcut map stays as it is.
+
+### OX-P11
+
+**Thumbnails on the frame strip, onion skin for the next frame, and the full duration range.** The strip labels frames with 1, 2, 3. Onion skin composites the previous frame only, and on frame 1 that frame is the last frame in the document. The duration slider stops at 1000 ms, while `set_frame_duration` accepts 20 to 10000 ms. A later task should draw a small thumbnail on each frame button, show the next frame as well as the previous one, leave frame 1 without a ghost of the last frame, and let the slider reach 10000 ms.
+
+### OX-P12
+
+**A recovery file after a crash.** Closing the window with unsaved edits already asks before discarding them. A killed process keeps only the last successful save. Recent files store a path, and [OX-P5](#ox-p5) would store a text log. A later task should write a recovery `.oxypix` on a timer next to `recent.txt`, and on the next launch ask whether to open it. Export commands, unit tests, and a headless run do not write that file and do not open a dialog.
+
+### OX-P13
+
+**Drop the extra corner on a one-pixel pencil stroke.** The pencil keeps every pixel the pointer visits, so a diagonal step leaves a doubled corner. A later task should add a checkbox, off by default, that removes that corner while the brush is one pixel. The stroke is still one undo step. The rule is tested in `draw.rs`. The line tool is unchanged.
+
+### OX-P14
+
+**Wrap a stroke around the canvas for a tile.** Mirror H and Mirror V repeat a stamp across the center. A stroke that leaves the left edge stops there, so a seamless tile border takes more than one drag. A later task should add a tile mode that wraps pencil, eraser, and shape stamps on both axes, including the shape preview. The center mirrors stay as they are.
+
+### OX-P15
+
+**Show enough of a recent file to tell two of them apart.** File → Open recent keeps five paths, and each row is the file name. The full path is a hover tip. A missing file uses that same label, and the list has no Clear. A later task should show the parent folder on the row, mark a path that is gone, add Clear recent, and keep up to ten paths.
+
+### OX-P16
+
+**Reorder swatches, and optionally snap strokes to the palette.** The palette holds up to 256 colors. A click sets the primary color, a right-click sets the secondary color, and import replaces the list in one undo step. Swatches have no drag order, and a stroke may use any RGBA color. A later task should let a swatch be dragged to a new index, fill a ramp between two swatches, and offer a session toggle that snaps the pencil, the fill, and the shape tools to the nearest palette color. The `.oxypix` version stays 1, and the document stays RGBA.
+
+### OX-P17
+
+**A reference image that export skips.** Import image as layer fits the bitmap into the canvas and stores a normal layer, so PNG, GIF, and the spritesheet include those pixels. A later task should keep a reference above the stack for the session, let it be moved and scaled, and leave it out of the composite those exporters write. It is not a new field in the file.
+
+### OX-P18
+
+**Blend modes on a layer, once the file format allows them.** Each layer already has an opacity, and compositing is source-over. A later task could add a few blend modes, such as multiply, screen, and add, stored on the layer. That needs a new `.oxypix` version, so it waits until a human accepts the format change.
+
 ## Human only
 
 ### OX-H1
