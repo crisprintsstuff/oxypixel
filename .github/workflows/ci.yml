@@ -96,21 +96,33 @@ jobs:
       # Windows runner, so a Windows-only lint fails here instead of on the
       # minutes that count double. The windows-latest job still runs host clippy.
       #
-      # apt-get update talks to the Ubuntu archive and, with -qq, prints
-      # nothing while it waits. On 2026-10-23 that wait consumed the whole
-      # job (and a bounded retry still never finished). The runner image
-      # already has package lists that include this compiler, so install
-      # from those lists. The timeout is only so a hung download fails the
-      # step instead of the job.
+      # The Ubuntu 24.04 image tries azure.archive.ubuntu.com first. When
+      # that mirror stalls, apt-get update -qq prints nothing until the
+      # job timeout. Drop Azure and install from the lists already on the
+      # image. Refresh indexes only if the package is missing. timeout runs
+      # as root so a stall dies with apt instead of leaving the lock held.
       - name: Windows-target clippy
         if: matrix.os == 'ubuntu-latest'
         run: |
-          timeout -k 15s 120s sudo apt-get install -y -qq \
-            -o Acquire::ForceIPv4=true \
-            -o Acquire::Retries=3 \
-            -o Acquire::http::Timeout=30 \
-            -o Acquire::https::Timeout=30 \
-            gcc-mingw-w64-x86-64
+          set -euo pipefail
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
+          fi
+          apt_install() {
+            sudo timeout -k 15s 90s apt-get install -y --no-install-recommends \
+              -o Acquire::Retries=2 \
+              -o Acquire::http::Timeout=15 \
+              -o Acquire::https::Timeout=15 \
+              gcc-mingw-w64-x86-64
+          }
+          if ! apt_install; then
+            echo "install from the image lists failed; refreshing from the Ubuntu archive"
+            sudo timeout -k 15s 90s apt-get update \
+              -o Acquire::Retries=2 \
+              -o Acquire::http::Timeout=15 \
+              -o Acquire::https::Timeout=15
+            apt_install
+          fi
           rustup target add x86_64-pc-windows-gnu
           make check-windows
       - name: Test
