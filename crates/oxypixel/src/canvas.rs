@@ -389,6 +389,33 @@ fn handle_pointer(
         }
         (rel.x / zoom, rel.y / zoom)
     };
+    let pointer_pos = response.interact_pointer_pos().or(response.hover_pos());
+    let primary_down = ui.input(|i| i.pointer.button_down(PointerButton::Primary));
+    let primary_pressed = ui.input(|i| i.pointer.button_pressed(PointerButton::Primary));
+    let picking = alt || editor.tool() == Tool::Eyedropper;
+    if let Some(index) = view.moving_ref {
+        if primary_down {
+            if let Some(pos) = pointer_pos {
+                let (dx, dy) = doc_at(pos);
+                let (lx, ly) = doc_at(view.move_last);
+                refs.nudge(index, dx - lx, dy - ly);
+                view.move_last = pos;
+            }
+        } else {
+            view.moving_ref = None;
+        }
+        return;
+    }
+    if primary_pressed && !picking {
+        if let Some(pos) = pointer_pos {
+            if let Some(index) = refs.hit_movable(doc_at(pos).0, doc_at(pos).1) {
+                refs.set_active(Some(index));
+                view.moving_ref = Some(index);
+                view.move_last = pos;
+                return;
+            }
+        }
+    }
     if response.drag_started() {
         if let Some(pos) = response.interact_pointer_pos() {
             let (x, y) = at(pos);

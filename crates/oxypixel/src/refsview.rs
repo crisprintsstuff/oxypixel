@@ -117,6 +117,10 @@ pub fn show_list(
             {
                 let _ = refs.set_scale(index, scale);
             }
+            if let Some((x, y)) = refs.placement(index) {
+                ui.label(format!("{x:.0}, {y:.0}"))
+                    .on_hover_text("Document position. Drag the image on the canvas to move it.");
+            }
             if ui
                 .checkbox(&mut sample, "Sample")
                 .on_hover_text(

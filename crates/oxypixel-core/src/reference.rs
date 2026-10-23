@@ -191,6 +191,10 @@ impl References {
             .unwrap_or(1.0)
     }
 
+    pub fn placement(&self, index: usize) -> Option<(f32, f32)> {
+        self.items.get(index).map(|image| (image.x, image.y))
+    }
+
     pub fn set_visible(&mut self, index: usize, visible: bool) -> Result<()> {
         self.edit(index, |image| image.visible = visible)
     }
