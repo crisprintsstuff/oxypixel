@@ -20,7 +20,7 @@ Image decoding still depends on `image` and the `png`, `gif`, and `bmp` crates. 
 
 ## Threat model
 
-A document is opened because a person asked for it. A hostile file should fail with an error or stay inside the memory caps above. It should not overwrite arbitrary paths: export writes only the path the user entered.
+A document is opened because a person asked for it. A hostile file should fail with an error or stay inside the memory caps above. It should not overwrite arbitrary paths: export writes only the path the user entered. Autosave writes a recovery copy only inside the app data directory, as a temp file renamed into place, and removes that copy after a successful save.
 
 The Windows build in this repository is **unsigned**. An unsigned installer can be modified in transit. Publish checksums with releases (`SHA256SUMS.txt` from the build scripts) and prefer an Authenticode signature once a certificate exists. Signing steps are in [docs/BUILD-WINDOWS.md](docs/BUILD-WINDOWS.md). Never commit a certificate or its password.
 

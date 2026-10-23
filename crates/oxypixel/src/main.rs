@@ -13,6 +13,7 @@ mod clipboard;
 mod icon;
 mod native;
 mod recent;
+mod recovery;
 mod shortcuts;
 mod theme;
 mod toolicons;

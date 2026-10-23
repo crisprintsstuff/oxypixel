@@ -188,3 +188,66 @@ fn palette_export_and_import_roundtrip() {
     assert_eq!(doc.composite(0).unwrap()[0], Rgba::new(10, 20, 30, 255));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn export_does_not_write_a_recovery_file() {
+    let root = std::env::temp_dir().join(format!(
+        "oxypixel-cli-recovery-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let src = root.join("sprite.oxypix");
+    let png = root.join("sprite.png");
+    let mut editor = Editor::new(2, 2).unwrap();
+    editor.set_primary(Rgba::new(10, 20, 30, 255));
+    editor.pointer_down(0, 0, MouseButton::Primary, false);
+    editor.pointer_up(0, 0, false);
+    save_oxypix(editor.document(), &src).unwrap();
+
+    #[cfg(windows)]
+    let data = root.join("OxyPixel");
+    #[cfg(not(windows))]
+    let data = root.join("oxypixel");
+
+    let mut command = bin();
+    #[cfg(windows)]
+    command.env("APPDATA", &root);
+    #[cfg(not(windows))]
+    command.env("XDG_DATA_HOME", &root);
+    command
+        .arg("export-png")
+        .arg(&src)
+        .arg(&png)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child = command.spawn().unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        if child.try_wait().unwrap().is_some() {
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("export-png hung instead of exiting");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(png.is_file());
+    assert!(
+        !data.join("recovery").exists(),
+        "export must not write a recovery file"
+    );
+    assert!(!data.join("autosave.txt").exists());
+    let _ = std::fs::remove_dir_all(&root);
+}

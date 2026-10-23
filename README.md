@@ -113,6 +113,7 @@ These match the current editor. Planned work is listed in [docs/ROADMAP.md](docs
 - PNG and spritesheet export at 1×, 2×, or 4× nearest-neighbor
 - `.oxypix` documents, plus PNG, BMP, and GIF import and export
 - Recent files (a folder hint when names match, a missing-file mark, and Clear recent), drag-and-drop, a Windows file dialog, and a Linux portal dialog with a path field if the portal is unavailable
+- Autosave writes a recovery copy about once a minute, and after a run of edits, into the app data folder. It does not overwrite the open file. The next launch can restore or discard that copy, including a drawing that was never saved. Turn it off from the File menu
 - Headless `export-png`, `export-bmp`, `export-gif`, `export-sheet`, `export-palette`, and `import-palette` commands
 - Keyboard shortcuts
 

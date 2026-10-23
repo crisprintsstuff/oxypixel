@@ -149,6 +149,14 @@ impl Editor {
         self.dirty = false;
     }
 
+    /// The document has changes that are not in the user's file.
+    ///
+    /// Restoring a recovery copy uses this. The pixels already come from that
+    /// copy, so this does not push an undo step.
+    pub fn mark_dirty(&mut self) {
+        self.dirty = true;
+    }
+
     pub fn tool(&self) -> Tool {
         self.tool
     }
@@ -271,6 +279,11 @@ impl Editor {
 
     pub fn gesture_active(&self) -> bool {
         !matches!(self.gesture, Gesture::None)
+    }
+
+    /// A slider drag is grouping edits into one undo step.
+    pub fn coalesce_active(&self) -> bool {
+        self.coalescing
     }
 
     pub fn selection(&self) -> Option<PixelRect> {

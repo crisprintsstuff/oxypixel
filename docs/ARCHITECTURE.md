@@ -29,6 +29,8 @@ Shape tools preview until pointer release, then commit one undo step. Pencil com
 
 The window is egui 0.31 with the `glow` OpenGL backend. The canvas is a nearest-neighbor texture rebuilt when the document changes, and on every frame while a shape preview is active. File dialogs use `rfd`: the system dialog on Windows, and the XDG desktop portal on Linux. The path field stays available when the portal does not return a file. The Linux build does not need GTK development packages. Tool icons are drawn in code at 16×16.
 
+A dirty document is also copied into the app data directory on a background thread, as a recovery `.oxypix` beside `recent.txt`. That copy is not the user's file. The next launch can restore or discard it. Export commands do not write it.
+
 ## Windows and Linux
 
 The Windows release links the MSVC CRT statically (`target-feature=+crt-static`) and uses the GUI subsystem. A resource compiler, when present, embeds an icon and `VERSIONINFO`. The installer is NSIS and installs per user.

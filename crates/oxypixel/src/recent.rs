@@ -89,7 +89,7 @@ fn store_path() -> Option<PathBuf> {
     data_dir().map(|dir| dir.join("recent.txt"))
 }
 
-fn data_dir() -> Option<PathBuf> {
+pub fn data_dir() -> Option<PathBuf> {
     #[cfg(windows)]
     {
         std::env::var_os("APPDATA").map(|p| PathBuf::from(p).join("OxyPixel"))

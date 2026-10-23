@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
+use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, RichText, ViewportCommand};
 use oxypixel_core::{
@@ -14,6 +15,7 @@ use crate::canvas::{self, ViewState};
 use crate::clipboard::{self, ClipboardRead};
 use crate::native;
 use crate::recent;
+use crate::recovery;
 use crate::shortcuts::{self, Command};
 use crate::theme::AMBER;
 use crate::toolicons;
@@ -35,6 +37,7 @@ enum DialogKind {
     About,
     Shortcuts,
     Update,
+    Recovery,
 }
 
 enum UpdateStatus {
@@ -105,6 +108,16 @@ pub struct OxyApp {
     clipboard_local_only: bool,
     /// Copy and paste chords that are still held. Key repeats must not run again.
     clipboard_chord: shortcuts::ClipboardChord,
+    autosave_enabled: bool,
+    /// Discard was chosen and the next dialog can still be cancelled.
+    recovery_suppress: bool,
+    recovery_id: String,
+    recovery_anchor_generation: u64,
+    recovery_anchor_at: Option<Instant>,
+    recovery_in_flight: bool,
+    recovery: Option<recovery::RecoveryWriter>,
+    pending_recoveries: Vec<recovery::RecoveryEntry>,
+    recovery_choice: usize,
 }
 
 enum UpdateMessage {
@@ -123,6 +136,11 @@ impl OxyApp {
             .map(Path::to_path_buf);
         let mut editor = Editor::demo().unwrap_or_else(|_| Editor::default());
         editor.mark_clean();
+        let recovery_anchor_generation = editor.generation();
+        let autosave_enabled = recent::data_dir()
+            .map(|dir| recovery::autosave_enabled(&dir))
+            .unwrap_or(true);
+        let recovery = recovery::RecoveryWriter::spawn().ok();
         let mut app = Self {
             editor,
             view: ViewState::default(),
@@ -158,11 +176,21 @@ impl OxyApp {
             update_rx: None,
             clipboard_local_only: false,
             clipboard_chord: shortcuts::ClipboardChord::default(),
+            autosave_enabled,
+            recovery_suppress: false,
+            recovery_id: recovery::untitled_id(),
+            recovery_anchor_generation,
+            recovery_anchor_at: None,
+            recovery_in_flight: false,
+            recovery,
+            pending_recoveries: Vec::new(),
+            recovery_choice: 0,
         };
         app.hex = app.editor.primary().to_hex();
         if let Some(path) = open {
             app.open_path(path);
         }
+        app.scan_recoveries();
         app
     }
 
@@ -251,9 +279,11 @@ impl OxyApp {
     fn open_path(&mut self, path: PathBuf) {
         match load_oxypix(&path) {
             Ok(doc) => {
+                self.detach_recovery();
                 self.editor.replace_document(doc);
                 self.remember_file(&path);
-                self.save_path = Some(path);
+                self.save_path = Some(path.clone());
+                self.bind_recovery_slot(Some(&path));
                 self.view.fit_next = true;
                 self.playing = false;
                 self.hex = self.editor.primary().to_hex();
@@ -268,7 +298,9 @@ impl OxyApp {
             Ok(()) => {
                 self.editor.mark_clean();
                 self.remember_file(&path);
-                self.save_path = Some(path);
+                self.forget_recovery();
+                self.save_path = Some(path.clone());
+                self.bind_recovery_slot(Some(&path));
                 self.note_ok("Saved.");
                 true
             }
@@ -298,10 +330,27 @@ impl eframe::App for OxyApp {
         self.bottom_bar(ctx);
         self.tool_panel(ctx);
         self.side_panel(ctx);
+        let allow_draw = !self.playing && !matches!(self.dialog, Some(DialogKind::Recovery));
         egui::CentralPanel::default().show(ctx, |ui| {
-            self.hover = canvas::show_canvas(ui, &mut self.editor, &mut self.view, !self.playing);
+            self.hover = canvas::show_canvas(ui, &mut self.editor, &mut self.view, allow_draw);
         });
         self.show_dialog(ctx);
+        self.consider_autosave(ctx);
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        let pending_current = self
+            .pending_recoveries
+            .iter()
+            .any(|entry| entry.id == self.recovery_id);
+        if self.recovery_suppress || (!self.editor.is_dirty() && !pending_current) {
+            self.forget_recovery();
+        } else if self.editor.is_dirty() && self.autosave_enabled {
+            self.flush_recovery();
+        }
+        if let Some(writer) = self.recovery.as_mut() {
+            writer.shutdown();
+        }
     }
 }
 
@@ -332,11 +381,12 @@ impl OxyApp {
             // Track chord releases while the dialog is up so the next copy still runs.
             let _ = self.shortcut_commands(ctx);
             let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
-            if escape {
+            if escape && self.dialog != Some(DialogKind::Recovery) {
                 self.dialog = None;
                 self.pending = None;
                 self.pending_path = None;
                 self.dialog_error = None;
+                self.recovery_suppress = false;
             }
             return;
         }
@@ -575,9 +625,11 @@ impl OxyApp {
     fn load_example(&mut self) {
         match Editor::demo() {
             Ok(editor) => {
+                self.detach_recovery();
                 let doc = editor.document().clone();
                 self.editor.replace_document(doc);
                 self.save_path = None;
+                self.bind_recovery_slot(None);
                 self.view.fit_next = true;
                 self.playing = false;
                 self.hex = self.editor.primary().to_hex();
@@ -685,9 +737,11 @@ impl OxyApp {
     fn import_document(&mut self, path: &Path) -> bool {
         match import_image(path) {
             Ok(doc) => {
+                self.detach_recovery();
                 self.editor.replace_document(doc);
                 self.note_dir(path);
                 self.save_path = None;
+                self.bind_recovery_slot(None);
                 self.view.fit_next = true;
                 self.playing = false;
                 self.note_ok(format!("Imported {}.", path.display()));
@@ -925,9 +979,11 @@ impl OxyApp {
         };
         match Editor::new(width, height) {
             Ok(editor) => {
+                self.detach_recovery();
                 let doc = editor.document().clone();
                 self.editor.replace_document(doc);
                 self.save_path = None;
+                self.bind_recovery_slot(None);
                 self.view.fit_next = true;
                 self.playing = false;
                 self.hex = self.editor.primary().to_hex();
@@ -1019,6 +1075,21 @@ impl OxyApp {
                         ui.close_menu();
                     }
                     ui.separator();
+                    let autosave_label = if self.autosave_enabled {
+                        "Turn off autosave recovery"
+                    } else {
+                        "Turn on autosave recovery"
+                    };
+                    if ui
+                        .button(autosave_label)
+                        .on_hover_text(
+                            "Saves a recovery copy in the app data folder. It does not overwrite this file.",
+                        )
+                        .clicked()
+                    {
+                        self.set_autosave_enabled(!self.autosave_enabled);
+                        ui.close_menu();
+                    }
                     if menu_item(ui, "Quit", "Ctrl+Q") {
                         self.request_quit(ui.ctx());
                         ui.close_menu();
@@ -1793,6 +1864,7 @@ impl OxyApp {
             DialogKind::About => self.dialog_about(ctx),
             DialogKind::Shortcuts => self.dialog_shortcuts(ctx),
             DialogKind::Update => self.dialog_update(ctx),
+            DialogKind::Recovery => self.dialog_recovery(ctx),
         }
         if self.allow_quit && matches!(self.pending, Some(Pending::Quit)) {
             ctx.send_viewport_cmd(ViewportCommand::Close);
@@ -1838,6 +1910,7 @@ impl OxyApp {
         if close {
             self.dialog = None;
             self.dialog_error = None;
+            self.recovery_suppress = false;
         }
     }
 
@@ -2012,6 +2085,7 @@ impl OxyApp {
             self.dialog = None;
             self.dialog_error = None;
             self.pending = None;
+            self.recovery_suppress = false;
         }
     }
 
@@ -2040,6 +2114,7 @@ impl OxyApp {
         match action {
             Some(0) => self.request_save(),
             Some(1) => {
+                self.recovery_suppress = true;
                 if let Some(pending) = self.pending {
                     self.finish(pending);
                 }
@@ -2182,6 +2257,381 @@ impl OxyApp {
             self.dialog = None;
         }
     }
+
+    fn scan_recoveries(&mut self) {
+        let Some(dir) = recovery::directory() else {
+            return;
+        };
+        recovery::clear_temps(&dir);
+        self.pending_recoveries = recovery::list(&dir);
+        if !self.pending_recoveries.is_empty() {
+            self.recovery_choice = 0;
+            self.dialog_error = None;
+            self.dialog = Some(DialogKind::Recovery);
+        }
+    }
+
+    fn document_name(&self) -> String {
+        self.save_path
+            .as_ref()
+            .and_then(|path| path.file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "Untitled".to_string())
+    }
+
+    fn bind_recovery_slot(&mut self, path: Option<&Path>) {
+        self.recovery_suppress = false;
+        self.recovery_id = match path {
+            Some(path) => recovery::id_for_path(path),
+            None => recovery::untitled_id(),
+        };
+        self.recovery_anchor_generation = self.editor.generation();
+        self.recovery_anchor_at = None;
+        self.recovery_in_flight = false;
+    }
+
+    fn forget_recovery(&mut self) {
+        let id = self.recovery_id.clone();
+        if let Some(writer) = self.recovery.as_ref() {
+            if let Some(dir) = recovery::directory() {
+                writer.invalidate(&dir, &id);
+            } else {
+                writer.retire_inflight();
+            }
+        }
+        self.recovery_in_flight = false;
+        self.recovery_anchor_generation = self.editor.generation();
+        self.recovery_anchor_at = None;
+        self.pending_recoveries.retain(|entry| entry.id != id);
+        if self.pending_recoveries.is_empty() && self.dialog == Some(DialogKind::Recovery) {
+            self.dialog = None;
+            self.dialog_error = None;
+        }
+    }
+
+    /// Leave a crash copy in place when it is still waiting on the startup dialog.
+    fn detach_recovery(&mut self) {
+        let id = self.recovery_id.clone();
+        let waiting = self.pending_recoveries.iter().any(|entry| entry.id == id);
+        if waiting && !self.recovery_suppress {
+            if let Some(writer) = self.recovery.as_ref() {
+                writer.retire_inflight();
+            }
+            self.recovery_in_flight = false;
+            return;
+        }
+        self.forget_recovery();
+    }
+
+    fn set_autosave_enabled(&mut self, enabled: bool) {
+        self.autosave_enabled = enabled;
+        if let Some(dir) = recent::data_dir() {
+            if let Err(err) = recovery::set_autosave_enabled(&dir, enabled) {
+                self.note_err(format!("Could not store the autosave setting: {err}"));
+            }
+        }
+        if !enabled {
+            let id = self.recovery_id.clone();
+            self.forget_recovery();
+            self.pending_recoveries.retain(|entry| entry.id != id);
+            if self.pending_recoveries.is_empty() && self.dialog == Some(DialogKind::Recovery) {
+                self.dialog = None;
+                self.dialog_error = None;
+            }
+            self.note_ok("Autosave recovery is off.");
+        } else {
+            self.note_ok("Autosave recovery is on.");
+        }
+    }
+
+    fn poll_recovery(&mut self) {
+        let Some(writer) = self.recovery.as_ref() else {
+            return;
+        };
+        let current_epoch = writer.epoch();
+        let mut events = Vec::new();
+        while let Some(event) = writer.poll() {
+            events.push(event);
+        }
+        for event in events {
+            match event {
+                recovery::RecoveryEvent::Wrote { epoch, generation } => {
+                    self.recovery_in_flight = false;
+                    if epoch == current_epoch {
+                        self.recovery_anchor_generation = generation;
+                        self.recovery_anchor_at = Some(Instant::now());
+                    }
+                }
+                recovery::RecoveryEvent::Cancelled => {
+                    self.recovery_in_flight = false;
+                }
+                recovery::RecoveryEvent::Failed { message } => {
+                    self.recovery_in_flight = false;
+                    if message == "recovery writer stopped" {
+                        self.recovery = None;
+                    } else {
+                        self.recovery_anchor_at = Some(Instant::now());
+                    }
+                    self.note_err(format!("Could not write the recovery copy: {message}"));
+                }
+            }
+        }
+    }
+
+    fn consider_autosave(&mut self, ctx: &egui::Context) {
+        self.poll_recovery();
+        let dirty = self.editor.is_dirty();
+        let generation = self.editor.generation();
+        if !dirty {
+            self.recovery_anchor_at = None;
+            self.recovery_anchor_generation = generation;
+            return;
+        }
+        if !self.autosave_enabled
+            || self.recovery.is_none()
+            || self.recovery_suppress
+            || matches!(self.dialog, Some(DialogKind::Recovery))
+        {
+            return;
+        }
+        if self
+            .pending_recoveries
+            .iter()
+            .any(|entry| entry.id == self.recovery_id)
+        {
+            return;
+        }
+        if self.recovery_anchor_at.is_none() {
+            self.recovery_anchor_at = Some(Instant::now());
+        }
+        let elapsed = self
+            .recovery_anchor_at
+            .map(|start| start.elapsed())
+            .unwrap_or_default();
+        let edits = generation.saturating_sub(self.recovery_anchor_generation);
+        let busy = self.editor.gesture_active() || self.editor.coalesce_active();
+        if recovery::should_write(recovery::AutosaveQuery {
+            enabled: true,
+            dirty: true,
+            busy,
+            write_in_flight: self.recovery_in_flight,
+            edits_since_recovery: edits,
+            elapsed,
+        }) {
+            self.enqueue_recovery(generation);
+        }
+        let wait = if self.recovery_in_flight {
+            Duration::from_millis(200)
+        } else {
+            Duration::from_secs(1)
+        };
+        ctx.request_repaint_after(wait);
+    }
+
+    fn enqueue_recovery(&mut self, generation: u64) {
+        let Some(dir) = recovery::directory() else {
+            return;
+        };
+        let Some(writer) = self.recovery.as_ref() else {
+            return;
+        };
+        let record = recovery::RecoveryRecord {
+            id: self.recovery_id.clone(),
+            name: self.document_name(),
+            source: self.save_path.clone(),
+            saved_unix: recovery::unix_now(),
+        };
+        let document = self.editor.document().clone();
+        let epoch = writer.epoch();
+        if writer
+            .submit(recovery::WriteJob {
+                epoch,
+                generation,
+                dir,
+                record,
+                document,
+            })
+            .is_ok()
+        {
+            self.recovery_in_flight = true;
+        }
+    }
+
+    fn flush_recovery(&mut self) {
+        let Some(dir) = recovery::directory() else {
+            return;
+        };
+        if self.editor.generation() == self.recovery_anchor_generation {
+            if let Some(path) = recovery::oxypix_path(&dir, &self.recovery_id) {
+                if path.is_file() {
+                    return;
+                }
+            }
+        }
+        if let Some(writer) = self.recovery.as_ref() {
+            writer.retire_inflight();
+        }
+        let record = recovery::RecoveryRecord {
+            id: self.recovery_id.clone(),
+            name: self.document_name(),
+            source: self.save_path.clone(),
+            saved_unix: recovery::unix_now(),
+        };
+        if let Err(err) = recovery::store_document(&dir, &record, self.editor.document()) {
+            self.note_err(format!("Could not write the recovery copy: {err}"));
+        }
+    }
+
+    fn restore_selected_recovery(&mut self) {
+        let Some(entry) = self.pending_recoveries.get(self.recovery_choice).cloned() else {
+            return;
+        };
+        match recovery::load_document(&entry.file) {
+            Ok(doc) => {
+                self.editor.replace_document(doc);
+                self.editor.mark_dirty();
+                self.save_path = entry.source.clone();
+                self.recovery_id = entry.id.clone();
+                self.recovery_suppress = false;
+                self.recovery_anchor_generation = self.editor.generation();
+                self.recovery_anchor_at = None;
+                self.recovery_in_flight = false;
+                self.pending_recoveries.retain(|item| item.id != entry.id);
+                self.recovery_choice = 0;
+                self.view.fit_next = true;
+                self.playing = false;
+                self.hex = self.editor.primary().to_hex();
+                self.dialog_error = None;
+                self.note_ok(format!("Restored {}.", entry.name));
+                if self.pending_recoveries.is_empty() {
+                    self.dialog = None;
+                }
+            }
+            Err(err) => self.dialog_error = Some(err.to_string()),
+        }
+    }
+
+    fn discard_recovery_at(&mut self, index: usize) {
+        let Some(entry) = self.pending_recoveries.get(index).cloned() else {
+            return;
+        };
+        if entry.id == self.recovery_id {
+            self.forget_recovery();
+        } else if let Some(dir) = recovery::directory() {
+            let _ = recovery::remove_id(&dir, &entry.id);
+        }
+        self.pending_recoveries.retain(|item| item.id != entry.id);
+        if self.recovery_choice >= self.pending_recoveries.len() {
+            self.recovery_choice = self.pending_recoveries.len().saturating_sub(1);
+        }
+        if self.pending_recoveries.is_empty() {
+            self.dialog = None;
+            self.dialog_error = None;
+        }
+    }
+
+    fn discard_all_recoveries(&mut self) {
+        let ids: Vec<String> = self
+            .pending_recoveries
+            .iter()
+            .map(|entry| entry.id.clone())
+            .collect();
+        for id in ids {
+            if id == self.recovery_id {
+                self.forget_recovery();
+            } else if let Some(dir) = recovery::directory() {
+                let _ = recovery::remove_id(&dir, &id);
+            }
+        }
+        self.pending_recoveries.clear();
+        self.recovery_choice = 0;
+        self.dialog = None;
+        self.dialog_error = None;
+    }
+
+    fn dialog_recovery(&mut self, ctx: &egui::Context) {
+        if self.pending_recoveries.is_empty() {
+            self.dialog = None;
+            return;
+        }
+        if self.recovery_choice >= self.pending_recoveries.len() {
+            self.recovery_choice = 0;
+        }
+        let rows: Vec<(String, String, String)> =
+            self.pending_recoveries.iter().map(recovery_row).collect();
+        let mut choice = self.recovery_choice;
+        let mut restore = false;
+        let mut discard = false;
+        let mut discard_all = false;
+        let many = rows.len() > 1;
+        let error = self.dialog_error.clone();
+        egui::Window::new("Recover unsaved work")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                ui.set_min_width(440.0);
+                ui.label(
+                    "A recovery copy was saved when OxyPixel closed before this drawing was saved.",
+                );
+                ui.label("The original file was not changed.");
+                ui.add_space(8.0);
+                if many {
+                    for (index, (title, _detail, when)) in rows.iter().enumerate() {
+                        ui.radio_value(&mut choice, index, format!("{title} — {when}"));
+                    }
+                    ui.add_space(6.0);
+                }
+                if let Some((title, detail, when)) = rows.get(choice) {
+                    if !many {
+                        ui.label(RichText::new(title).strong());
+                    }
+                    ui.label(detail);
+                    if !many {
+                        ui.label(when);
+                    }
+                }
+                if let Some(error) = &error {
+                    ui.colored_label(Color32::from_rgb(220, 100, 90), error);
+                }
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Restore").clicked()
+                        || ui.input(|input| input.key_pressed(egui::Key::Enter))
+                    {
+                        restore = true;
+                    }
+                    if ui.button("Discard").clicked() {
+                        discard = true;
+                    }
+                    if many && ui.button("Discard all").clicked() {
+                        discard_all = true;
+                    }
+                });
+                ui.add_space(6.0);
+                ui.label("Turn this off later from the File menu.");
+            });
+        self.recovery_choice = choice;
+        if restore {
+            self.restore_selected_recovery();
+        } else if discard_all {
+            self.discard_all_recoveries();
+        } else if discard {
+            let index = self.recovery_choice;
+            self.discard_recovery_at(index);
+        }
+    }
+}
+
+fn recovery_row(entry: &recovery::RecoveryEntry) -> (String, String, String) {
+    let when = format!("Saved {}", recovery::format_unix_utc(entry.saved_unix));
+    let detail = match &entry.source {
+        Some(path) => path.display().to_string(),
+        None => "This drawing had not been saved to a file yet.".to_string(),
+    };
+    (entry.name.clone(), detail, when)
 }
 
 fn paint_tool_shortcut(ui: &egui::Ui, rect: egui::Rect, shortcut: &str) {
