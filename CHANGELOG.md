@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-23
+
 ### Added
 
 - Autosave keeps a recovery `.oxypix` in the app data folder, about once a minute and after a run of edits. It does not overwrite the open file. The next launch can restore or discard that copy, including a drawing that was never saved. File can turn autosave off. Saving, or discarding changes, removes the recovery copy.
@@ -20,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Zoom in, zoom out, and the wheel step through whole-pixel scales (1×, 2×, 3×, and so on, up to 64×). Below 100% the steps are 1/2, 1/3, 1/4, 1/5, 1/6, 1/8, and 1/10. Fit still frames the canvas, on the largest of those scales that fits.
 - The pixel grid draws below 600% when a cell is still large enough to read. From 200% to 400% the lines are coarser, and a wide view uses a lighter line.
 - The brush hover mark is filled with the color that will be painted. The right button previews the secondary color. The eraser uses a light tint. Fill, pick, and select stay a one-pixel outline.
+- Ubuntu CI installs the MinGW compiler from the Ubuntu archive. It does not run `apt-get update` against the Azure mirror, which was hanging until the job timed out.
 
 ## [0.4.0] - 2026-10-21
 
