@@ -36,6 +36,9 @@ pub enum Command {
     Paste,
     Nudge(i32, i32),
     Transform(Transform),
+    TogglePixelPerfect,
+    ToggleWrap,
+    ToggleTiled,
 }
 
 pub struct Binding {
@@ -141,6 +144,18 @@ pub const BINDINGS: &[Binding] = &[
         action: "Pick a color without changing tools",
     },
     Binding {
+        keys: "P",
+        action: "Pixel-perfect pencil. One-pixel strokes drop the extra diagonal corner",
+    },
+    Binding {
+        keys: "T",
+        action: "Wrap drawing past an edge onto the opposite edge",
+    },
+    Binding {
+        keys: "Shift+T",
+        action: "Tiled view. Draw the canvas 3 by 3 so the seam is visible. Export is unchanged",
+    },
+    Binding {
         keys: "Shift+drag",
         action: "Constrain lines to 45 degrees and shapes to squares",
     },
@@ -184,6 +199,9 @@ pub fn command_from(modifiers: Modifiers, key: Key) -> Option<Command> {
         (false, false, Key::O) => Some(Command::Tool(Tool::Ellipse)),
         (false, false, Key::M) => Some(Command::Tool(Tool::Select)),
         (false, false, Key::X) => Some(Command::SwapColors),
+        (false, false, Key::P) => Some(Command::TogglePixelPerfect),
+        (false, false, Key::T) => Some(Command::ToggleWrap),
+        (false, true, Key::T) => Some(Command::ToggleTiled),
         (false, false, Key::OpenBracket) => Some(Command::BrushSmaller),
         (false, false, Key::CloseBracket) => Some(Command::BrushLarger),
         (false, false, Key::Enter) => Some(Command::PlayToggle),
@@ -336,11 +354,20 @@ mod tests {
         );
         assert_eq!(command_from(Modifiers::NONE, Key::H), None);
         assert_eq!(
+            command_from(Modifiers::NONE, Key::P),
+            Some(Command::TogglePixelPerfect)
+        );
+        assert_eq!(
+            command_from(Modifiers::NONE, Key::T),
+            Some(Command::ToggleWrap)
+        );
+        assert_eq!(
             command_from(Modifiers::NONE, Key::Period),
             Some(Command::NextFrame)
         );
         let mut shift = Modifiers::NONE;
         shift.shift = true;
+        assert_eq!(command_from(shift, Key::T), Some(Command::ToggleTiled));
         assert_eq!(
             command_from(shift, Key::H),
             Some(Command::Transform(Transform::FlipHorizontal))

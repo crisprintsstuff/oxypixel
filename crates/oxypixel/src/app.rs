@@ -476,6 +476,13 @@ impl OxyApp {
             Command::Transform(op) => {
                 self.apply(|editor| editor.transform_pixels(op));
             }
+            Command::TogglePixelPerfect => {
+                self.editor.set_pixel_perfect(!self.editor.pixel_perfect());
+            }
+            Command::ToggleWrap => {
+                self.editor.set_wrap(!self.editor.wraps());
+            }
+            Command::ToggleTiled => self.set_tiled_view(!self.view.tiled),
         }
     }
 
@@ -523,6 +530,17 @@ impl OxyApp {
                 }
             }
             _ => self.note_err("Drop a .oxypix, PNG, BMP, or GIF file."),
+        }
+    }
+
+    fn set_tiled_view(&mut self, on: bool) {
+        let width = self.editor.document().width();
+        let height = self.editor.document().height();
+        if on {
+            self.view.fit_tiled(width, height);
+        } else {
+            self.view.tiled = false;
+            self.view.fit(width, height);
         }
     }
 
@@ -1187,6 +1205,17 @@ impl OxyApp {
                         ui.close_menu();
                     }
                     if ui
+                        .button(if self.view.tiled {
+                            "Hide tiled view"
+                        } else {
+                            "Show tiled view"
+                        })
+                        .clicked()
+                    {
+                        self.set_tiled_view(!self.view.tiled);
+                        ui.close_menu();
+                    }
+                    if ui
                         .button(if self.view.onion {
                             "Hide onion skin"
                         } else {
@@ -1309,6 +1338,26 @@ impl OxyApp {
                     .changed()
                 {
                     self.editor.set_mirror_y(mirror_y);
+                }
+                let mut perfect = self.editor.pixel_perfect();
+                if ui
+                    .checkbox(&mut perfect, "Pixel-perfect (P)")
+                    .on_hover_text(
+                        "One-pixel pencil drops the extra corner of a diagonal step. The line tool is unchanged.",
+                    )
+                    .changed()
+                {
+                    self.editor.set_pixel_perfect(perfect);
+                }
+                let mut wrap = self.editor.wraps();
+                if ui
+                    .checkbox(&mut wrap, "Wrap (T)")
+                    .on_hover_text(
+                        "Pencil, eraser, fill, lines, and shapes that leave an edge continue on the opposite edge.",
+                    )
+                    .changed()
+                {
+                    self.editor.set_wrap(wrap);
                 }
                 ui.separator();
                 ui.label(egui::RichText::new(tool_hint(self.editor.tool())).small());
@@ -1713,6 +1762,14 @@ impl OxyApp {
                 .changed()
             {
                 self.view.grid = grid;
+            }
+            let mut tiled = self.view.tiled;
+            if ui
+                .checkbox(&mut tiled, "Tiled view (Shift+T)")
+                .on_hover_text("Show the canvas repeated 3 by 3. Export still writes one copy.")
+                .changed()
+            {
+                self.set_tiled_view(tiled);
             }
             ui.separator();
             if let Some((x, y, color)) = hover {

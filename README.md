@@ -105,6 +105,8 @@ These match the current editor. Planned work is listed in [docs/ROADMAP.md](docs
 - Move, nudge, flip, and rotate a selection (or the active cel when nothing is selected). A 90° turn swaps the sides and stays centered; pixels that do not fit are dropped. Copy publishes a straight-alpha image to the system clipboard and keeps an in-memory patch. Paste uses the system image, or that patch when the clipboard has no image
 - Canvas resize and crop
 - Horizontal and vertical mirror while drawing
+- Pixel-perfect pencil (P), off until you turn it on, drops the extra corner of a one-pixel diagonal step. The line tool is unchanged
+- Wrap (T) continues a stroke or fill that leaves an edge on the opposite edge. Tiled view (Shift+T) shows the canvas 3 by 3. Export still writes one copy
 - Primary and secondary colors, hex entry, and the Ink palette
 - Import and export the palette as GIMP `.gpl`, hex `.hex` (one `RRGGBB` per line), or JASC `.pal`. Import replaces the palette and can be undone
 - Layers with visibility, opacity, rename, reorder, duplicate, and merge down
@@ -132,6 +134,8 @@ The maintainer develops OxyPixel with AI coding agents. The written rules for th
 | Ctrl+Z / Ctrl+Y | Undo / redo |
 | Ctrl+C / Ctrl+V | Copy / paste the selection image |
 | Arrow keys | Nudge the selection |
+| P | Pixel-perfect pencil |
+| T / Shift+T | Wrap drawing / tiled view |
 | Shift+H / Shift+V | Flip horizontal / vertical |
 | Shift+. / Shift+, / Ctrl+Shift+. | Rotate 90° clockwise, counter-clockwise, or 180° |
 | Comma / Period | Previous / next frame |
