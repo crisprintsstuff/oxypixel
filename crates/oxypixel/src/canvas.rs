@@ -206,6 +206,12 @@ pub fn show_canvas(
                     (sel.y + sel.height as i32) as f32 * view.zoom,
                 ),
         );
+        painter.rect_stroke(
+            r,
+            0.0,
+            Stroke::new(1.0_f32, theme::INK),
+            StrokeKind::Outside,
+        );
         painter.rect_stroke(r, 0.0, Stroke::new(1.0_f32, AMBER), StrokeKind::Inside);
     }
 

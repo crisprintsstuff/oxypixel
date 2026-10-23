@@ -102,7 +102,7 @@ These match the current editor. Planned work is listed in [docs/ROADMAP.md](docs
 
 - Pixel canvas with nearest-neighbor zoom on whole-pixel steps, pan, and an optional grid
 - Pencil, eraser, fill, eyedropper, line, rectangle, ellipse, and rectangular selection
-- Move and nudge a selection. Copy publishes a straight-alpha image to the system clipboard and keeps an in-memory patch. Paste uses the system image, or that patch when the clipboard has no image
+- Move, nudge, flip, and rotate a selection (or the active cel when nothing is selected). A 90° turn swaps the sides and stays centered; pixels that do not fit are dropped. Copy publishes a straight-alpha image to the system clipboard and keeps an in-memory patch. Paste uses the system image, or that patch when the clipboard has no image
 - Canvas resize and crop
 - Horizontal and vertical mirror while drawing
 - Primary and secondary colors, hex entry, and the Ink palette
@@ -132,6 +132,8 @@ The maintainer develops OxyPixel with AI coding agents. The written rules for th
 | Ctrl+Z / Ctrl+Y | Undo / redo |
 | Ctrl+C / Ctrl+V | Copy / paste the selection image |
 | Arrow keys | Nudge the selection |
+| Shift+H / Shift+V | Flip horizontal / vertical |
+| Shift+. / Shift+, / Ctrl+Shift+. | Rotate 90° clockwise, counter-clockwise, or 180° |
 | Comma / Period | Previous / next frame |
 | Ctrl+N / Ctrl+O / Ctrl+S | New, open, save |
 | Enter | Play or pause |

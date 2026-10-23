@@ -4,7 +4,7 @@ use crate::color::Rgba;
 use crate::document::Document;
 use crate::draw::{
     brush_offsets, clamp_to_margin, constrain_line, constrain_square, ellipse_points, flood_fill,
-    line_points, rect_points, PixelRect,
+    line_points, rect_on_canvas, rect_points, transform_pixels, turned_rect, PixelRect, Transform,
 };
 use crate::error::{Error, Result};
 use crate::history::{History, Snapshot};
@@ -584,6 +584,61 @@ impl Editor {
         self.cancel_gesture();
         self.push_undo();
         self.place_moved_selection(sel, &base, &patch, dx, dy);
+        Ok(())
+    }
+
+    /// Flip or turn the selection. With no selection, the same command uses every
+    /// pixel of the active cel (this layer on this frame).
+    ///
+    /// Each call is one undo step. Other layers and frames stay as they are, and
+    /// the canvas size does not change. Flips and a 180 degree turn keep the
+    /// rectangle. A 90 degree turn swaps its width and height and keeps the same
+    /// center. If the turned rectangle fits and still touches the cel, it shifts
+    /// fully onto the cel. Pixels that still land outside are dropped, and the
+    /// selection covers only the part that remains. A turn that misses the cel
+    /// changes nothing.
+    pub fn transform_pixels(&mut self, op: Transform) -> Result<()> {
+        let canvas_w = self.doc.width();
+        let canvas_h = self.doc.height();
+        let had_selection = self.selection.is_some();
+        let sel = self.selection.unwrap_or(PixelRect {
+            x: 0,
+            y: 0,
+            width: canvas_w,
+            height: canvas_h,
+        });
+        let Some((base, patch)) = self.capture_selection(sel) else {
+            return Err(Error::Index { what: "cel" });
+        };
+        let (_width, _height, turned) =
+            transform_pixels(sel.width, sel.height, &patch, op).ok_or(Error::Limit {
+                what: "pixels in a transform",
+                value: u64::from(sel.width).saturating_mul(u64::from(sel.height)),
+                max: crate::limits::MAX_CEL_PIXELS,
+            })?;
+        let dest = turned_rect(sel, canvas_w, canvas_h, op);
+        let kept = rect_on_canvas(dest, canvas_w, canvas_h).ok_or(Error::TransformOutside)?;
+        let frame = self.doc.active_frame();
+        let layer = self.doc.active_layer();
+        let cel_len = self.doc.cel(frame, layer)?.len();
+        if cel_len != base.len() {
+            return Err(Error::Limit {
+                what: "pixels in a transform",
+                value: base.len() as u64,
+                max: cel_len as u64,
+            });
+        }
+        self.cancel_gesture();
+        self.push_undo();
+        if let Ok(cel) = self.doc.cel_mut(frame, layer) {
+            if cel.len() == base.len() {
+                cel.copy_from_slice(&base);
+            }
+        }
+        self.blit_patch(dest.x, dest.y, dest.width, dest.height, &turned);
+        self.selection = if had_selection { Some(kept) } else { None };
+        self.dirty = true;
+        self.generation += 1;
         Ok(())
     }
 
@@ -1373,6 +1428,164 @@ mod tests {
         assert_eq!(ed.selection().unwrap().width, 8);
         ed.resize_canvas(8, 8, 0, 0).unwrap();
         assert!(ed.selection().is_some());
+    }
+
+    fn ink(n: u8) -> Rgba {
+        Rgba::new(n, 10, 20, 255)
+    }
+
+    fn paint(ed: &mut Editor, x: i32, y: i32, color: Rgba) {
+        ed.doc
+            .set_pixel(ed.doc.active_frame(), ed.doc.active_layer(), x, y, color)
+            .unwrap();
+    }
+
+    #[test]
+    fn flip_horizontal_mirrors_the_selection_and_is_one_undo() {
+        let mut ed = Editor::new(6, 4).unwrap();
+        let faded = Rgba::new(1, 2, 3, 128);
+        paint(&mut ed, 1, 1, ink(1));
+        paint(&mut ed, 2, 1, faded);
+        paint(&mut ed, 1, 2, ink(3));
+        paint(&mut ed, 5, 1, ink(9));
+        ed.selection = Some(PixelRect {
+            x: 1,
+            y: 1,
+            width: 2,
+            height: 2,
+        });
+        ed.transform_pixels(Transform::FlipHorizontal).unwrap();
+        let cel = ed.document().cel(0, 0).unwrap();
+        assert_eq!(cel[1 + 6], faded);
+        assert_eq!(cel[2 + 6], ink(1));
+        assert_eq!(cel[1 + 12], Rgba::CLEAR);
+        assert_eq!(cel[2 + 12], ink(3));
+        assert_eq!(cel[5 + 6], ink(9));
+        let sel = ed.selection().unwrap();
+        assert_eq!((sel.x, sel.y, sel.width, sel.height), (1, 1, 2, 2));
+        assert!(ed.undo());
+        let restored = ed.document().cel(0, 0).unwrap();
+        assert_eq!(restored[1 + 6], ink(1));
+        assert_eq!(restored[2 + 6], faded);
+        assert_eq!(ed.selection().unwrap().x, 1);
+        assert!(!ed.can_undo());
+        assert!(ed.redo());
+        assert_eq!(ed.document().cel(0, 0).unwrap()[1 + 6], faded);
+        assert!(ed.undo());
+        assert!(!ed.can_undo());
+    }
+
+    #[test]
+    fn rotate_90_swaps_a_non_square_selection_around_its_center() {
+        let mut ed = Editor::new(8, 8).unwrap();
+        let colors = [
+            (3, 2, ink(1)),
+            (4, 2, ink(2)),
+            (3, 3, ink(3)),
+            (4, 3, ink(4)),
+            (3, 4, ink(5)),
+            (4, 4, ink(6)),
+        ];
+        for (x, y, color) in colors {
+            paint(&mut ed, x, y, color);
+        }
+        paint(&mut ed, 5, 2, ink(8));
+        ed.selection = Some(PixelRect {
+            x: 3,
+            y: 2,
+            width: 2,
+            height: 3,
+        });
+        ed.transform_pixels(Transform::Rotate90Cw).unwrap();
+        let cel = ed.document().cel(0, 0).unwrap();
+        assert_eq!(cel[3 + 2 * 8], ink(5));
+        assert_eq!(cel[4 + 2 * 8], ink(3));
+        assert_eq!(cel[5 + 2 * 8], ink(1));
+        assert_eq!(cel[3 + 3 * 8], ink(6));
+        assert_eq!(cel[4 + 3 * 8], ink(4));
+        assert_eq!(cel[5 + 3 * 8], ink(2));
+        assert_eq!(cel[3 + 4 * 8], Rgba::CLEAR);
+        assert_eq!(cel[4 + 4 * 8], Rgba::CLEAR);
+        let sel = ed.selection().unwrap();
+        assert_eq!((sel.x, sel.y, sel.width, sel.height), (3, 2, 3, 2));
+        assert!(ed.undo());
+        assert_eq!(ed.document().cel(0, 0).unwrap()[3 + 4 * 8], ink(5));
+        assert_eq!(ed.selection().unwrap().height, 3);
+    }
+
+    #[test]
+    fn rotate_shifts_a_selection_that_would_hang_off_the_edge() {
+        let mut ed = Editor::new(8, 8).unwrap();
+        paint(&mut ed, 0, 0, ink(1));
+        paint(&mut ed, 1, 0, ink(2));
+        paint(&mut ed, 0, 3, ink(3));
+        ed.selection = Some(PixelRect {
+            x: 0,
+            y: 0,
+            width: 2,
+            height: 4,
+        });
+        ed.transform_pixels(Transform::Rotate90Cw).unwrap();
+        let sel = ed.selection().unwrap();
+        assert_eq!((sel.x, sel.y, sel.width, sel.height), (0, 1, 4, 2));
+        let cel = ed.document().cel(0, 0).unwrap();
+        assert_eq!(cel[0], Rgba::CLEAR);
+        assert_eq!(cel[8], ink(3));
+        assert_eq!(cel[3 + 8], ink(1));
+        assert_eq!(cel[3 + 16], ink(2));
+    }
+
+    #[test]
+    fn turning_the_active_cel_clips_a_non_square_canvas_and_leaves_the_rest() {
+        let mut ed = Editor::new(3, 1).unwrap();
+        paint(&mut ed, 0, 0, ink(1));
+        paint(&mut ed, 1, 0, ink(2));
+        paint(&mut ed, 2, 0, ink(3));
+        ed.add_frame().unwrap();
+        paint(&mut ed, 0, 0, ink(7));
+        ed.set_active_frame(0).unwrap();
+        ed.add_layer().unwrap();
+        ed.set_active_layer(0).unwrap();
+        assert!(ed.selection().is_none());
+        ed.transform_pixels(Transform::Rotate90Cw).unwrap();
+        assert_eq!((ed.document().width(), ed.document().height()), (3, 1));
+        assert!(ed.selection().is_none());
+        let cel = ed.document().cel(0, 0).unwrap();
+        assert_eq!(cel[0], Rgba::CLEAR);
+        assert_eq!(cel[1], ink(2));
+        assert_eq!(cel[2], Rgba::CLEAR);
+        assert_eq!(ed.document().cel(1, 0).unwrap()[0], ink(7));
+        assert!(ed.document().cel(0, 1).unwrap().iter().all(|px| px.a == 0));
+        ed.transform_pixels(Transform::FlipVertical).unwrap();
+        ed.transform_pixels(Transform::Rotate180).unwrap();
+        ed.transform_pixels(Transform::Rotate90Ccw).unwrap();
+        assert_eq!(ed.document().cel(1, 0).unwrap()[0], ink(7));
+        assert!(ed.undo());
+        assert!(ed.undo());
+        assert!(ed.undo());
+        assert!(ed.undo());
+        assert_eq!(ed.document().cel(0, 0).unwrap()[0], ink(1));
+        assert_eq!(ed.document().cel(0, 0).unwrap()[2], ink(3));
+        assert!(ed.can_undo());
+    }
+
+    #[test]
+    fn a_turn_that_lands_fully_outside_does_not_change_the_cel() {
+        let mut ed = editor();
+        paint(&mut ed, 1, 1, ink(4));
+        ed.selection = Some(PixelRect {
+            x: 100,
+            y: 100,
+            width: 2,
+            height: 1,
+        });
+        assert!(matches!(
+            ed.transform_pixels(Transform::Rotate90Cw),
+            Err(Error::TransformOutside)
+        ));
+        assert!(!ed.can_undo());
+        assert_eq!(ed.document().cel(0, 0).unwrap()[1 + 8], ink(4));
+        assert_eq!(ed.selection().unwrap().x, 100);
     }
 
     #[test]

@@ -21,7 +21,7 @@ In the 0.4.0 tree and covered by tests or by the release workflow.
 | Area | What exists | Where |
 | --- | --- | --- |
 | Tools | Pencil, eraser, fill, eyedropper, line, rectangle, ellipse, rectangular select. Brush 1–16. Filled or outline shapes. | `editor.rs`, `draw.rs` |
-| Selection | Drag to move, arrow nudge, system-clipboard and in-memory copy and paste, clear, select all | `editor.rs`, `clipboard.rs` |
+| Selection | Drag to move, arrow nudge, flip, rotate, system-clipboard and in-memory copy and paste, clear, select all. The status line shows the selection size | `editor.rs`, `clipboard.rs`, `app.rs` |
 | Canvas | Resize and crop. Mirror horizontal and vertical while stamping | `document.rs`, `editor.rs` |
 | Layers | Add, delete, duplicate, reorder, rename, visibility, opacity, merge down. At most 32 | `document.rs` |
 | Frames | Add, duplicate, duration 20–10000 ms, playback clock, onion skin in the view | `animation.rs`, `canvas.rs` |
@@ -146,7 +146,9 @@ Pencil, line, rectangle, and ellipse fill the hover stamp with the primary color
 
 ### OX-P9
 
-**Show the selection, then flip it or turn it by 90 degrees.** The marquee is a one-pixel amber rectangle, and the status line does not report its width and height. Dragging inside the rectangle moves those pixels, the arrow keys nudge them, and copy and paste already work. Paste paints immediately at the selection origin, or at (0, 0) when nothing is selected. Mirror H and Mirror V repeat a new stroke across the center. Edit has no command that flips or rotates pixels already on the cel. A later task should draw a marquee that stays easy to see, print the selection size on the status line, and add flip horizontal, flip vertical, and rotate 90 degrees. Each change is one undo step, applied to the selection, or to the active cel when nothing is selected. Resampling a selection to a new size is a separate task.
+**Show the selection, then flip it or turn it by 90 degrees.** Status: done. Area: `crates/oxypixel-core/src/editor.rs`, `crates/oxypixel-core/src/draw.rs`, `crates/oxypixel/src/app.rs`.
+
+Edit → Flip horizontal, Flip vertical, Rotate 90 clockwise, Rotate 90 counter-clockwise, and Rotate 180 each take one undo step. Shortcuts are Shift+H, Shift+V, Shift+., Shift+,, and Ctrl+Shift+.. A selection transforms only that rectangle on the active cel. With nothing selected, the command uses every pixel of the active cel (this layer on this frame). Other layers and frames stay put, and the canvas size does not change. Flips and a 180° turn keep the rectangle. A 90° turn swaps its width and height and keeps the same center. If the turned rectangle fits and still touches the cel, it shifts fully onto the cel. If it is wider or taller than the cel, the centered pixels that land outside are dropped and the selection covers only what remains. A turn that misses the cel changes nothing. The marquee is a dark edge plus an amber edge, and the status line prints the selection size. Resampling a selection to a new size is still a separate task.
 
 ### OX-P10
 

@@ -95,11 +95,34 @@ jobs:
       # code with the MinGW target. A cold run is a second clippy, not a
       # Windows runner, so a Windows-only lint fails here instead of on the
       # minutes that count double. The windows-latest job still runs host clippy.
+      #
+      # The Ubuntu 24.04 image tries azure.archive.ubuntu.com first. When
+      # that mirror stalls, apt-get update -qq prints nothing until the
+      # job timeout. Drop Azure and install from the lists already on the
+      # image. Refresh indexes only if the package is missing. timeout runs
+      # as root so a stall dies with apt instead of leaving the lock held.
       - name: Windows-target clippy
         if: matrix.os == 'ubuntu-latest'
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq gcc-mingw-w64-x86-64
+          set -euo pipefail
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
+          fi
+          apt_install() {
+            sudo timeout -k 15s 90s apt-get install -y --no-install-recommends \
+              -o Acquire::Retries=2 \
+              -o Acquire::http::Timeout=15 \
+              -o Acquire::https::Timeout=15 \
+              gcc-mingw-w64-x86-64
+          }
+          if ! apt_install; then
+            echo "install from the image lists failed; refreshing from the Ubuntu archive"
+            sudo timeout -k 15s 90s apt-get update \
+              -o Acquire::Retries=2 \
+              -o Acquire::http::Timeout=15 \
+              -o Acquire::https::Timeout=15
+            apt_install
+          fi
           rustup target add x86_64-pc-windows-gnu
           make check-windows
       - name: Test

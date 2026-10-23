@@ -21,13 +21,15 @@ Geometry (line, rectangle, ellipse, flood fill, brush stamps) is pure and tested
 
 Shape tools preview until pointer release, then commit one undo step. Pencil commits during the drag as a single undo step. A selection, when present, clips stamps and flood fill. Dragging inside the selection moves those pixels on the active cel, and arrow keys nudge them. Copy stores the selection in an in-memory patch and publishes it as a straight-alpha image on the system clipboard. Paste uses that image when the clipboard has one. When the clipboard is missing, holds no image, or does not answer in time, paste uses the in-memory patch. Image conversion lives in `oxypixel-core`. The window publishes and reads the system clipboard, and it keeps the patch when that call fails. No selection means the whole canvas is editable. Mirror stamps the same point across the canvas center.
 
+Flip and rotate use the selection, or every pixel of the active cel when nothing is selected. Each command is one undo step. Other layers and frames are unchanged, and the canvas size stays the same. Flips and a 180 degree turn keep the rectangle. A 90 degree turn swaps width and height and keeps the same center (integer division leaves an odd leftover toward the top and left). If the turned rectangle fits and still touches the cel, it shifts fully onto the cel. If it is wider or taller than the cel, pixels that land outside are dropped and the selection shrinks to the part that remains. A turn that misses the cel is refused and does not record an undo step.
+
 ## Files
 
 `.oxypix` is a little-endian versioned blob. Version 1 is described in [FORMAT.md](FORMAT.md). Raster IO uses the `image` crate. GIF import uses that crate's composited frames. GIF export loops forever. Palette files are text, parsed in `io/palette.rs`: GIMP `.gpl`, a hex list (`.hex`), and JASC `.pal`. Import replaces the document palette and is one undo step.
 
 ## GUI
 
-The window is egui 0.31 with the `glow` OpenGL backend. The canvas is a nearest-neighbor texture rebuilt when the document changes, and on every frame while a shape preview is active. File dialogs use `rfd`: the system dialog on Windows, and the XDG desktop portal on Linux. The path field stays available when the portal does not return a file. The Linux build does not need GTK development packages. Tool icons are drawn in code at 16×16.
+The window is egui 0.31 with the `glow` OpenGL backend. The canvas is a nearest-neighbor texture rebuilt when the document changes, and on every frame while a shape preview is active. The selection marquee is a dark stroke just outside the rectangle and an amber stroke just inside it. The status line prints the selection width and height while a selection exists. File dialogs use `rfd`: the system dialog on Windows, and the XDG desktop portal on Linux. The path field stays available when the portal does not return a file. The Linux build does not need GTK development packages. Tool icons are drawn in code at 16×16.
 
 A dirty document is also copied into the app data directory on a background thread, as a recovery `.oxypix` beside `recent.txt`. That copy is not the user's file. The next launch can restore or discard it. Export commands do not write it.
 
