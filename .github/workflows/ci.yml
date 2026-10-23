@@ -95,11 +95,34 @@ jobs:
       # code with the MinGW target. A cold run is a second clippy, not a
       # Windows runner, so a Windows-only lint fails here instead of on the
       # minutes that count double. The windows-latest job still runs host clippy.
+      #
+      # apt-get update prints nothing with -qq, and a slow Ubuntu archive
+      # holds the step until the job timeout. Each try is bounded. IPv4
+      # avoids a hung IPv6 connect. A healthy install finishes in seconds.
       - name: Windows-target clippy
         if: matrix.os == 'ubuntu-latest'
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq gcc-mingw-w64-x86-64
+          set -euo pipefail
+          apt_ok=0
+          for attempt in 1 2 3; do
+            if timeout -k 10s 60s sudo apt-get update -qq \
+                -o Acquire::ForceIPv4=true \
+                -o Acquire::Retries=3 \
+                -o Acquire::http::Timeout=20 \
+                -o Acquire::https::Timeout=20 \
+              && timeout -k 10s 60s sudo apt-get install -y -qq \
+                -o Acquire::ForceIPv4=true \
+                gcc-mingw-w64-x86-64; then
+              apt_ok=1
+              break
+            fi
+            echo "apt attempt ${attempt} did not finish"
+            sleep 5
+          done
+          if [ "${apt_ok}" != 1 ]; then
+            echo "could not install gcc-mingw-w64-x86-64" >&2
+            exit 1
+          fi
           rustup target add x86_64-pc-windows-gnu
           make check-windows
       - name: Test
