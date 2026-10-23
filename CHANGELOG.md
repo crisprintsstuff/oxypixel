@@ -9,7 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- File → Load reference, or a dropped PNG or JPEG, shows that image on the canvas or in a floating panel. It can be moved, scaled, faded, locked, hidden, and drawn behind or above the art. The eyedropper ignores it unless Sample is on. Copy onto layer is what puts those pixels into the document.
+- File → Load reference, or a dropped PNG or JPEG, shows that image on the canvas or in a floating panel. It can be moved, scaled, faded, locked, hidden, and drawn behind or above the art. The eyedropper ignores it unless Sample is on. Copy onto layer is what puts those pixels into the document. Tiled view repeats the cel, not the reference.
+- Pixel-perfect pencil, off until you turn it on (P), drops the extra corner of a one-pixel diagonal step. A larger brush and the line tool are unchanged. Mirror follows the cleaned stroke, and the stroke is still one undo step.
+- Wrap (T) continues pencil, eraser, fill, lines, and shapes that leave an edge on the opposite edge, including the shape preview. Tiled view (Shift+T) draws the canvas 3 by 3 so the seam is visible. Export still writes one copy.
 
 ### Changed
 

@@ -4,7 +4,8 @@ use crate::color::Rgba;
 use crate::document::Document;
 use crate::draw::{
     brush_offsets, clamp_to_margin, constrain_line, constrain_square, ellipse_points, flood_fill,
-    line_points, rect_on_canvas, rect_points, transform_pixels, turned_rect, PixelRect, Transform,
+    line_points, pixel_perfect_path, rect_on_canvas, rect_points, transform_pixels, turned_rect,
+    wrap_coord, FillLimits, PixelRect, Transform,
 };
 use crate::error::{Error, Result};
 use crate::history::{History, Snapshot};
@@ -35,6 +36,10 @@ enum Gesture {
     Pencil {
         button: MouseButton,
         last: (i32, i32),
+        /// Captured at pointer down. A brush larger than one pixel ignores it.
+        perfect: bool,
+        /// Pointer samples for a pixel-perfect stroke. Empty for an ordinary stroke.
+        trail: Vec<(i32, i32)>,
     },
     Shape {
         tool: Tool,
@@ -76,6 +81,10 @@ pub struct Editor {
     shape_filled: bool,
     mirror_x: bool,
     mirror_y: bool,
+    pixel_perfect: bool,
+    wrap: bool,
+    /// Cel pixels from before the current pixel-perfect stroke.
+    pencil_base: Option<Vec<Rgba>>,
     selection: Option<PixelRect>,
     clipboard: Option<Clipboard>,
     gesture: Gesture,
@@ -122,6 +131,9 @@ impl Editor {
             shape_filled: false,
             mirror_x: false,
             mirror_y: false,
+            pixel_perfect: false,
+            wrap: false,
+            pencil_base: None,
             selection: None,
             clipboard: None,
             gesture: Gesture::None,
@@ -201,6 +213,32 @@ impl Editor {
 
     pub fn set_mirror_y(&mut self, enabled: bool) {
         self.mirror_y = enabled;
+    }
+
+    /// Drop the extra corner of a one-pixel pencil stroke. Off until the user turns it on.
+    pub fn pixel_perfect(&self) -> bool {
+        self.pixel_perfect
+    }
+
+    pub fn set_pixel_perfect(&mut self, enabled: bool) {
+        self.pixel_perfect = enabled;
+    }
+
+    /// Stamp and fill past an edge continue on the opposite edge.
+    pub fn wraps(&self) -> bool {
+        self.wrap
+    }
+
+    pub fn set_wrap(&mut self, enabled: bool) {
+        self.wrap = enabled;
+    }
+
+    /// The canvas pixel a tiled-view coordinate paints, when wrap is on.
+    pub fn wrap_point(&self, x: i32, y: i32) -> (i32, i32) {
+        (
+            wrap_coord(x, self.doc.width() as i32),
+            wrap_coord(y, self.doc.height() as i32),
+        )
     }
 
     pub fn primary(&self) -> Rgba {
@@ -320,6 +358,7 @@ impl Editor {
     pub fn cancel_gesture(&mut self) {
         self.gesture = Gesture::None;
         self.gesture_saved = false;
+        self.pencil_base = None;
     }
 
     /// Pixels a shape tool would paint. Empty for tools that paint immediately.
@@ -354,12 +393,19 @@ impl Editor {
         let (x, y) = self.clamp_pointer(x, y);
         match self.tool {
             Tool::Pencil | Tool::Eraser => {
+                let perfect = self.tool == Tool::Pencil && self.pixel_perfect;
                 self.gesture = Gesture::Pencil {
                     button,
                     last: (x, y),
+                    perfect,
+                    trail: if perfect { vec![(x, y)] } else { Vec::new() },
                 };
                 let color = self.stroke_color(button);
-                self.paint(&[(x, y)], color, true);
+                if perfect {
+                    self.paint_pixel_perfect(&[(x, y)], color);
+                } else {
+                    self.paint(&[(x, y)], color, true);
+                }
             }
             Tool::Bucket => {
                 let color = self.button_color(button);
@@ -402,13 +448,31 @@ impl Editor {
     pub fn pointer_move(&mut self, x: i32, y: i32, shift: bool) {
         let (x, y) = self.clamp_pointer(x, y);
         match self.gesture {
-            Gesture::Pencil { button, last } => {
-                let points = line_points(last.0, last.1, x, y);
+            Gesture::Pencil { .. } => {
+                let Gesture::Pencil {
+                    button,
+                    last,
+                    perfect,
+                    mut trail,
+                } = std::mem::replace(&mut self.gesture, Gesture::None)
+                else {
+                    return;
+                };
                 let color = self.stroke_color(button);
-                self.paint(&points, color, true);
+                if perfect {
+                    if trail.last() != Some(&(x, y)) {
+                        trail.push((x, y));
+                    }
+                    self.paint_pixel_perfect(&trail, color);
+                } else if (x, y) != last {
+                    let points = line_points(last.0, last.1, x, y);
+                    self.paint(&points, color, true);
+                }
                 self.gesture = Gesture::Pencil {
                     button,
                     last: (x, y),
+                    perfect,
+                    trail,
                 };
             }
             Gesture::Shape {
@@ -467,6 +531,7 @@ impl Editor {
             Gesture::Pencil { .. } => {
                 self.gesture = Gesture::None;
                 self.gesture_saved = false;
+                self.pencil_base = None;
             }
             Gesture::Shape {
                 tool,
@@ -950,7 +1015,12 @@ impl Editor {
     }
 
     fn clamp_pointer(&self, x: i32, y: i32) -> (i32, i32) {
-        let margin = self.brush as i32 + 2;
+        let mut margin = self.brush as i32 + 2;
+        if self.wrap {
+            margin = margin
+                .max(self.doc.width() as i32)
+                .max(self.doc.height() as i32);
+        }
         (
             clamp_to_margin(x, self.doc.width() as i32, margin),
             clamp_to_margin(y, self.doc.height() as i32, margin),
@@ -1046,6 +1116,70 @@ impl Editor {
         self.generation += 1;
     }
 
+    /// One-pixel pencil only. The whole stroke is rewritten from the pre-stroke cel,
+    /// so a corner dropped later is one undo step with the pixels that remain.
+    fn paint_pixel_perfect(&mut self, samples: &[(i32, i32)], color: Option<Rgba>) {
+        let expanded = expand_stroke(samples);
+        let cleaned = if self.brush == 1 {
+            pixel_perfect_path(&expanded)
+        } else {
+            expanded
+        };
+        self.rewrite_stroke(&cleaned, color);
+    }
+
+    fn rewrite_stroke(&mut self, points: &[(i32, i32)], color: Option<Rgba>) {
+        let frame = self.doc.active_frame();
+        let layer = self.doc.active_layer();
+        let width = self.doc.width();
+        let stamped = self.stamp(points, color);
+        let Ok(current_cel) = self.doc.cel(frame, layer) else {
+            return;
+        };
+        let current = current_cel.to_vec();
+        if self.pencil_base.is_none() {
+            let mut changes = Vec::new();
+            for (x, y, px) in &stamped {
+                let i = (*y as u32 * width + *x as u32) as usize;
+                if current.get(i).copied() != Some(*px) {
+                    changes.push((i, *px));
+                }
+            }
+            if changes.is_empty() {
+                return;
+            }
+            self.pencil_base = Some(current);
+            self.push_undo();
+            self.gesture_saved = true;
+            if let Ok(cel) = self.doc.cel_mut(frame, layer) {
+                for (i, px) in changes {
+                    cel[i] = px;
+                }
+            }
+            self.dirty = true;
+            self.generation += 1;
+            return;
+        }
+        let Some(base) = self.pencil_base.clone() else {
+            return;
+        };
+        let mut next = base;
+        for (x, y, px) in stamped {
+            let i = (y as u32 * width + x as u32) as usize;
+            if let Some(slot) = next.get_mut(i) {
+                *slot = px;
+            }
+        }
+        if next == current {
+            return;
+        }
+        if let Ok(cel) = self.doc.cel_mut(frame, layer) {
+            cel.copy_from_slice(&next);
+        }
+        self.dirty = true;
+        self.generation += 1;
+    }
+
     fn stamp(&self, points: &[(i32, i32)], color: Option<Rgba>) -> Vec<(i32, i32, Rgba)> {
         let px_color = color.unwrap_or(Rgba::CLEAR);
         let offsets = brush_offsets(self.brush);
@@ -1081,7 +1215,11 @@ impl Editor {
         if self.mirror_x && self.mirror_y {
             points.push((width - 1 - x, height - 1 - y));
         }
-        for (px, py) in points {
+        for (mut px, mut py) in points {
+            if self.wrap {
+                px = wrap_coord(px, width);
+                py = wrap_coord(py, height);
+            }
             if px < 0 || py < 0 || px >= width || py >= height {
                 continue;
             }
@@ -1093,6 +1231,11 @@ impl Editor {
     }
 
     fn bucket(&mut self, x: i32, y: i32, color: Rgba) {
+        let (x, y) = if self.wrap {
+            self.wrap_point(x, y)
+        } else {
+            (x, y)
+        };
         if x < 0 || y < 0 || x as u32 >= self.doc.width() || y as u32 >= self.doc.height() {
             return;
         }
@@ -1115,7 +1258,18 @@ impl Editor {
         let Ok(cel) = self.doc.cel_mut(frame, layer) else {
             return;
         };
-        if !flood_fill(cel, width, height, x, y, color, selection) {
+        if !flood_fill(
+            cel,
+            width,
+            height,
+            x,
+            y,
+            color,
+            FillLimits {
+                selection,
+                wrap: self.wrap,
+            },
+        ) {
             self.doc = snapshot.doc;
             return;
         }
@@ -1123,6 +1277,25 @@ impl Editor {
         self.dirty = true;
         self.generation += 1;
     }
+}
+
+/// Connect pointer samples with the same line the ordinary pencil uses.
+fn expand_stroke(samples: &[(i32, i32)]) -> Vec<(i32, i32)> {
+    let mut expanded = Vec::new();
+    let Some(&first) = samples.first() else {
+        return expanded;
+    };
+    let mut prev = first;
+    expanded.push(prev);
+    for &point in samples.iter().skip(1) {
+        if point == prev {
+            continue;
+        }
+        let segment = line_points(prev.0, prev.1, point.0, point.1);
+        expanded.extend(segment.into_iter().skip(1));
+        prev = point;
+    }
+    expanded
 }
 
 #[cfg(test)]
@@ -1595,5 +1768,156 @@ mod tests {
         ed.pointer_down(i32::MIN, i32::MIN, MouseButton::Primary, false);
         ed.pointer_move(i32::MAX, i32::MAX, false);
         ed.pointer_up(i32::MAX, i32::MAX, false);
+        ed.set_wrap(true);
+        ed.set_tool(Tool::Pencil);
+        ed.pointer_down(i32::MIN, 0, MouseButton::Primary, false);
+        ed.pointer_move(i32::MAX, i32::MAX, false);
+        ed.pointer_up(i32::MAX, 0, false);
+    }
+
+    fn cel_pixel(ed: &Editor, x: i32, y: i32) -> Rgba {
+        let width = ed.document().width();
+        ed.document().cel(0, 0).unwrap()[(y as u32 * width + x as u32) as usize]
+    }
+
+    #[test]
+    fn pixel_perfect_pencil_drops_the_corner_and_is_one_undo() {
+        let mut ed = editor();
+        let ink = Rgba::new(4, 5, 6, 255);
+        ed.set_primary(ink);
+        ed.set_pixel_perfect(true);
+        ed.pointer_down(0, 0, MouseButton::Primary, false);
+        ed.pointer_move(1, 0, false);
+        ed.pointer_move(1, 1, false);
+        ed.pointer_up(1, 1, false);
+        assert_eq!(cel_pixel(&ed, 0, 0), ink);
+        assert_eq!(cel_pixel(&ed, 1, 0), Rgba::CLEAR);
+        assert_eq!(cel_pixel(&ed, 1, 1), ink);
+        assert!(ed.undo());
+        assert!(ed
+            .document()
+            .cel(0, 0)
+            .unwrap()
+            .iter()
+            .all(|px| *px == Rgba::CLEAR));
+        assert!(!ed.can_undo());
+        assert!(ed.redo());
+        assert_eq!(cel_pixel(&ed, 1, 1), ink);
+        assert_eq!(cel_pixel(&ed, 1, 0), Rgba::CLEAR);
+
+        let old = Rgba::new(9, 0, 0, 255);
+        paint(&mut ed, 1, 0, old);
+        ed.pointer_down(0, 0, MouseButton::Primary, false);
+        ed.pointer_move(1, 0, false);
+        ed.pointer_move(1, 1, false);
+        ed.pointer_up(1, 1, false);
+        assert_eq!(cel_pixel(&ed, 1, 0), old);
+        assert_eq!(cel_pixel(&ed, 0, 0), ink);
+        assert!(ed.undo());
+        assert_eq!(cel_pixel(&ed, 1, 0), old);
+        assert_eq!(cel_pixel(&ed, 0, 0), ink);
+        assert_eq!(cel_pixel(&ed, 1, 1), ink);
+    }
+
+    #[test]
+    fn pixel_perfect_is_off_for_a_wide_brush_and_the_line_tool() {
+        let mut ed = editor();
+        let ink = Rgba::new(8, 0, 0, 255);
+        ed.set_primary(ink);
+        ed.set_pixel_perfect(true);
+        ed.set_brush(2);
+        ed.pointer_down(1, 1, MouseButton::Primary, false);
+        ed.pointer_move(2, 1, false);
+        ed.pointer_move(2, 2, false);
+        ed.pointer_up(2, 2, false);
+        assert_eq!(cel_pixel(&ed, 2, 0), ink);
+
+        let mut line = editor();
+        line.set_primary(ink);
+        line.set_pixel_perfect(true);
+        line.set_tool(Tool::Line);
+        line.pointer_down(0, 0, MouseButton::Primary, false);
+        line.pointer_move(3, 1, false);
+        line.pointer_up(3, 1, false);
+        let mut plain = editor();
+        plain.set_primary(ink);
+        plain.set_tool(Tool::Line);
+        plain.pointer_down(0, 0, MouseButton::Primary, false);
+        plain.pointer_move(3, 1, false);
+        plain.pointer_up(3, 1, false);
+        assert_eq!(
+            line.document().cel(0, 0).unwrap(),
+            plain.document().cel(0, 0).unwrap()
+        );
+    }
+
+    #[test]
+    fn pixel_perfect_mirror_drops_the_corner_on_both_sides() {
+        let mut ed = editor();
+        let ink = Rgba::new(1, 2, 3, 255);
+        ed.set_primary(ink);
+        ed.set_pixel_perfect(true);
+        ed.set_mirror_x(true);
+        ed.pointer_down(1, 1, MouseButton::Primary, false);
+        ed.pointer_move(2, 1, false);
+        ed.pointer_move(2, 2, false);
+        ed.pointer_up(2, 2, false);
+        assert_eq!(cel_pixel(&ed, 1, 1), ink);
+        assert_eq!(cel_pixel(&ed, 2, 1), Rgba::CLEAR);
+        assert_eq!(cel_pixel(&ed, 2, 2), ink);
+        assert_eq!(cel_pixel(&ed, 6, 1), ink);
+        assert_eq!(cel_pixel(&ed, 5, 1), Rgba::CLEAR);
+        assert_eq!(cel_pixel(&ed, 5, 2), ink);
+        assert!(ed.undo());
+        assert!(ed.document().cel(0, 0).unwrap().iter().all(|px| px.a == 0));
+    }
+
+    #[test]
+    fn wrap_continues_a_stroke_fill_and_preview_inside_the_same_cel() {
+        let mut ed = editor();
+        let ink = Rgba::new(9, 1, 2, 255);
+        ed.set_primary(ink);
+        ed.set_wrap(true);
+        ed.pointer_down(0, 1, MouseButton::Primary, false);
+        ed.pointer_move(-1, 1, false);
+        ed.pointer_up(-1, 1, false);
+        assert_eq!(cel_pixel(&ed, 0, 1), ink);
+        assert_eq!(cel_pixel(&ed, 7, 1), ink);
+        assert_eq!(ed.document().cel(0, 0).unwrap().len(), 64);
+
+        ed.set_tool(Tool::Line);
+        ed.pointer_down(0, 3, MouseButton::Primary, false);
+        ed.pointer_move(-1, 3, false);
+        let preview = ed.preview();
+        assert!(preview.iter().any(|(x, y, _)| *x == 7 && *y == 3));
+        ed.pointer_up(-1, 3, false);
+        assert_eq!(cel_pixel(&ed, 7, 3), ink);
+
+        ed.set_tool(Tool::Rectangle);
+        ed.pointer_down(0, 4, MouseButton::Primary, false);
+        ed.pointer_move(-1, 4, false);
+        ed.pointer_up(-1, 4, false);
+        assert_eq!(cel_pixel(&ed, 0, 4), ink);
+        assert_eq!(cel_pixel(&ed, 7, 4), ink);
+
+        ed.set_tool(Tool::Eraser);
+        ed.pointer_down(0, 4, MouseButton::Primary, false);
+        ed.pointer_move(-1, 4, false);
+        ed.pointer_up(-1, 4, false);
+        assert_eq!(cel_pixel(&ed, 0, 4), Rgba::CLEAR);
+        assert_eq!(cel_pixel(&ed, 7, 4), Rgba::CLEAR);
+
+        let mut tile = Editor::new(4, 1).unwrap();
+        tile.set_wrap(true);
+        tile.set_primary(ink);
+        paint(&mut tile, 1, 0, Rgba::new(1, 0, 0, 255));
+        tile.set_tool(Tool::Bucket);
+        tile.pointer_down(0, 0, MouseButton::Primary, false);
+        tile.pointer_up(0, 0, false);
+        assert_eq!(cel_pixel(&tile, 0, 0), ink);
+        assert_eq!(cel_pixel(&tile, 1, 0), Rgba::new(1, 0, 0, 255));
+        assert_eq!(cel_pixel(&tile, 2, 0), ink);
+        assert_eq!(cel_pixel(&tile, 3, 0), ink);
+        assert_eq!(tile.document().width(), 4);
     }
 }

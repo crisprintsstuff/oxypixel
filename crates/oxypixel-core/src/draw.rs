@@ -323,7 +323,68 @@ pub(crate) fn ellipse_points(x0: i32, y0: i32, x1: i32, y1: i32, filled: bool) -
         .collect()
 }
 
-/// Four-connected fill on one cel. Pixels outside `selection` are walls.
+/// Fold `value` into `0..size`. Negatives come in from the far side.
+///
+/// `size` of 0 or less returns 0. `i32::MIN` is safe: the remainder is computed
+/// in `i64`, so it does not overflow.
+pub(crate) fn wrap_coord(value: i32, size: i32) -> i32 {
+    if size <= 0 {
+        return 0;
+    }
+    let size = i64::from(size);
+    let mut wrapped = i64::from(value) % size;
+    if wrapped < 0 {
+        wrapped += size;
+    }
+    wrapped as i32
+}
+
+/// `b` is the extra corner of a one-pixel diagonal step from `a` to `c`.
+///
+/// `a` and `c` are diagonal neighbors. `b` is one of the two orthogonal pixels
+/// between them. A freehand stroke that visits `a`, then `b`, then `c` draws an L.
+pub(crate) fn is_doubled_corner(a: (i32, i32), b: (i32, i32), c: (i32, i32)) -> bool {
+    let dx = c.0.wrapping_sub(a.0);
+    let dy = c.1.wrapping_sub(a.1);
+    if dx.abs() != 1 || dy.abs() != 1 {
+        return false;
+    }
+    (b.0 == a.0 && b.1 == c.1) || (b.1 == a.1 && b.0 == c.0)
+}
+
+/// Drop doubled corners from a one-pixel freehand path. Other points stay, in order.
+///
+/// A repeated point is ignored. A straight run is unchanged. The line tool does
+/// not use this.
+pub(crate) fn pixel_perfect_path(points: &[(i32, i32)]) -> Vec<(i32, i32)> {
+    let mut kept = Vec::with_capacity(points.len());
+    for &point in points {
+        if kept.last() == Some(&point) {
+            continue;
+        }
+        if kept.len() >= 2 {
+            let a = kept[kept.len() - 2];
+            let b = kept[kept.len() - 1];
+            if is_doubled_corner(a, b, point) {
+                kept.pop();
+            }
+        }
+        if kept.last() != Some(&point) {
+            kept.push(point);
+        }
+    }
+    kept
+}
+
+/// Where a fill is allowed to spread.
+pub(crate) struct FillLimits {
+    pub selection: Option<PixelRect>,
+    pub wrap: bool,
+}
+
+/// Four-connected fill on one cel. Pixels outside `limits.selection` are walls.
+///
+/// When `limits.wrap` is set, a step past an edge continues on the opposite edge.
 /// Returns whether any pixel changed.
 pub(crate) fn flood_fill(
     pixels: &mut [Rgba],
@@ -332,8 +393,20 @@ pub(crate) fn flood_fill(
     x: i32,
     y: i32,
     color: Rgba,
-    selection: Option<PixelRect>,
+    limits: FillLimits,
 ) -> bool {
+    let FillLimits { selection, wrap } = limits;
+    let Some(len) = (width as usize).checked_mul(height as usize) else {
+        return false;
+    };
+    if width == 0 || height == 0 || pixels.len() != len {
+        return false;
+    }
+    let (x, y) = if wrap {
+        (wrap_coord(x, width as i32), wrap_coord(y, height as i32))
+    } else {
+        (x, y)
+    };
     if x < 0 || y < 0 || x as u32 >= width || y as u32 >= height {
         return false;
     }
@@ -362,12 +435,28 @@ pub(crate) fn flood_fill(
         seen[i] = true;
         pixels[i] = color;
         changed = true;
-        stack.push((cx + 1, cy));
-        stack.push((cx - 1, cy));
-        stack.push((cx, cy + 1));
-        stack.push((cx, cy - 1));
+        push_fill_neighbor(&mut stack, cx + 1, cy, width, height, wrap);
+        push_fill_neighbor(&mut stack, cx - 1, cy, width, height, wrap);
+        push_fill_neighbor(&mut stack, cx, cy + 1, width, height, wrap);
+        push_fill_neighbor(&mut stack, cx, cy - 1, width, height, wrap);
     }
     changed
+}
+
+fn push_fill_neighbor(
+    stack: &mut Vec<(i32, i32)>,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    wrap: bool,
+) {
+    let (x, y) = if wrap {
+        (wrap_coord(x, width as i32), wrap_coord(y, height as i32))
+    } else {
+        (x, y)
+    };
+    stack.push((x, y));
 }
 
 #[cfg(test)]
@@ -429,7 +518,10 @@ mod tests {
             0,
             0,
             Rgba::new(0, 0, 2, 255),
-            None
+            FillLimits {
+                selection: None,
+                wrap: false,
+            },
         ));
         assert_eq!(pixels[0], Rgba::new(0, 0, 2, 255));
         assert_eq!(pixels[1], Rgba::new(1, 0, 0, 255));
@@ -437,7 +529,18 @@ mod tests {
 
         let mut pixels = vec![Rgba::CLEAR; 9];
         let sel = PixelRect::from_corners(0, 0, 0, 2);
-        flood_fill(&mut pixels, 3, 3, 0, 0, Rgba::new(9, 0, 0, 255), Some(sel));
+        flood_fill(
+            &mut pixels,
+            3,
+            3,
+            0,
+            0,
+            Rgba::new(9, 0, 0, 255),
+            FillLimits {
+                selection: Some(sel),
+                wrap: false,
+            },
+        );
         assert_eq!(pixels[0].r, 9);
         assert_eq!(pixels[1], Rgba::CLEAR);
     }
@@ -568,5 +671,84 @@ mod tests {
     fn a_bad_buffer_is_refused_before_allocation() {
         assert!(transform_pixels(0, 2, &[], Transform::FlipHorizontal).is_none());
         assert!(transform_pixels(2, 2, &[solid(1)], Transform::Rotate90Cw).is_none());
+    }
+
+    #[test]
+    fn pixel_perfect_drops_only_the_doubled_corner() {
+        assert!(is_doubled_corner((0, 0), (1, 0), (1, 1)));
+        assert!(is_doubled_corner((0, 0), (0, 1), (1, 1)));
+        assert!(!is_doubled_corner((0, 0), (1, 0), (2, 0)));
+        assert!(!is_doubled_corner((0, 0), (1, 0), (2, 1)));
+
+        assert_eq!(
+            pixel_perfect_path(&[(0, 0), (1, 0), (1, 1)]),
+            vec![(0, 0), (1, 1)]
+        );
+        assert_eq!(
+            pixel_perfect_path(&[(0, 0), (1, 0), (1, 1), (2, 1), (2, 2)]),
+            vec![(0, 0), (1, 1), (2, 2)]
+        );
+        assert_eq!(
+            pixel_perfect_path(&[(0, 0), (1, 0), (2, 0), (3, 0)]),
+            vec![(0, 0), (1, 0), (2, 0), (3, 0)]
+        );
+        assert_eq!(
+            pixel_perfect_path(&[(4, 4), (4, 4), (5, 5)]),
+            vec![(4, 4), (5, 5)]
+        );
+    }
+
+    #[test]
+    fn wrap_coord_folds_both_edges_and_min_does_not_panic() {
+        assert_eq!(wrap_coord(0, 8), 0);
+        assert_eq!(wrap_coord(8, 8), 0);
+        assert_eq!(wrap_coord(9, 8), 1);
+        assert_eq!(wrap_coord(-1, 8), 7);
+        assert_eq!(wrap_coord(-8, 8), 0);
+        assert_eq!(wrap_coord(-9, 8), 7);
+        assert_eq!(wrap_coord(3, 1), 0);
+        assert_eq!(wrap_coord(-4, 0), 0);
+        let wrapped = wrap_coord(i32::MIN, 8);
+        assert!((0..8).contains(&wrapped));
+        assert_eq!(wrap_coord(i32::MAX, 8), (i32::MAX as i64 % 8) as i32);
+    }
+
+    #[test]
+    fn flood_fill_wraps_around_a_wall_on_the_near_side() {
+        let wall = Rgba::new(1, 0, 0, 255);
+        let ink = Rgba::new(0, 0, 9, 255);
+        let mut pixels = vec![Rgba::CLEAR, wall, Rgba::CLEAR, Rgba::CLEAR];
+        assert!(flood_fill(
+            &mut pixels,
+            4,
+            1,
+            0,
+            0,
+            ink,
+            FillLimits {
+                selection: None,
+                wrap: true,
+            },
+        ));
+        assert_eq!(pixels[0], ink);
+        assert_eq!(pixels[1], wall);
+        assert_eq!(pixels[2], ink);
+        assert_eq!(pixels[3], ink);
+
+        let mut blocked = vec![Rgba::CLEAR, wall, Rgba::CLEAR, Rgba::CLEAR];
+        assert!(flood_fill(
+            &mut blocked,
+            4,
+            1,
+            0,
+            0,
+            ink,
+            FillLimits {
+                selection: None,
+                wrap: false,
+            },
+        ));
+        assert_eq!(blocked[0], ink);
+        assert_eq!(blocked[3], Rgba::CLEAR);
     }
 }
