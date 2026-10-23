@@ -39,6 +39,8 @@ pub enum Error {
     BadPalette(String),
     #[error("nothing is selected")]
     NoSelection,
+    #[error("the turned pixels fall outside the canvas")]
+    TransformOutside,
     #[error("the clipboard is empty")]
     EmptyClipboard,
     #[error("unsupported image format (import PNG, BMP, or GIF)")]

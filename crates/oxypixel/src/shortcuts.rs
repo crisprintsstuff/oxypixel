@@ -5,7 +5,7 @@
 //! Ctrl+V still produces a key release. Paste runs on that release so the chord paints once.
 
 use eframe::egui::{self, Key, Modifiers};
-use oxypixel_core::Tool;
+use oxypixel_core::{Tool, Transform};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
@@ -35,6 +35,7 @@ pub enum Command {
     Copy,
     Paste,
     Nudge(i32, i32),
+    Transform(Transform),
 }
 
 pub struct Binding {
@@ -120,6 +121,14 @@ pub const BINDINGS: &[Binding] = &[
         action: "Nudge the selection by one pixel",
     },
     Binding {
+        keys: "Shift+H / Shift+V",
+        action: "Flip the selection horizontally or vertically, or the active cel when nothing is selected",
+    },
+    Binding {
+        keys: "Shift+. / Shift+, / Ctrl+Shift+.",
+        action: "Turn that area 90 degrees clockwise, counter-clockwise, or 180 degrees",
+    },
+    Binding {
         keys: "Comma / Period",
         action: "Previous or next frame",
     },
@@ -152,6 +161,7 @@ pub fn command_from(modifiers: Modifiers, key: Key) -> Option<Command> {
         (true, true, Key::Z) => Some(Command::Redo),
         (true, true, Key::N) => Some(Command::AddFrame),
         (true, true, Key::L) => Some(Command::AddLayer),
+        (true, true, Key::Period) => Some(Command::Transform(Transform::Rotate180)),
         (true, false, Key::S) => Some(Command::Save),
         (true, false, Key::Z) => Some(Command::Undo),
         (true, false, Key::Y) => Some(Command::Redo),
@@ -182,6 +192,10 @@ pub fn command_from(modifiers: Modifiers, key: Key) -> Option<Command> {
         (false, false, Key::ArrowLeft) => Some(Command::Nudge(-1, 0)),
         (false, false, Key::ArrowRight) => Some(Command::Nudge(1, 0)),
         (false, false, Key::ArrowUp) => Some(Command::Nudge(0, -1)),
+        (false, true, Key::H) => Some(Command::Transform(Transform::FlipHorizontal)),
+        (false, true, Key::V) => Some(Command::Transform(Transform::FlipVertical)),
+        (false, true, Key::Period) => Some(Command::Transform(Transform::Rotate90Cw)),
+        (false, true, Key::Comma) => Some(Command::Transform(Transform::Rotate90Ccw)),
         (false, false, Key::ArrowDown) => Some(Command::Nudge(0, 1)),
         (false, false, Key::Delete | Key::Backspace) => Some(Command::DeleteSelection),
         (false, false, Key::Escape) => Some(Command::Escape),
@@ -320,6 +334,34 @@ mod tests {
             command_from(Modifiers::NONE, Key::Comma),
             Some(Command::PrevFrame)
         );
+        assert_eq!(command_from(Modifiers::NONE, Key::H), None);
+        assert_eq!(
+            command_from(Modifiers::NONE, Key::Period),
+            Some(Command::NextFrame)
+        );
+        let mut shift = Modifiers::NONE;
+        shift.shift = true;
+        assert_eq!(
+            command_from(shift, Key::H),
+            Some(Command::Transform(Transform::FlipHorizontal))
+        );
+        assert_eq!(
+            command_from(shift, Key::V),
+            Some(Command::Transform(Transform::FlipVertical))
+        );
+        assert_eq!(
+            command_from(shift, Key::Period),
+            Some(Command::Transform(Transform::Rotate90Cw))
+        );
+        assert_eq!(
+            command_from(shift, Key::Comma),
+            Some(Command::Transform(Transform::Rotate90Ccw))
+        );
+        assert_eq!(
+            command_from(Modifiers::COMMAND | Modifiers::SHIFT, Key::Period),
+            Some(Command::Transform(Transform::Rotate180))
+        );
+        assert_eq!(command_from(Modifiers::COMMAND, Key::Period), None);
         assert_eq!(
             command_from(Modifiers::COMMAND, Key::C),
             Some(Command::Copy)
