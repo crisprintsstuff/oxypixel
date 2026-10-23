@@ -105,7 +105,7 @@ pub const BINDINGS: &[Binding] = &[
     },
     Binding {
         keys: "Ctrl+Plus / Ctrl+Minus / Ctrl+0",
-        action: "Zoom in, zoom out, fit",
+        action: "Zoom in or out by one whole-pixel step, or fit",
     },
     Binding {
         keys: "Enter",

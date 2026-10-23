@@ -30,8 +30,8 @@ In the 0.4.0 tree and covered by tests or by the release workflow.
 | Raster | PNG, BMP, and GIF import and export. GIF import is one composited layer. Spritesheet and 2×/4× nearest PNG | `io/raster.rs` |
 | CLI | `export-png`, `export-bmp`, `export-gif`, `export-sheet`, `export-palette`, and `import-palette`. Failures print and exit. Missing file must not hang | `cli.rs`, `tests/cli.rs` |
 | Palette files | GIMP `.gpl`, hex `.hex` (one `RRGGBB` per line, `RRGGBBAA` when alpha is not 255), and JASC `.pal`. Import replaces the palette and is one undo step. More than 256 colors is an error | `io/palette.rs`, `editor.rs`, `app.rs` |
-| Window | egui 0.31 glow, nearest-neighbor canvas, grid, zoom, pan, shortcuts, in-code tool icons | `app.rs`, `canvas.rs` |
-| Files UI | Recent list, drag and drop, Windows file dialog, Linux portal with a path field fallback | `recent.rs`, `native.rs` |
+| Window | egui 0.31 glow, nearest-neighbor canvas, whole-pixel zoom, a grid when the cells are readable, pan, shortcuts, tool icons with their shortcut letter | `app.rs`, `canvas.rs` |
+| Files UI | Recent list of ten paths, a folder hint when names match, a missing-file mark, and Clear recent. Drag and drop, Windows file dialog, Linux portal with a path field fallback | `recent.rs`, `native.rs` |
 | Updates | Help, then Check for updates. Download only after `SHA256SUMS.txt` matches. No network until that command | `update.rs` |
 | Windows package | Per-user NSIS installer and portable exe. Static CRT. Unsigned | `installer/oxypixel.nsi`, `release.yml` |
 | Portable exe resources | The tagged Windows build embeds an icon and VERSIONINFO from `oxypixel.rc` when `rc.exe` is on `PATH`. A cross-build without `rc.exe`, `llvm-rc`, or `windres` does not | `build.rs`, [README.md](../README.md), [BUILD-WINDOWS.md](BUILD-WINDOWS.md) |
@@ -133,11 +133,15 @@ The document palette can be replaced from a file and written back out. GIMP `.gp
 
 ### OX-P7
 
-**Snap zoom to whole pixels, and keep the grid visible at Fit.** The wheel and the status-bar buttons multiply the scale by 1.1, so a fitted canvas lands on percents such as 1952, and a few clicks later on 514. Nearest-neighbor drawing then gives neighboring pixels different screen sizes. The grid is skipped when zoom is below 6 (the status line is under 600%) and when more than 400 cells are in view, so Fit on a canvas larger than about 64×64 leaves the Grid checkbox with nothing on screen. A later task should step zoom through whole-pixel scales, still inside the current clamp, with the wheel centered on the pointer. Fit (Ctrl+0) stays. The grid should still draw at that fitted scale, lighter when many cells are visible.
+**Snap zoom to whole pixels, and keep the grid visible at Fit.** Status: done. Area: `crates/oxypixel/src/canvas.rs`.
+
+Zoom in, zoom out, and the wheel step through whole-pixel scales from 1× to 64×. Below 1× the steps are 1/2, 1/3, 1/4, 1/5, 1/6, 1/8, and 1/10. The pointer stays over the same document pixel. Fit (Ctrl+0) still frames the canvas, on the largest of those scales that fits in the panel. The grid draws from 2× upward. From 2× to 4× the lines are every two or four document pixels, so they stay a few screen pixels apart, and a span of more than 200 cells uses a lighter line. `next_clean_zoom`, `fit_zoom`, and `grid_draw` are unit tested.
 
 ### OX-P8
 
-**Preview the brush in the color that will be painted.** Pencil, eraser, line, rectangle, and ellipse already stroke a one-pixel teal rectangle the size of the brush. The rectangle is empty, so the stamp appears only after the drag starts. A later task should fill that hover mark with the color the next stamp will use, including the secondary color while the right button is down. The eyedropper and the selection keep a one-pixel outline.
+**Preview the brush in the color that will be painted.** Status: done. Area: `crates/oxypixel/src/canvas.rs`.
+
+Pencil, line, rectangle, and ellipse fill the hover stamp with the primary color, or the secondary color while the right button is down. The fill is translucent, with a contrasting edge. The eraser fills the stamp with a light tint. Fill, eyedropper, and select keep a one-pixel outline. `hover_paint` is unit tested.
 
 ### OX-P9
 
@@ -145,7 +149,9 @@ The document palette can be replaced from a file and written back out. GIMP `.gp
 
 ### OX-P10
 
-**Print the shortcut on each tool button.** The eight tools are 16×16 icons. The letter and the name show up on hover, in the status line, and under Help → Shortcuts. A later task should draw the shortcut that already exists (B, E, G, I, L, R, O, M) on the button. Until the first stroke, one line on the empty canvas can point at File → Open example and Help → Shortcuts. The shortcut map stays as it is.
+**Print the shortcut on each tool button.** Status: done. Area: `crates/oxypixel/src/app.rs`.
+
+Each tool button draws its letter (B, E, G, I, L, R, O, M) in the corner of the icon. The tooltip and Help → Shortcuts still list the same keys.
 
 ### OX-P11
 
@@ -165,7 +171,9 @@ The document palette can be replaced from a file and written back out. GIMP `.gp
 
 ### OX-P15
 
-**Show enough of a recent file to tell two of them apart.** File → Open recent keeps five paths, and each row is the file name. The full path is a hover tip. A missing file uses that same label, and the list has no Clear. A later task should show the parent folder on the row, mark a path that is gone, add Clear recent, and keep up to ten paths.
+**Show enough of a recent file to tell two of them apart.** Status: done. Area: `crates/oxypixel/src/recent.rs`, `crates/oxypixel/src/app.rs`.
+
+Open recent keeps ten paths. A repeated file name shows the parent folder, and a longer suffix when those folder names also match. A path that is not a file is labeled "(missing)". Clear recent empties the list and writes it back. The full path stays on the hover tip. The label and the ten-path cap are unit tested.
 
 ### OX-P16
 

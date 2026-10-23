@@ -100,7 +100,7 @@ Help, then Check for updates, downloads the tar.gz for an unpacked copy and the 
 
 These match the current editor. Planned work is listed in [docs/ROADMAP.md](docs/ROADMAP.md) and is not included here.
 
-- Pixel canvas with nearest-neighbor zoom, pan, and an optional grid
+- Pixel canvas with nearest-neighbor zoom on whole-pixel steps, pan, and an optional grid
 - Pencil, eraser, fill, eyedropper, line, rectangle, ellipse, and rectangular selection
 - Move and nudge a selection. Copy publishes a straight-alpha image to the system clipboard and keeps an in-memory patch. Paste uses the system image, or that patch when the clipboard has no image
 - Canvas resize and crop
@@ -112,7 +112,7 @@ These match the current editor. Planned work is listed in [docs/ROADMAP.md](docs
 - Animation frames, playback, onion skin, GIF export, and a horizontal spritesheet
 - PNG and spritesheet export at 1×, 2×, or 4× nearest-neighbor
 - `.oxypix` documents, plus PNG, BMP, and GIF import and export
-- Recent files, drag-and-drop, a Windows file dialog, and a Linux portal dialog with a path field if the portal is unavailable
+- Recent files (a folder hint when names match, a missing-file mark, and Clear recent), drag-and-drop, a Windows file dialog, and a Linux portal dialog with a path field if the portal is unavailable
 - Headless `export-png`, `export-bmp`, `export-gif`, `export-sheet`, `export-palette`, and `import-palette` commands
 - Keyboard shortcuts
 
@@ -135,7 +135,7 @@ The maintainer develops OxyPixel with AI coding agents. The written rules for th
 | Ctrl+N / Ctrl+O / Ctrl+S | New, open, save |
 | Enter | Play or pause |
 | Space+drag | Pan |
-| Ctrl+Plus / Ctrl+Minus / Ctrl+0 | Zoom in, zoom out, fit |
+| Ctrl+Plus / Ctrl+Minus / Ctrl+0 | Zoom in, zoom out (whole-pixel steps), fit |
 
 The full list is [docs/SHORTCUTS.md](docs/SHORTCUTS.md).
 
