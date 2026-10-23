@@ -5,6 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Each tool button shows its shortcut letter.
+- File → Open recent keeps ten documents. A repeated file name shows the parent folder, a missing file is marked, and Clear recent empties the list.
+
+### Changed
+
+- Zoom in, zoom out, and the wheel step through whole-pixel scales (1×, 2×, 3×, and so on, up to 64×). Below 100% the steps are 1/2, 1/3, 1/4, 1/5, 1/6, 1/8, and 1/10. Fit still frames the canvas, on the largest of those scales that fits.
+- The pixel grid draws below 600% when a cell is still large enough to read. From 200% to 400% the lines are coarser, and a wide view uses a lighter line.
+- The brush hover mark is filled with the color that will be painted. The right button previews the secondary color. The eraser uses a light tint. Fill, pick, and select stay a one-pixel outline.
+
 ## [0.4.0] - 2026-10-21
 
 ### Added

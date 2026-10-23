@@ -390,8 +390,8 @@ impl OxyApp {
                     self.editor.deselect();
                 }
             }
-            Command::ZoomIn => self.view.zoom_center(1.1),
-            Command::ZoomOut => self.view.zoom_center(1.0 / 1.1),
+            Command::ZoomIn => self.view.zoom_step(1),
+            Command::ZoomOut => self.view.zoom_step(-1),
             Command::ZoomFit => {
                 let w = self.editor.document().width();
                 let h = self.editor.document().height();
@@ -958,19 +958,22 @@ impl OxyApp {
                     if !self.recent.is_empty() {
                         ui.menu_button("Open recent", |ui| {
                             let recent = self.recent.clone();
-                            for path in recent {
-                                let name = path
-                                    .file_name()
-                                    .map(|n| n.to_string_lossy().to_string())
-                                    .unwrap_or_else(|| path.display().to_string());
+                            for path in &recent {
+                                let label = recent::row_label(path, &recent);
                                 if ui
-                                    .button(name)
+                                    .button(label)
                                     .on_hover_text(path.display().to_string())
                                     .clicked()
                                 {
-                                    self.request_open_at(path);
+                                    self.request_open_at(path.clone());
                                     ui.close_menu();
                                 }
+                            }
+                            ui.separator();
+                            if ui.button("Clear recent").clicked() {
+                                recent::clear(&mut self.recent);
+                                recent::save(&self.recent);
+                                ui.close_menu();
                             }
                         });
                     }
@@ -1063,11 +1066,11 @@ impl OxyApp {
                 });
                 ui.menu_button("View", |ui| {
                     if menu_item(ui, "Zoom in", "Ctrl+Plus") {
-                        self.view.zoom_center(1.1);
+                        self.view.zoom_step(1);
                         ui.close_menu();
                     }
                     if menu_item(ui, "Zoom out", "Ctrl+Minus") {
-                        self.view.zoom_center(1.0 / 1.1);
+                        self.view.zoom_step(-1);
                         ui.close_menu();
                     }
                     if menu_item(ui, "Fit", "Ctrl+0") {
@@ -1261,6 +1264,7 @@ impl OxyApp {
                         .fit_to_exact_size(egui::vec2(22.0, 22.0))
                 })
         });
+        let has_icon = image.is_some();
         let mut button = match image {
             Some(image) => egui::Button::image(image),
             None => egui::Button::new(shortcut),
@@ -1269,11 +1273,11 @@ impl OxyApp {
             button = button.fill(Color32::from_rgb(78, 62, 32));
         }
         let tip = format!("{} ({shortcut})\n{}", tool_name(tool), tool_hint(tool));
-        if ui
-            .add_sized([34.0, 34.0], button)
-            .on_hover_text(tip)
-            .clicked()
-        {
+        let response = ui.add_sized([34.0, 34.0], button).on_hover_text(tip);
+        if has_icon {
+            paint_tool_shortcut(ui, response.rect, shortcut);
+        }
+        if response.clicked() {
             self.editor.set_tool(tool);
         }
     }
@@ -1582,12 +1586,20 @@ impl OxyApp {
         let hover = self.hovered_color();
         ui.horizontal(|ui| {
             ui.label(format!("{width}×{height}"));
-            if ui.small_button("−").on_hover_text("Zoom out").clicked() {
-                self.view.zoom_center(1.0 / 1.1);
+            if ui
+                .small_button("−")
+                .on_hover_text("Zoom out one whole-pixel step")
+                .clicked()
+            {
+                self.view.zoom_step(-1);
             }
             ui.label(format!("{zoom}%"));
-            if ui.small_button("+").on_hover_text("Zoom in").clicked() {
-                self.view.zoom_center(1.1);
+            if ui
+                .small_button("+")
+                .on_hover_text("Zoom in one whole-pixel step")
+                .clicked()
+            {
+                self.view.zoom_step(1);
             }
             if ui
                 .small_button("Fit")
@@ -1599,7 +1611,7 @@ impl OxyApp {
             let mut grid = self.view.grid;
             if ui
                 .checkbox(&mut grid, "Grid")
-                .on_hover_text("Show pixel grid when zoomed in")
+                .on_hover_text("Show a pixel grid when the cells are large enough to read")
                 .changed()
             {
                 self.view.grid = grid;
@@ -2170,6 +2182,25 @@ impl OxyApp {
             self.dialog = None;
         }
     }
+}
+
+fn paint_tool_shortcut(ui: &egui::Ui, rect: egui::Rect, shortcut: &str) {
+    let corner = rect.right_bottom() - egui::vec2(2.0, 1.0);
+    let font = egui::FontId::proportional(10.0);
+    ui.painter().text(
+        corner + egui::vec2(1.0, 1.0),
+        egui::Align2::RIGHT_BOTTOM,
+        shortcut,
+        font.clone(),
+        Color32::from_rgb(20, 22, 30),
+    );
+    ui.painter().text(
+        corner,
+        egui::Align2::RIGHT_BOTTOM,
+        shortcut,
+        font,
+        Color32::from_rgb(246, 243, 236),
+    );
 }
 
 fn menu_item(ui: &mut egui::Ui, label: &str, shortcut: &str) -> bool {
