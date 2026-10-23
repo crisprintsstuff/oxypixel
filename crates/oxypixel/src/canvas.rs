@@ -6,20 +6,46 @@ use eframe::egui::{
 };
 use oxypixel_core::{source_over, Editor, MouseButton, Rgba, Tool};
 
+use crate::cache::FrameComposites;
 use crate::theme::{self, AMBER};
+
+/// How many neighboring frames onion skin will look at, in one direction.
+pub const ONION_FRAME_CAP: u32 = 8;
+
+/// Onion skin. Frame 0 does not borrow the last frame, and the last frame does not borrow frame 0.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OnionSkin {
+    pub enabled: bool,
+    pub previous: u32,
+    pub next: u32,
+    pub opacity: u8,
+    pub tint: bool,
+}
+
+impl Default for OnionSkin {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            previous: 1,
+            next: 1,
+            opacity: 80,
+            tint: true,
+        }
+    }
+}
 
 pub struct ViewState {
     pub zoom: f32,
     pub pan: Vec2,
     pub grid: bool,
-    pub onion: bool,
+    pub onion: OnionSkin,
     pub fit_next: bool,
     pub panel: Rect,
     texture: Option<TextureHandle>,
     cache_valid: bool,
     cached_gen: u64,
     cached_frame: usize,
-    cached_onion: bool,
+    cached_onion: OnionSkin,
     cached_w: u32,
     cached_h: u32,
     panning: bool,
@@ -33,14 +59,14 @@ impl Default for ViewState {
             zoom: 8.0,
             pan: Vec2::ZERO,
             grid: true,
-            onion: false,
+            onion: OnionSkin::default(),
             fit_next: true,
             panel: Rect::ZERO,
             texture: None,
             cache_valid: false,
             cached_gen: 0,
             cached_frame: 0,
-            cached_onion: false,
+            cached_onion: OnionSkin::default(),
             cached_w: 0,
             cached_h: 0,
             panning: false,
@@ -173,6 +199,7 @@ pub fn show_canvas(
     ui: &mut egui::Ui,
     editor: &mut Editor,
     view: &mut ViewState,
+    composites: &mut FrameComposites,
     allow_draw: bool,
 ) -> Option<(i32, i32)> {
     let width = editor.document().width();
@@ -182,7 +209,7 @@ pub fn show_canvas(
     if view.fit_next {
         view.fit(width, height);
     }
-    ensure_texture(ui, editor, view, width, height);
+    ensure_texture(ui, editor, view, composites, width, height);
 
     let origin = rect.min + view.pan;
     let screen = Vec2::new(width as f32 * view.zoom, height as f32 * view.zoom);
@@ -386,7 +413,14 @@ fn handle_pointer(
     }
 }
 
-fn ensure_texture(ui: &egui::Ui, editor: &Editor, view: &mut ViewState, width: u32, height: u32) {
+fn ensure_texture(
+    ui: &egui::Ui,
+    editor: &Editor,
+    view: &mut ViewState,
+    composites: &mut FrameComposites,
+    width: u32,
+    height: u32,
+) {
     let frame = editor.document().active_frame();
     let live = editor.gesture_active();
     let stale = !view.cache_valid
@@ -401,7 +435,7 @@ fn ensure_texture(ui: &egui::Ui, editor: &Editor, view: &mut ViewState, width: u
     if view.cached_w != width || view.cached_h != height {
         view.texture = None;
     }
-    let rgba = display_rgba(editor, view.onion);
+    let rgba = display_rgba(editor, view.onion, composites);
     let image = egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &rgba);
     if let Some(texture) = &mut view.texture {
         texture.set(image, TextureOptions::NEAREST);
@@ -424,33 +458,49 @@ fn ensure_texture(ui: &egui::Ui, editor: &Editor, view: &mut ViewState, width: u
     }
 }
 
-fn display_rgba(editor: &Editor, onion: bool) -> Vec<u8> {
+fn display_rgba(editor: &Editor, skin: OnionSkin, composites: &mut FrameComposites) -> Vec<u8> {
     let doc = editor.document();
     let width = doc.width();
     let height = doc.height();
     let frame = doc.active_frame();
-    let current = doc.composite(frame).unwrap_or_default();
-    let previous = if onion && doc.frame_count() > 1 {
-        let prev = if frame == 0 {
-            doc.frame_count() - 1
-        } else {
-            frame - 1
-        };
-        doc.composite(prev).ok()
+    let count = doc.frame_count();
+    let (previous, next) = if skin.enabled {
+        onion_neighbors(frame, count, skin.previous, skin.next)
     } else {
-        None
+        (Vec::new(), Vec::new())
     };
-    let mut out = Vec::with_capacity(current.len() * 4);
-    for (i, px) in current.iter().enumerate() {
-        let x = (i as u32) % width;
-        let y = (i as u32) / width;
+    let mut needed = Vec::with_capacity(1 + previous.len() + next.len());
+    needed.push(frame);
+    needed.extend(previous.iter().copied());
+    needed.extend(next.iter().copied());
+    composites.prepare(editor, &needed);
+    let pixels = (width as usize).saturating_mul(height as usize);
+    let mut out = Vec::with_capacity(pixels.saturating_mul(4));
+    for i in 0..pixels {
+        let x = (i as u32) % width.max(1);
+        let y = (i as u32) / width.max(1);
         let mut color = checker(x, y);
-        if let Some(prev) = &previous {
-            if let Some(ghost) = prev.get(i) {
-                color = source_over(color, ghost.fade(80), 255);
-            }
+        paint_ghosts(
+            &mut color,
+            composites,
+            &previous,
+            i,
+            false,
+            skin.opacity,
+            skin.tint,
+        );
+        paint_ghosts(
+            &mut color,
+            composites,
+            &next,
+            i,
+            true,
+            skin.opacity,
+            skin.tint,
+        );
+        if let Some(px) = pixel_at_index(composites, frame, i) {
+            color = source_over(color, px, 255);
         }
-        color = source_over(color, *px, 255);
         out.extend_from_slice(&color.to_bytes());
     }
     for (x, y, px) in editor.preview() {
@@ -458,11 +508,178 @@ fn display_rgba(editor: &Editor, onion: bool) -> Vec<u8> {
             continue;
         }
         let i = (y as u32 * width + x as u32) as usize * 4;
+        if i + 3 >= out.len() {
+            continue;
+        }
         let dst = Rgba::new(out[i], out[i + 1], out[i + 2], out[i + 3]);
         let blended = source_over(dst, px, 255);
         out[i..i + 4].copy_from_slice(&blended.to_bytes());
     }
     out
+}
+
+fn paint_ghosts(
+    color: &mut Rgba,
+    composites: &FrameComposites,
+    frames: &[usize],
+    index: usize,
+    next: bool,
+    opacity: u8,
+    tint: bool,
+) {
+    let span = frames.len() as u32;
+    for (offset, frame_index) in frames.iter().enumerate().rev() {
+        let distance = offset as u32 + 1;
+        let faded = onion_opacity(opacity, distance, span);
+        if let Some(px) = pixel_at_index(composites, *frame_index, index) {
+            *color = source_over(*color, ghost_pixel(px, next, faded, tint), 255);
+        }
+    }
+}
+
+fn pixel_at_index(composites: &FrameComposites, frame: usize, index: usize) -> Option<Rgba> {
+    composites
+        .pixels(frame)
+        .and_then(|pixels| pixels.get(index).copied())
+}
+
+/// Previous frames, nearest first, then next frames, nearest first. No wrap.
+pub(crate) fn onion_neighbors(
+    active: usize,
+    count: usize,
+    previous: u32,
+    next: u32,
+) -> (Vec<usize>, Vec<usize>) {
+    let previous = previous.min(ONION_FRAME_CAP);
+    let next = next.min(ONION_FRAME_CAP);
+    let mut before = Vec::new();
+    let back = previous.min(active as u32);
+    for step in 1..=back {
+        before.push(active - step as usize);
+    }
+    let mut after = Vec::new();
+    if count > active + 1 {
+        let room = (count - active - 1) as u32;
+        let forward = next.min(room);
+        for step in 1..=forward {
+            after.push(active + step as usize);
+        }
+    }
+    (before, after)
+}
+
+/// Farther ghosts are dimmer. `distance` is 1 for the neighbor next to the current frame.
+pub(crate) fn onion_opacity(base: u8, distance: u32, span: u32) -> u8 {
+    if span == 0 || distance == 0 || base == 0 {
+        return 0;
+    }
+    let distance = distance.min(span);
+    let weight = span - distance + 1;
+    ((u32::from(base) * weight) / span) as u8
+}
+
+const PREV_TINT: Rgba = Rgba::new(196, 72, 88, 255);
+const NEXT_TINT: Rgba = Rgba::new(72, 168, 196, 255);
+
+pub(crate) fn ghost_pixel(px: Rgba, next: bool, opacity: u8, tint: bool) -> Rgba {
+    if px.a == 0 || opacity == 0 {
+        return Rgba::CLEAR;
+    }
+    let mut px = px;
+    if tint {
+        let toward = if next { NEXT_TINT } else { PREV_TINT };
+        px.r = mix8(px.r, toward.r);
+        px.g = mix8(px.g, toward.g);
+        px.b = mix8(px.b, toward.b);
+    }
+    px.fade(opacity)
+}
+
+fn mix8(a: u8, b: u8) -> u8 {
+    ((u32::from(a) + u32::from(b)) / 2) as u8
+}
+
+/// Screen pixels per document pixel. Whole pixels when the picture fits.
+/// When it does not, each screen pixel covers a whole number of document pixels.
+pub(crate) fn integer_fit_scale(box_w: f32, box_h: f32, doc_w: u32, doc_h: u32) -> f32 {
+    if doc_w == 0 || doc_h == 0 || box_w < 1.0 || box_h < 1.0 {
+        return 1.0;
+    }
+    let up_x = (box_w / doc_w as f32).floor();
+    let up_y = (box_h / doc_h as f32).floor();
+    let up = up_x.min(up_y);
+    if up >= 1.0 {
+        return up;
+    }
+    let down_x = (doc_w as f32 / box_w).ceil().max(1.0);
+    let down_y = (doc_h as f32 / box_h).ceil().max(1.0);
+    1.0 / down_x.max(down_y)
+}
+
+/// Nearest-neighbor picture that fits in the box, checkerboard behind clear pixels.
+pub(crate) fn fitted_rgba(
+    pixels: &[Rgba],
+    width: u32,
+    height: u32,
+    box_w: u32,
+    box_h: u32,
+) -> (u32, u32, Vec<u8>) {
+    if width == 0 || height == 0 || pixels.len() < (width as usize).saturating_mul(height as usize)
+    {
+        return (1, 1, vec![0, 0, 0, 0]);
+    }
+    let scale = integer_fit_scale(box_w as f32, box_h as f32, width, height);
+    let out_w = ((width as f32) * scale).round().max(1.0) as u32;
+    let out_h = ((height as f32) * scale).round().max(1.0) as u32;
+    let mut out = Vec::with_capacity((out_w as usize).saturating_mul(out_h as usize) * 4);
+    for y in 0..out_h {
+        for x in 0..out_w {
+            let sx = ((x as f32 + 0.5) / scale).floor() as u32;
+            let sy = ((y as f32 + 0.5) / scale).floor() as u32;
+            let sx = sx.min(width - 1);
+            let sy = sy.min(height - 1);
+            let px = pixels[(sy * width + sx) as usize];
+            let color = source_over(checker(sx, sy), px, 255);
+            out.extend_from_slice(&color.to_bytes());
+        }
+    }
+    (out_w, out_h, out)
+}
+
+/// Full-size composite with the checkerboard behind clear pixels.
+pub(crate) fn checker_image(pixels: &[Rgba], width: u32, _height: u32) -> Vec<u8> {
+    let mut out = Vec::with_capacity(pixels.len().saturating_mul(4));
+    for (i, px) in pixels.iter().enumerate() {
+        let x = (i as u32) % width.max(1);
+        let y = (i as u32) / width.max(1);
+        let color = source_over(checker(x, y), *px, 255);
+        out.extend_from_slice(&color.to_bytes());
+    }
+    out
+}
+
+/// Move the pan so the document point sits in the middle of the canvas panel.
+pub(crate) fn center_document_point(view: &mut ViewState, doc_x: f32, doc_y: f32) {
+    if view.zoom <= 0.0 || view.panel.width() < 1.0 || view.panel.height() < 1.0 {
+        return;
+    }
+    view.pan = Vec2::new(
+        view.panel.width() * 0.5 - doc_x * view.zoom,
+        view.panel.height() * 0.5 - doc_y * view.zoom,
+    );
+}
+
+/// The portion of the document currently inside the canvas panel, in document pixels.
+pub(crate) fn visible_document_bounds(view: &ViewState, width: u32, height: u32) -> Rect {
+    if view.zoom <= 0.0 {
+        return Rect::from_min_max(Pos2::ZERO, Pos2::new(width as f32, height as f32));
+    }
+    let origin = view.panel.min + view.pan;
+    let x0 = ((view.panel.min.x - origin.x) / view.zoom).clamp(0.0, width as f32);
+    let y0 = ((view.panel.min.y - origin.y) / view.zoom).clamp(0.0, height as f32);
+    let x1 = ((view.panel.max.x - origin.x) / view.zoom).clamp(0.0, width as f32);
+    let y1 = ((view.panel.max.y - origin.y) / view.zoom).clamp(0.0, height as f32);
+    Rect::from_min_max(Pos2::new(x0, y0), Pos2::new(x1.max(x0), y1.max(y0)))
 }
 
 fn checker(x: u32, y: u32) -> Rgba {
@@ -693,5 +910,70 @@ mod tests {
         let erased = eraser.fill.expect("eraser tints");
         assert!(erased.a() > 0);
         assert_ne!((erased.r(), erased.g(), erased.b()), (232, 168, 56));
+    }
+
+    #[test]
+    fn onion_skin_does_not_wrap_and_looks_both_ways() {
+        let (prev, next) = onion_neighbors(0, 4, 2, 2);
+        assert!(prev.is_empty());
+        assert_eq!(next, vec![1, 2]);
+        let (prev, next) = onion_neighbors(2, 4, 2, 1);
+        assert_eq!(prev, vec![1, 0]);
+        assert_eq!(next, vec![3]);
+        let (prev, next) = onion_neighbors(3, 4, 1, 2);
+        assert_eq!(prev, vec![2]);
+        assert!(next.is_empty());
+        assert_eq!(onion_opacity(80, 1, 2), 80);
+        assert_eq!(onion_opacity(80, 2, 2), 40);
+    }
+
+    #[test]
+    fn a_tinted_ghost_moves_toward_the_tint_and_clear_pixels_stay_clear() {
+        let ink = Rgba::new(232, 168, 56, 255);
+        let tinted = ghost_pixel(ink, false, 255, true);
+        assert_eq!(tinted.r, ((232 + 196) / 2) as u8);
+        assert_eq!(tinted.g, ((168 + 72) / 2) as u8);
+        assert_eq!(tinted.b, ((56 + 88) / 2) as u8);
+        assert_eq!(tinted.a, 255);
+        let plain = ghost_pixel(ink, false, 255, false);
+        assert_eq!((plain.r, plain.g, plain.b), (232, 168, 56));
+        assert_eq!(ghost_pixel(ink, true, 0, true), Rgba::CLEAR);
+        assert_eq!(ghost_pixel(Rgba::CLEAR, false, 255, true), Rgba::CLEAR);
+        let next = ghost_pixel(ink, true, 255, true);
+        assert_ne!(next.b, tinted.b);
+    }
+
+    #[test]
+    fn preview_scale_is_an_integer_or_an_integer_divisor() {
+        assert_eq!(integer_fit_scale(200.0, 120.0, 32, 32), 3.0);
+        assert!((integer_fit_scale(40.0, 40.0, 100, 50) - (1.0 / 3.0)).abs() < 1e-4);
+        assert_eq!(integer_fit_scale(0.0, 40.0, 8, 8), 1.0);
+        let pixels = vec![
+            Rgba::new(10, 20, 30, 255),
+            Rgba::CLEAR,
+            Rgba::CLEAR,
+            Rgba::new(1, 2, 3, 255),
+        ];
+        let (w, h, rgba) = fitted_rgba(&pixels, 2, 2, 2, 2);
+        assert_eq!((w, h), (2, 2));
+        assert_eq!(&rgba[0..4], &[10, 20, 30, 255]);
+    }
+
+    #[test]
+    fn centering_a_document_point_puts_it_in_the_middle_of_the_panel() {
+        let mut view = ViewState {
+            panel: Rect::from_min_size(Pos2::new(10.0, 30.0), Vec2::new(100.0, 80.0)),
+            zoom: 10.0,
+            pan: Vec2::ZERO,
+            ..Default::default()
+        };
+        center_document_point(&mut view, 16.0, 4.0);
+        let origin = view.panel.min + view.pan;
+        let screen = origin + Vec2::new(16.0 * view.zoom, 4.0 * view.zoom);
+        assert!((screen.x - view.panel.center().x).abs() < 1e-3);
+        assert!((screen.y - view.panel.center().y).abs() < 1e-3);
+        let visible = visible_document_bounds(&view, 32, 32);
+        assert!(visible.min.x < 16.0 && visible.max.x > 16.0);
+        assert!(visible.min.y < 4.0 && visible.max.y > 4.0);
     }
 }

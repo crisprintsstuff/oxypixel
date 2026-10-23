@@ -24,13 +24,13 @@ In the 0.5.0 tree and covered by tests or by the release workflow.
 | Selection | Drag to move, arrow nudge, flip, rotate, system-clipboard and in-memory copy and paste, clear, select all. The status line shows the selection size | `editor.rs`, `clipboard.rs`, `app.rs` |
 | Canvas | Resize and crop. Mirror horizontal and vertical while stamping | `document.rs`, `editor.rs` |
 | Layers | Add, delete, duplicate, reorder, rename, visibility, opacity, merge down. At most 32 | `document.rs` |
-| Frames | Add, duplicate, duration 20–10000 ms, playback clock, onion skin in the view | `animation.rs`, `canvas.rs` |
+| Frames | Add, duplicate, duration 20–10000 ms on the slider, playback clock, thumbnails, onion skin for earlier and later frames | `animation.rs`, `canvas.rs`, `framestrip.rs` |
 | Undo | Up to 50 steps and 256 MiB, including the selection rectangle. Slider drags coalesce | `history.rs` |
 | `.oxypix` | Version 1, little-endian, caps before allocation, trailing bytes rejected | `io/oxypix.rs`, `docs/FORMAT.md` |
 | Raster | PNG, BMP, and GIF import and export. GIF import is one composited layer. Spritesheet and 2×/4× nearest PNG | `io/raster.rs` |
 | CLI | `export-png`, `export-bmp`, `export-gif`, `export-sheet`, `export-palette`, and `import-palette`. Failures print and exit. Missing file must not hang | `cli.rs`, `tests/cli.rs` |
 | Palette files | GIMP `.gpl`, hex `.hex` (one `RRGGBB` per line, `RRGGBBAA` when alpha is not 255), and JASC `.pal`. Import replaces the palette and is one undo step. More than 256 colors is an error | `io/palette.rs`, `editor.rs`, `app.rs` |
-| Window | egui 0.31 glow, nearest-neighbor canvas, whole-pixel zoom, a grid when the cells are readable, pan, shortcuts, tool icons with their shortcut letter | `app.rs`, `canvas.rs` |
+| Window | egui 0.31 glow, nearest-neighbor canvas, whole-pixel zoom, a grid when the cells are readable, pan, shortcuts, tool icons with their shortcut letter, a preview panel beside the canvas | `app.rs`, `canvas.rs`, `preview.rs` |
 | Files UI | Recent list of ten paths, a folder hint when names match, a missing-file mark, and Clear recent. Drag and drop, Windows file dialog, Linux portal with a path field fallback | `recent.rs`, `native.rs` |
 | Recovery | Autosave writes a `.oxypix` in the data directory about once a minute and after 30 edits. Startup can restore or discard it. A save, a discard, or a clean close removes it | `recovery.rs`, `app.rs` |
 | Updates | Help, then Check for updates. Download only after `SHA256SUMS.txt` matches. No network until that command | `update.rs` |
@@ -158,7 +158,15 @@ Each tool button draws its letter (B, E, G, I, L, R, O, M) in the corner of the 
 
 ### OX-P11
 
-**Thumbnails on the frame strip, onion skin for the next frame, and the full duration range.** The strip labels frames with 1, 2, 3. Onion skin composites the previous frame only, and on frame 1 that frame is the last frame in the document. The duration slider stops at 1000 ms, while `set_frame_duration` accepts 20 to 10000 ms. A later task should draw a small thumbnail on each frame button, show the next frame as well as the previous one, leave frame 1 without a ghost of the last frame, and let the slider reach 10000 ms.
+**Thumbnails on the frame strip, onion skin for the next frame, and the full duration range.** Status: done. Area: `crates/oxypixel/src/framestrip.rs`, `crates/oxypixel/src/canvas.rs`.
+
+Each frame button shows a small composite of that frame and its number. The hover tip includes the duration. Frame names are not edited: a version 1 `.oxypix` file has no frame-name field, and this change does not add one. Onion skin can ghost up to eight frames before the current one and eight after it. Earlier ghosts lean rose and later ghosts lean teal when Tint is on, and Opacity scales them, with farther frames dimmer. Frame 1 does not show the last frame, and the last frame does not show frame 1. The duration slider runs from 20 ms to 10000 ms, on a logarithmic scale so both a short frame and the file-format maximum are reachable.
+
+### OX-P19
+
+**A preview of the whole image beside the canvas.** Status: done. Area: `crates/oxypixel/src/preview.rs`, `crates/oxypixel/src/session.rs`.
+
+View → Show preview opens a resizable panel between the canvas and the layer list. It draws the composited frame at the largest integer scale that fits, or one screen pixel for several document pixels when the frame is larger than the panel. The picture updates as you draw. With more than one frame, Play walks the durations inside the panel and leaves the edited frame where it is; Pause shows the frame you are on. A click or drag pans the main canvas so that spot is centered, and an amber rectangle marks the canvas viewport. Hide preview closes the panel. The choice is stored in `view.txt` next to recent files and is restored on the next launch. A composite is built once per frame until the pixels change. A stroke rebuilds only the active frame. Playback reuses the frames it already built.
 
 ### OX-P12
 
