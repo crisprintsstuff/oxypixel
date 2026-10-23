@@ -7,7 +7,7 @@ use eframe::egui::{self, Color32, RichText, ViewportCommand};
 use oxypixel_core::{
     advance, decode_first_rgba, export_bmp, export_gif, export_palette, export_png_scaled,
     export_spritesheet_scaled, fit_into, import_image, import_palette, load_oxypix, save_oxypix,
-    Editor, Error, Fit, PaletteFormat, Rgba, Tool, MAX_DIMENSION,
+    Editor, Error, Fit, PaletteFormat, Rgba, Tool, Transform, MAX_DIMENSION,
 };
 
 use crate::canvas::{self, ViewState};
@@ -422,6 +422,9 @@ impl OxyApp {
                 if self.editor.selection().is_some() {
                     self.apply(|editor| editor.nudge_selection(dx, dy));
                 }
+            }
+            Command::Transform(op) => {
+                self.apply(|editor| editor.transform_pixels(op));
             }
         }
     }
@@ -1055,6 +1058,27 @@ impl OxyApp {
                         ui.close_menu();
                     }
                     ui.separator();
+                    if menu_item(ui, "Flip horizontal", "Shift+H") {
+                        self.apply(|editor| editor.transform_pixels(Transform::FlipHorizontal));
+                        ui.close_menu();
+                    }
+                    if menu_item(ui, "Flip vertical", "Shift+V") {
+                        self.apply(|editor| editor.transform_pixels(Transform::FlipVertical));
+                        ui.close_menu();
+                    }
+                    if menu_item(ui, "Rotate 90 clockwise", "Shift+.") {
+                        self.apply(|editor| editor.transform_pixels(Transform::Rotate90Cw));
+                        ui.close_menu();
+                    }
+                    if menu_item(ui, "Rotate 90 counter-clockwise", "Shift+,") {
+                        self.apply(|editor| editor.transform_pixels(Transform::Rotate90Ccw));
+                        ui.close_menu();
+                    }
+                    if menu_item(ui, "Rotate 180", "Ctrl+Shift+.") {
+                        self.apply(|editor| editor.transform_pixels(Transform::Rotate180));
+                        ui.close_menu();
+                    }
+                    ui.separator();
                     if menu_item(ui, "Canvas size…", "") {
                         self.open_canvas_dialog();
                         ui.close_menu();
@@ -1586,6 +1610,9 @@ impl OxyApp {
         let hover = self.hovered_color();
         ui.horizontal(|ui| {
             ui.label(format!("{width}×{height}"));
+            if let Some(sel) = self.editor.selection_preview() {
+                ui.label(format!("sel {}×{}", sel.width, sel.height));
+            }
             if ui
                 .small_button("−")
                 .on_hover_text("Zoom out one whole-pixel step")

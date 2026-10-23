@@ -34,6 +34,149 @@ impl PixelRect {
     }
 }
 
+/// Flip or turn a rectangle of pixels.
+///
+/// A 90 degree turn swaps width and height. See [`turned_rect`] for where that
+/// rectangle sits on the cel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Transform {
+    FlipHorizontal,
+    FlipVertical,
+    Rotate90Cw,
+    Rotate90Ccw,
+    Rotate180,
+}
+
+/// Map `pixels` (row-major, `width` by `height`) through `op`.
+///
+/// Returns the new width, the new height, and the new pixels. A zero side, a
+/// buffer whose length is not `width * height`, or a buffer larger than one cel
+/// returns `None` and allocates nothing.
+pub(crate) fn transform_pixels(
+    width: u32,
+    height: u32,
+    pixels: &[Rgba],
+    op: Transform,
+) -> Option<(u32, u32, Vec<Rgba>)> {
+    if width == 0 || height == 0 {
+        return None;
+    }
+    let len = (width as usize).checked_mul(height as usize)?;
+    if len > crate::limits::MAX_CEL_PIXELS as usize || pixels.len() != len {
+        return None;
+    }
+    let (out_w, out_h) = match op {
+        Transform::Rotate90Cw | Transform::Rotate90Ccw => (height, width),
+        Transform::FlipHorizontal | Transform::FlipVertical | Transform::Rotate180 => {
+            (width, height)
+        }
+    };
+    let mut out = vec![Rgba::CLEAR; len];
+    for y in 0..height {
+        for x in 0..width {
+            let (nx, ny) = match op {
+                Transform::FlipHorizontal => (width - 1 - x, y),
+                Transform::FlipVertical => (x, height - 1 - y),
+                Transform::Rotate180 => (width - 1 - x, height - 1 - y),
+                Transform::Rotate90Cw => (height - 1 - y, x),
+                Transform::Rotate90Ccw => (y, width - 1 - x),
+            };
+            let src = (y as usize)
+                .checked_mul(width as usize)?
+                .checked_add(x as usize)?;
+            let dst = (ny as usize)
+                .checked_mul(out_w as usize)?
+                .checked_add(nx as usize)?;
+            let px = pixels.get(src).copied()?;
+            *out.get_mut(dst)? = px;
+        }
+    }
+    Some((out_w, out_h, out))
+}
+
+/// Where a transformed rectangle lands.
+///
+/// Flips and a 180 degree turn keep `src`. A 90 degree turn swaps the sides and
+/// keeps the same center, using integer division so an odd leftover sits toward
+/// the top and left. When that turned rectangle fits on the cel and still
+/// touches it, it shifts by the smallest amount that puts it fully inside. A
+/// rectangle that does not touch the cel stays where the center put it. When
+/// the turned rectangle is wider or taller than the cel, the centered position
+/// is left alone and the caller drops the pixels that fall outside.
+pub(crate) fn turned_rect(
+    src: PixelRect,
+    canvas_w: u32,
+    canvas_h: u32,
+    op: Transform,
+) -> PixelRect {
+    let (width, height) = match op {
+        Transform::Rotate90Cw | Transform::Rotate90Ccw => (src.height, src.width),
+        Transform::FlipHorizontal | Transform::FlipVertical | Transform::Rotate180 => {
+            (src.width, src.height)
+        }
+    };
+    if !matches!(op, Transform::Rotate90Cw | Transform::Rotate90Ccw) {
+        return src;
+    }
+    let mut x = i64::from(src.x) + (i64::from(src.width) - i64::from(width)) / 2;
+    let mut y = i64::from(src.y) + (i64::from(src.height) - i64::from(height)) / 2;
+    let span_w = i64::from(width);
+    let span_h = i64::from(height);
+    let limit_w = i64::from(canvas_w);
+    let limit_h = i64::from(canvas_h);
+    let fits = span_w <= limit_w && span_h <= limit_h;
+    let touches = x < limit_w && y < limit_h && x + span_w > 0 && y + span_h > 0;
+    if fits && touches {
+        if x < 0 {
+            x = 0;
+        } else if x + span_w > limit_w {
+            x = limit_w - span_w;
+        }
+        if y < 0 {
+            y = 0;
+        } else if y + span_h > limit_h {
+            y = limit_h - span_h;
+        }
+    }
+    PixelRect {
+        x: clamp_i64_to_i32(x),
+        y: clamp_i64_to_i32(y),
+        width,
+        height,
+    }
+}
+
+/// The part of `rect` that lies on a canvas of `canvas_w` by `canvas_h`.
+pub(crate) fn rect_on_canvas(rect: PixelRect, canvas_w: u32, canvas_h: u32) -> Option<PixelRect> {
+    let left = i64::from(rect.x);
+    let top = i64::from(rect.y);
+    let right = left.saturating_add(i64::from(rect.width));
+    let bottom = top.saturating_add(i64::from(rect.height));
+    let x0 = left.max(0);
+    let y0 = top.max(0);
+    let x1 = right.min(i64::from(canvas_w));
+    let y1 = bottom.min(i64::from(canvas_h));
+    if x1 <= x0 || y1 <= y0 {
+        return None;
+    }
+    Some(PixelRect {
+        x: clamp_i64_to_i32(x0),
+        y: clamp_i64_to_i32(y0),
+        width: (x1 - x0) as u32,
+        height: (y1 - y0) as u32,
+    })
+}
+
+fn clamp_i64_to_i32(value: i64) -> i32 {
+    if value > i64::from(i32::MAX) {
+        i32::MAX
+    } else if value < i64::from(i32::MIN) {
+        i32::MIN
+    } else {
+        value as i32
+    }
+}
+
 pub(crate) fn clamp_to_margin(v: i32, limit: i32, margin: i32) -> i32 {
     v.clamp(-margin, limit.saturating_add(margin))
 }
@@ -297,5 +440,133 @@ mod tests {
         flood_fill(&mut pixels, 3, 3, 0, 0, Rgba::new(9, 0, 0, 255), Some(sel));
         assert_eq!(pixels[0].r, 9);
         assert_eq!(pixels[1], Rgba::CLEAR);
+    }
+
+    fn solid(n: u8) -> Rgba {
+        Rgba::new(n, 0, 0, 255)
+    }
+
+    #[test]
+    fn flips_and_half_turns_stay_in_the_same_rectangle() {
+        let pixels = [solid(1), solid(2), solid(3), solid(4)];
+        let (w, h, flipped) = transform_pixels(2, 2, &pixels, Transform::FlipHorizontal).unwrap();
+        assert_eq!((w, h), (2, 2));
+        assert_eq!(flipped, vec![solid(2), solid(1), solid(4), solid(3)]);
+        let (_, _, vertical) = transform_pixels(2, 2, &pixels, Transform::FlipVertical).unwrap();
+        assert_eq!(vertical, vec![solid(3), solid(4), solid(1), solid(2)]);
+        let (_, _, half) = transform_pixels(2, 2, &pixels, Transform::Rotate180).unwrap();
+        assert_eq!(half, vec![solid(4), solid(3), solid(2), solid(1)]);
+        let src = PixelRect {
+            x: 2,
+            y: 3,
+            width: 2,
+            height: 2,
+        };
+        assert_eq!(turned_rect(src, 8, 8, Transform::FlipHorizontal), src);
+        assert_eq!(turned_rect(src, 8, 8, Transform::Rotate180), src);
+    }
+
+    #[test]
+    fn quarter_turns_swap_the_sides_and_round_trip() {
+        let row = [solid(1), solid(2)];
+        let (w, h, cw) = transform_pixels(2, 1, &row, Transform::Rotate90Cw).unwrap();
+        assert_eq!((w, h), (1, 2));
+        assert_eq!(cw, vec![solid(1), solid(2)]);
+        let (w, h, ccw) = transform_pixels(2, 1, &row, Transform::Rotate90Ccw).unwrap();
+        assert_eq!((w, h), (1, 2));
+        assert_eq!(ccw, vec![solid(2), solid(1)]);
+
+        let block = [solid(1), solid(2), solid(3), solid(4), solid(5), solid(6)];
+        let (_, _, turned) = transform_pixels(3, 2, &block, Transform::Rotate90Cw).unwrap();
+        assert_eq!(
+            turned,
+            vec![solid(4), solid(1), solid(5), solid(2), solid(6), solid(3)]
+        );
+        let (_, _, back) = transform_pixels(2, 3, &turned, Transform::Rotate90Ccw).unwrap();
+        assert_eq!(back, block);
+
+        let mut spinning = block.to_vec();
+        let mut w = 3;
+        let mut h = 2;
+        for _ in 0..4 {
+            let (nw, nh, next) = transform_pixels(w, h, &spinning, Transform::Rotate90Cw).unwrap();
+            spinning = next;
+            w = nw;
+            h = nh;
+        }
+        assert_eq!((w, h), (3, 2));
+        assert_eq!(spinning, block);
+    }
+
+    #[test]
+    fn a_wide_turn_shifts_onto_the_canvas_and_a_taller_one_stays_centered() {
+        let wide = PixelRect {
+            x: 0,
+            y: 0,
+            width: 2,
+            height: 4,
+        };
+        assert_eq!(
+            turned_rect(wide, 8, 8, Transform::Rotate90Cw),
+            PixelRect {
+                x: 0,
+                y: 1,
+                width: 4,
+                height: 2,
+            }
+        );
+        let cel = PixelRect {
+            x: 0,
+            y: 0,
+            width: 3,
+            height: 1,
+        };
+        let turned = turned_rect(cel, 3, 1, Transform::Rotate90Cw);
+        assert_eq!(
+            turned,
+            PixelRect {
+                x: 1,
+                y: -1,
+                width: 1,
+                height: 3,
+            }
+        );
+        assert_eq!(
+            rect_on_canvas(turned, 3, 1),
+            Some(PixelRect {
+                x: 1,
+                y: 0,
+                width: 1,
+                height: 1,
+            })
+        );
+        assert_eq!(
+            rect_on_canvas(
+                PixelRect {
+                    x: 100,
+                    y: 100,
+                    width: 1,
+                    height: 1,
+                },
+                8,
+                8
+            ),
+            None
+        );
+        let away = PixelRect {
+            x: 100,
+            y: 100,
+            width: 2,
+            height: 1,
+        };
+        let parked = turned_rect(away, 8, 8, Transform::Rotate90Cw);
+        assert!(parked.x >= 8 || parked.y >= 8);
+        assert_eq!(rect_on_canvas(parked, 8, 8), None);
+    }
+
+    #[test]
+    fn a_bad_buffer_is_refused_before_allocation() {
+        assert!(transform_pixels(0, 2, &[], Transform::FlipHorizontal).is_none());
+        assert!(transform_pixels(2, 2, &[solid(1)], Transform::Rotate90Cw).is_none());
     }
 }

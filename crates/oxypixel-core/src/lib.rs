@@ -19,7 +19,7 @@ mod limits;
 pub use animation::advance;
 pub use color::{source_over, Rgba};
 pub use document::{Document, LayerInfo};
-pub use draw::PixelRect;
+pub use draw::{PixelRect, Transform};
 pub use editor::{Editor, MouseButton, Tool};
 pub use error::Error;
 pub use io::Fit;
