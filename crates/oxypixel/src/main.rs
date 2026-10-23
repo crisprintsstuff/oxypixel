@@ -14,6 +14,7 @@ mod icon;
 mod native;
 mod recent;
 mod recovery;
+mod refsview;
 mod shortcuts;
 mod theme;
 mod toolicons;

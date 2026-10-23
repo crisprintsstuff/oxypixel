@@ -38,6 +38,8 @@ colors         palette_count times 4 bytes RGBA
 
 Trailing bytes are an error.
 
+Reference images are not a field in this file. Version 1 has no room for them: trailing bytes are rejected, and a new field would be a new version. A saved document may have a sidecar, `<name>.oxypix.refs`, in the same directory. That file lists PNG or JPEG paths and where each image sits. The pixels stay in those image files. A reader that only understands this document never sees them, and export does not read the sidecar.
+
 ## Limits
 
 | Limit | Value |

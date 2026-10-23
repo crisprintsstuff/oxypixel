@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- File → Load reference, or a dropped PNG or JPEG, shows that image on the canvas or in a floating panel. It can be moved, scaled, faded, locked, hidden, and drawn behind or above the art. The eyedropper ignores it unless Sample is on. Copy onto layer is what puts those pixels into the document.
+
+### Changed
+
+- Dropping a PNG loads a reference and leaves the open document alone. BMP and GIF drops still import as before. Reference paths and placement are written to `<file>.oxypix.refs` beside a saved document. They are not a field in the `.oxypix` file, and export does not include them.
+
 ## [0.5.0] - 2026-10-23
 
 ### Added

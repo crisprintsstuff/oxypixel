@@ -13,6 +13,8 @@ A document has a size, a palette, and a layer stack. Layer name, visibility, and
 
 Compositing walks layers from bottom to top with source-over. Hidden layers and layers at opacity 0 are skipped. Pencil and eraser **replace** pixels on the active cel. They do not blend into the cel. Blend happens only when compositing.
 
+Reference images are not layers. `References` holds up to eight decoded PNG or JPEG pictures, plus placement. `Document::composite`, merge down, and every exporter take a `Document` and do not read `References`. The eyedropper reads a reference only when that image's Sample flag is on. Copy onto layer is a separate step: it rasterizes one reference into a new layer, and that layer is then part of the document. The `.oxypix` version stays 1, which rejects trailing bytes, so paths and placement are a sidecar named `<file>.oxypix.refs` next to a saved document. The pixels stay in the image file the path points at.
+
 Undo stores a clone of the document and the selection rectangle, capped at 50 steps and 256 MiB of pixel data. Tool choice, zoom, and mirror toggles stay session state. Slider edits (opacity, duration, rename) are coalesced while the control is active so one drag is one undo step.
 
 ## Tools
@@ -25,7 +27,7 @@ Flip and rotate use the selection, or every pixel of the active cel when nothing
 
 ## Files
 
-`.oxypix` is a little-endian versioned blob. Version 1 is described in [FORMAT.md](FORMAT.md). Raster IO uses the `image` crate. GIF import uses that crate's composited frames. GIF export loops forever. Palette files are text, parsed in `io/palette.rs`: GIMP `.gpl`, a hex list (`.hex`), and JASC `.pal`. Import replaces the document palette and is one undo step.
+`.oxypix` is a little-endian versioned blob. Version 1 is described in [FORMAT.md](FORMAT.md). Raster IO uses the `image` crate. GIF import uses that crate's composited frames. GIF export loops forever. Palette files are text, parsed in `io/palette.rs`: GIMP `.gpl`, a hex list (`.hex`), and JASC `.pal`. Import replaces the document palette and is one undo step. Reference placement is the sidecar described above. It is not parsed as part of the document.
 
 ## GUI
 
