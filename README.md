@@ -111,7 +111,8 @@ These match the current editor. Planned work is listed in [docs/ROADMAP.md](docs
 - Import and export the palette as GIMP `.gpl`, hex `.hex` (one `RRGGBB` per line), or JASC `.pal`. Import replaces the palette and can be undone. Drag swatches to reorder them, and fill a ramp of N steps between two swatches. Snap (S) makes pencil, fill, and shapes use the nearest palette color
 - Layers with visibility, opacity, rename, reorder, duplicate, and merge down
 - Undo and redo, including the selection rectangle
-- Animation frames, playback, onion skin, GIF export, and a horizontal spritesheet
+- Animation frames with thumbnails, playback, onion skin for earlier and later frames, a duration up to 10 seconds, GIF export, and a horizontal spritesheet
+- A preview panel of the whole image, with its own playback, that pans the canvas when you click it
 - PNG and spritesheet export at 1×, 2×, or 4× nearest-neighbor
 - `.oxypix` documents, plus PNG, BMP, and GIF import and export
 - Recent files (a folder hint when names match, a missing-file mark, and Clear recent), drag-and-drop, a Windows file dialog, and a Linux portal dialog with a path field if the portal is unavailable
