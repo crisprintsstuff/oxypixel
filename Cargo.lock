@@ -2135,7 +2135,7 @@ dependencies = [
 
 [[package]]
 name = "oxypixel"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "arboard",
  "eframe",
@@ -2151,7 +2151,7 @@ dependencies = [
 
 [[package]]
 name = "oxypixel-core"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "image",
  "thiserror 2.0.21",

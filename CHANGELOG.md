@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-24
+
 ### Fixed
 
 - Drawing over a reference image works. A press on a reference used to grab it and move it, so the pencil could not trace it unless Lock was on. Now Ctrl+drag moves a reference, and without Ctrl every tool draws.
