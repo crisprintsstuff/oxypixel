@@ -91,12 +91,6 @@ impl Default for ViewState {
 }
 
 impl ViewState {
-    pub fn reference_drag(&self) -> bool {
-        self.moving_ref.is_some()
-    }
-}
-
-impl ViewState {
     pub fn fit(&mut self, width: u32, height: u32) {
         if self.panel.width() < 8.0 || self.panel.height() < 8.0 || width == 0 || height == 0 {
             return;

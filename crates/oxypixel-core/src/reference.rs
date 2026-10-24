@@ -407,7 +407,7 @@ impl References {
         if self.items.is_empty() {
             return remove_if_present(&path);
         }
-        let bytes = self.encode()?;
+        let bytes = self.encode(document_dir(document))?;
         let mut tmp_name = path.as_os_str().to_os_string();
         tmp_name.push(".tmp");
         let tmp = PathBuf::from(tmp_name);
@@ -446,8 +446,12 @@ impl References {
             });
         }
         let records = parse_sidecar(&bytes)?;
+        let dir = document_dir(document);
         let mut refs = Self::new();
-        for record in records {
+        for mut record in records {
+            if record.path.is_relative() {
+                record.path = dir.join(&record.path);
+            }
             let mut image = match refs.decode_file(&record.path) {
                 Ok(image) => image,
                 Err(_) => {
@@ -537,11 +541,13 @@ impl References {
         })
     }
 
-    fn encode(&self) -> Result<Vec<u8>> {
+    /// An image inside `dir` is written relative to it, so the folder can move.
+    fn encode(&self, dir: &Path) -> Result<Vec<u8>> {
         let mut out = Vec::new();
         out.extend(format!("{MAGIC}\n{}\n", self.items.len()).into_bytes());
         for image in &self.items {
-            let path = image.path.to_str().ok_or(Error::BadReference)?.as_bytes();
+            let stored = image.path.strip_prefix(dir).unwrap_or(&image.path);
+            let path = stored.to_str().ok_or(Error::BadReference)?.as_bytes();
             if path.is_empty() || path.len() > MAX_PATH_BYTES || path.contains(&b'\n') {
                 return Err(Error::BadReference);
             }
@@ -613,6 +619,11 @@ pub fn sidecar_path(document: &Path) -> PathBuf {
         Some(parent) if !parent.as_os_str().is_empty() => parent.join(name),
         _ => PathBuf::from(name),
     }
+}
+
+/// The folder a sidecar's relative paths start from.
+fn document_dir(document: &Path) -> &Path {
+    document.parent().unwrap_or(Path::new(""))
 }
 
 struct Record {
@@ -891,6 +902,34 @@ mod tests {
             sidecar_path(Path::new("sprite.oxypix")),
             PathBuf::from("sprite.oxypix.refs")
         );
+    }
+
+    #[test]
+    fn a_reference_beside_the_document_follows_the_folder() {
+        let root = scratch("relative");
+        let before = root.join("before");
+        std::fs::create_dir_all(before.join("art")).unwrap();
+        let inside = before.join("art").join("ref.png");
+        write_png(&inside, 1, 1, &[Rgba::new(255, 0, 0, 255)]);
+        let outside = red_png(&root);
+        let mut refs = References::new();
+        refs.add_file(&inside).unwrap();
+        refs.add_file(&outside).unwrap();
+        refs.write_sidecar(&before.join("sprite.oxypix")).unwrap();
+
+        let text = std::fs::read_to_string(before.join("sprite.oxypix.refs")).unwrap();
+        let inside_name = Path::new("art").join("ref.png");
+        assert!(text.contains(&format!("\n{}\n", inside_name.to_str().unwrap())));
+        assert!(text.contains(outside.to_str().unwrap()));
+        assert!(!text.contains(before.to_str().unwrap()));
+
+        let after = root.join("after");
+        std::fs::rename(&before, &after).unwrap();
+        let loaded = References::read_sidecar(&after.join("sprite.oxypix")).unwrap();
+        assert_eq!(loaded.len(), 2);
+        assert!(!loaded.missing(0));
+        assert!(!loaded.missing(1));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

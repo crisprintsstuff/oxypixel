@@ -219,7 +219,7 @@ impl OxyApp {
             .and_then(|p| p.file_name())
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "Untitled".to_string());
-        if self.editor.is_dirty() {
+        if self.has_unsaved_changes() {
             format!("OxyPixel - {name} *")
         } else {
             format!("OxyPixel - {name}")
@@ -297,7 +297,6 @@ impl OxyApp {
     fn open_path(&mut self, path: PathBuf) {
         match load_oxypix(&path) {
             Ok(doc) => {
-                self.flush_references();
                 self.detach_recovery();
                 self.editor.replace_document(doc);
                 self.remember_file(&path);
@@ -314,6 +313,7 @@ impl OxyApp {
     }
 
     fn save_to(&mut self, path: PathBuf) -> bool {
+        let same_path = self.save_path.as_deref() == Some(path.as_path());
         match save_oxypix(self.editor.document(), &path) {
             Ok(()) => {
                 self.editor.mark_clean();
@@ -321,7 +321,11 @@ impl OxyApp {
                 self.forget_recovery();
                 self.save_path = Some(path.clone());
                 self.bind_recovery_slot(Some(&path));
-                self.write_reference_sidecar(&path);
+                // An unread sidecar (corrupt, or newer) stays on disk until the
+                // references change or the document moves.
+                if self.references_unsaved() || !same_path {
+                    self.write_reference_sidecar(&path);
+                }
                 self.note_ok("Saved.");
                 true
             }
@@ -337,7 +341,7 @@ impl eframe::App for OxyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.send_viewport_cmd(ViewportCommand::Title(self.title()));
         if ctx.input(|i| i.viewport().close_requested())
-            && self.editor.is_dirty()
+            && self.has_unsaved_changes()
             && !self.allow_quit
         {
             ctx.send_viewport_cmd(ViewportCommand::CancelClose);
@@ -383,7 +387,6 @@ impl eframe::App for OxyApp {
         }
         self.show_dialog(ctx);
         self.consider_autosave(ctx);
-        self.flush_references();
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -564,21 +567,27 @@ impl OxyApp {
             return;
         }
         let mut opened = false;
+        let mut imported = false;
         let mut noted = false;
         for path in dropped {
-            match extension_of(&path).as_str() {
-                "oxypix" if !opened => {
+            match drop_kind(&extension_of(&path)) {
+                DropKind::Open if !opened => {
                     self.request_open_at(path);
                     opened = true;
                 }
-                "oxypix" => {}
-                "png" | "jpg" | "jpeg" => {
+                // One raster per drop, as before references: a second one would
+                // replace the document the first one just opened.
+                DropKind::Import if !imported => {
+                    self.import_dropped_raster(&path);
+                    imported = true;
+                }
+                DropKind::Open | DropKind::Import => {}
+                DropKind::Reference => {
                     let _ = self.load_reference(&path);
                 }
-                "bmp" | "gif" => self.import_dropped_raster(&path),
-                _ => {
+                DropKind::Unsupported => {
                     if !noted {
-                        self.note_err("Drop a .oxypix, PNG, JPEG, BMP, or GIF file.");
+                        self.note_err("Drop a .oxypix, PNG, BMP, GIF, or JPEG file.");
                         noted = true;
                     }
                 }
@@ -587,7 +596,7 @@ impl OxyApp {
     }
 
     fn import_dropped_raster(&mut self, path: &Path) {
-        if self.editor.is_dirty() {
+        if self.has_unsaved_changes() {
             let _ = self.import_layer(path);
             if let Some(err) = self.dialog_error.take() {
                 self.note_err(err);
@@ -613,17 +622,14 @@ impl OxyApp {
         }
     }
 
-    fn flush_references(&mut self) {
-        if self.view.reference_drag() {
-            return;
-        }
-        let Some(path) = self.save_path.clone() else {
-            return;
-        };
-        if self.references.revision() == self.refs_saved {
-            return;
-        }
-        self.write_reference_sidecar(&path);
+    /// Reference changes since the sidecar was last read or written.
+    fn references_unsaved(&self) -> bool {
+        self.references.revision() != self.refs_saved
+    }
+
+    /// The document or its references have changes that Save would write.
+    fn has_unsaved_changes(&self) -> bool {
+        self.editor.is_dirty() || self.references_unsaved()
     }
 
     fn write_reference_sidecar(&mut self, path: &Path) {
@@ -684,7 +690,7 @@ impl OxyApp {
     }
 
     fn request_new(&mut self) {
-        if self.editor.is_dirty() {
+        if self.has_unsaved_changes() {
             self.pending = Some(Pending::New);
             self.dialog = Some(DialogKind::Unsaved);
         } else {
@@ -694,7 +700,7 @@ impl OxyApp {
     }
 
     fn request_open(&mut self) {
-        if self.editor.is_dirty() {
+        if self.has_unsaved_changes() {
             self.pending = Some(Pending::Open);
             self.dialog = Some(DialogKind::Unsaved);
         } else {
@@ -703,7 +709,7 @@ impl OxyApp {
     }
 
     fn request_open_at(&mut self, path: PathBuf) {
-        if self.editor.is_dirty() {
+        if self.has_unsaved_changes() {
             self.pending_path = Some(path);
             self.pending = Some(Pending::OpenAt);
             self.dialog = Some(DialogKind::Unsaved);
@@ -723,7 +729,7 @@ impl OxyApp {
     }
 
     fn request_import(&mut self) {
-        if self.editor.is_dirty() {
+        if self.has_unsaved_changes() {
             self.pending = Some(Pending::Import);
             self.dialog = Some(DialogKind::Unsaved);
         } else {
@@ -732,7 +738,7 @@ impl OxyApp {
     }
 
     fn request_example(&mut self) {
-        if self.editor.is_dirty() {
+        if self.has_unsaved_changes() {
             self.pending = Some(Pending::Example);
             self.dialog = Some(DialogKind::Unsaved);
         } else {
@@ -741,7 +747,7 @@ impl OxyApp {
     }
 
     fn request_quit(&mut self, ctx: &egui::Context) {
-        if self.editor.is_dirty() {
+        if self.has_unsaved_changes() {
             self.pending = Some(Pending::Quit);
             self.dialog = Some(DialogKind::Unsaved);
         } else {
@@ -766,7 +772,6 @@ impl OxyApp {
     fn load_example(&mut self) {
         match Editor::demo() {
             Ok(editor) => {
-                self.flush_references();
                 self.clear_references();
                 self.detach_recovery();
                 let doc = editor.document().clone();
@@ -882,7 +887,6 @@ impl OxyApp {
     fn import_document(&mut self, path: &Path) -> bool {
         match import_image(path) {
             Ok(doc) => {
-                self.flush_references();
                 self.clear_references();
                 self.detach_recovery();
                 self.editor.replace_document(doc);
@@ -1126,7 +1130,6 @@ impl OxyApp {
         };
         match Editor::new(width, height) {
             Ok(editor) => {
-                self.flush_references();
                 self.clear_references();
                 self.detach_recovery();
                 let doc = editor.document().clone();
@@ -2098,7 +2101,7 @@ impl OxyApp {
     }
 
     fn apply_update(&mut self, ctx: &egui::Context) {
-        if self.editor.is_dirty() {
+        if self.has_unsaved_changes() {
             self.note_err("Save or discard this drawing before installing the update.");
             return;
         }
@@ -2788,7 +2791,6 @@ impl OxyApp {
         };
         match recovery::load_document(&entry.file) {
             Ok(doc) => {
-                self.flush_references();
                 self.editor.replace_document(doc);
                 self.editor.mark_dirty();
                 self.save_path = entry.source.clone();
@@ -3005,6 +3007,27 @@ fn extension_of(path: &Path) -> String {
         .to_ascii_lowercase()
 }
 
+/// What a dropped file does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DropKind {
+    Open,
+    /// Opens the image, or adds it as a layer when the document has edits.
+    Import,
+    /// JPEG is not an import format, so a dropped JPEG becomes a reference.
+    /// A PNG reference comes from File → Load reference.
+    Reference,
+    Unsupported,
+}
+
+fn drop_kind(extension: &str) -> DropKind {
+    match extension {
+        "oxypix" => DropKind::Open,
+        "png" | "bmp" | "gif" => DropKind::Import,
+        "jpg" | "jpeg" => DropKind::Reference,
+        _ => DropKind::Unsupported,
+    }
+}
+
 fn parse_u32(text: &str, label: &str) -> Result<u32, String> {
     text.trim()
         .parse::<u32>()
@@ -3059,4 +3082,25 @@ fn replace_palette_extension(path: &str, ext: &str) -> String {
     let mut next = PathBuf::from(trimmed);
     next.set_extension(ext);
     next.display().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_dropped_png_imports_and_a_jpeg_loads_a_reference() {
+        assert_eq!(drop_kind("oxypix"), DropKind::Open);
+        assert_eq!(drop_kind("png"), DropKind::Import);
+        assert_eq!(drop_kind("bmp"), DropKind::Import);
+        assert_eq!(drop_kind("gif"), DropKind::Import);
+        assert_eq!(drop_kind("jpg"), DropKind::Reference);
+        assert_eq!(drop_kind("jpeg"), DropKind::Reference);
+        assert_eq!(drop_kind("txt"), DropKind::Unsupported);
+        assert_eq!(drop_kind(""), DropKind::Unsupported);
+        assert_eq!(
+            drop_kind(&extension_of(Path::new("Sprite.PNG"))),
+            DropKind::Import
+        );
+    }
 }
