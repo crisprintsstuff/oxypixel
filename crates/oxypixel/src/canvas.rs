@@ -330,16 +330,18 @@ pub fn show_canvas(
     if response.hovered() {
         let space = ui.input(|i| i.key_down(egui::Key::Space));
         let picking = ui.input(|i| i.modifiers.alt) || editor.tool() == Tool::Eyedropper;
-        let over_ref = response.hover_pos().is_some_and(|pos| {
-            view.zoom > 0.0 && {
-                let rel = pos - origin;
-                refs.hit_movable(rel.x / view.zoom, rel.y / view.zoom)
-                    .is_some()
-            }
-        });
+        let ctrl = ui.input(|i| i.modifiers.command);
+        let over_ref = grabs_reference(ctrl, picking)
+            && response.hover_pos().is_some_and(|pos| {
+                view.zoom > 0.0 && {
+                    let rel = pos - origin;
+                    refs.hit_movable(rel.x / view.zoom, rel.y / view.zoom)
+                        .is_some()
+                }
+            });
         let icon = if view.panning || view.moving_ref.is_some() {
             egui::CursorIcon::Grabbing
-        } else if space || (over_ref && !picking) {
+        } else if space || over_ref {
             egui::CursorIcon::Grab
         } else if !allow_draw {
             egui::CursorIcon::NotAllowed
@@ -426,6 +428,7 @@ fn handle_pointer(
     let space = ui.input(|i| i.key_down(egui::Key::Space));
     let alt = ui.input(|i| i.modifiers.alt);
     let shift = ui.input(|i| i.modifiers.shift);
+    let ctrl = ui.input(|i| i.modifiers.command);
     let secondary = ui.input(|i| i.pointer.button_down(PointerButton::Secondary));
     let middle = ui.input(|i| i.pointer.button_down(PointerButton::Middle));
     let button = if secondary {
@@ -479,7 +482,7 @@ fn handle_pointer(
         }
         return;
     }
-    if primary_pressed && !picking {
+    if primary_pressed && grabs_reference(ctrl, picking) {
         if let Some(pos) = pointer_pos {
             if let Some(index) = refs.hit_movable(doc_at(pos).0, doc_at(pos).1) {
                 refs.set_active(Some(index));
@@ -496,7 +499,10 @@ fn handle_pointer(
             if picking {
                 sample_with_references(editor, refs, x, y, button);
                 view.sampling = true;
-            } else if let Some(index) = refs.hit_movable(doc_at(pos).0, doc_at(pos).1) {
+            } else if let Some(index) = refs
+                .hit_movable(doc_at(pos).0, doc_at(pos).1)
+                .filter(|_| ctrl)
+            {
                 refs.set_active(Some(index));
                 view.moving_ref = Some(index);
                 view.move_last = pos;
@@ -541,7 +547,10 @@ fn handle_pointer(
             let picking = alt || editor.tool() == Tool::Eyedropper;
             if picking {
                 sample_with_references(editor, refs, x, y, button);
-            } else if let Some(index) = refs.hit_movable(doc_at(pos).0, doc_at(pos).1) {
+            } else if let Some(index) = refs
+                .hit_movable(doc_at(pos).0, doc_at(pos).1)
+                .filter(|_| ctrl)
+            {
                 refs.set_active(Some(index));
             } else {
                 editor.pointer_down(x, y, button, shift);
@@ -549,6 +558,12 @@ fn handle_pointer(
             }
         }
     }
+}
+
+/// A press grabs a reference only while Ctrl is held. Without it, every tool
+/// draws over the reference, so tracing works with Lock off.
+fn grabs_reference(ctrl: bool, picking: bool) -> bool {
+    ctrl && !picking
 }
 
 fn sample_with_references(
@@ -1012,6 +1027,14 @@ fn pixel_at(origin: Pos2, zoom: f32, pos: Pos2) -> (i32, i32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_ctrl_grabs_a_reference() {
+        assert!(!grabs_reference(false, false));
+        assert!(grabs_reference(true, false));
+        assert!(!grabs_reference(true, true));
+        assert!(!grabs_reference(false, true));
+    }
 
     #[test]
     fn brush_tools_preview_the_stamp_and_point_tools_preview_one_pixel() {

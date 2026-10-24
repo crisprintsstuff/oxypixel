@@ -115,7 +115,7 @@ These match the current editor. Planned work is listed in [docs/ROADMAP.md](docs
 - A preview panel of the whole image, with its own playback, that pans the canvas when you click it
 - PNG and spritesheet export at 1×, 2×, or 4× nearest-neighbor
 - `.oxypix` documents, plus PNG, BMP, and GIF import and export
-- Reference images (PNG or JPEG) on the canvas or in a floating panel. They are left out of export unless you copy one onto a layer. Dropping a JPEG loads a reference; a dropped PNG still imports. Save writes the paths and placement beside the document, not inside the `.oxypix` file. An image in the document's folder is stored by a relative path, so the folder can move
+- Reference images (PNG or JPEG) on the canvas or in a floating panel, behind the art by default, so tools draw over them. Ctrl+drag moves one, and Fit to canvas scales it to the document. They are left out of export unless you copy one onto a layer. Dropping a JPEG loads a reference; a dropped PNG still imports. Save writes the paths and placement beside the document, not inside the `.oxypix` file. An image in the document's folder is stored by a relative path, so the folder can move
 - Recent files (a folder hint when names match, a missing-file mark, and Clear recent), drag-and-drop, a Windows file dialog, and a Linux portal dialog with a path field if the portal is unavailable
 - Autosave writes a recovery copy about once a minute, and after a run of edits, into the app data folder. It does not overwrite the open file. The next launch can restore or discard that copy, including a drawing that was never saved. Turn it off from the File menu
 - Headless `export-png`, `export-bmp`, `export-gif`, `export-sheet`, `export-palette`, and `import-palette` commands
@@ -145,6 +145,7 @@ The maintainer develops OxyPixel with AI coding agents. The written rules for th
 | Ctrl+N / Ctrl+O / Ctrl+S | New, open, save |
 | Enter | Play or pause |
 | Space+drag | Pan |
+| Ctrl+drag | Move a reference image |
 | Ctrl+Plus / Ctrl+Minus / Ctrl+0 | Zoom in, zoom out (whole-pixel steps), fit |
 
 The full list is [docs/SHORTCUTS.md](docs/SHORTCUTS.md).

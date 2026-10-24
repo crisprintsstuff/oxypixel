@@ -22,8 +22,10 @@ pub const MAX_REFERENCES: usize = 8;
 pub const MAX_REFERENCE_SIDE: u32 = 2048;
 const MAX_SIDECAR_BYTES: u64 = 256 * 1024;
 const MAX_PATH_BYTES: usize = 4096;
-const MIN_SCALE: f32 = 0.25;
-const MAX_SCALE: f32 = 8.0;
+/// Smallest overlay scale. A 2048-pixel reference still shrinks to 32 pixels.
+pub const MIN_REFERENCE_SCALE: f32 = 1.0 / 64.0;
+/// Largest overlay scale.
+pub const MAX_REFERENCE_SCALE: f32 = 8.0;
 const MAX_OFFSET: f32 = 100_000.0;
 const MAGIC: &str = "OXYREFS1";
 
@@ -223,8 +225,67 @@ impl References {
         if !scale.is_finite() {
             return Err(Error::BadReference);
         }
-        let scale = scale.clamp(MIN_SCALE, MAX_SCALE);
+        let scale = scale.clamp(MIN_REFERENCE_SCALE, MAX_REFERENCE_SCALE);
         self.edit(index, |image| image.scale = scale)
+    }
+
+    /// Width and height on the canvas, in document pixels, at the current scale.
+    pub fn display_size(&self, index: usize) -> Option<(f32, f32)> {
+        let image = self.items.get(index)?;
+        if image.missing || image.width == 0 || image.height == 0 {
+            return None;
+        }
+        Some((
+            image.width as f32 * image.scale,
+            image.height as f32 * image.scale,
+        ))
+    }
+
+    /// Scale so the image is `width` document pixels wide. The height follows.
+    pub fn set_display_width(&mut self, index: usize, width: f32) -> Result<()> {
+        let (current, _) = self.display_size(index).ok_or(Error::BadReference)?;
+        self.set_display_side(index, width, current)
+    }
+
+    /// Scale so the image is `height` document pixels tall. The width follows.
+    pub fn set_display_height(&mut self, index: usize, height: f32) -> Result<()> {
+        let (_, current) = self.display_size(index).ok_or(Error::BadReference)?;
+        self.set_display_side(index, height, current)
+    }
+
+    fn set_display_side(&mut self, index: usize, wanted: f32, current: f32) -> Result<()> {
+        if !wanted.is_finite() || wanted <= 0.0 || current <= 0.0 {
+            return Err(Error::BadReference);
+        }
+        let scale = self.scale(index) * wanted / current;
+        self.set_scale(index, scale)
+    }
+
+    /// Scale the image to the largest size that fits the canvas, and center it.
+    ///
+    /// The scale stays within the overlay limits, so a tiny image on a large
+    /// canvas stops at the largest scale. A missing image is an error.
+    pub fn fit_to_canvas(&mut self, index: usize, canvas_w: u32, canvas_h: u32) -> Result<()> {
+        crate::limits::check_canvas(canvas_w, canvas_h)?;
+        let image = self
+            .items
+            .get(index)
+            .ok_or(Error::Index { what: "reference" })?;
+        if image.missing || image.width == 0 || image.height == 0 {
+            return Err(Error::BadReference);
+        }
+        let (width, height) = (image.width as f32, image.height as f32);
+        let (canvas_w, canvas_h) = (canvas_w as f32, canvas_h as f32);
+        let scale = (canvas_w / width)
+            .min(canvas_h / height)
+            .clamp(MIN_REFERENCE_SCALE, MAX_REFERENCE_SCALE);
+        let x = ((canvas_w - width * scale) / 2.0).clamp(-MAX_OFFSET, MAX_OFFSET);
+        let y = ((canvas_h - height * scale) / 2.0).clamp(-MAX_OFFSET, MAX_OFFSET);
+        self.edit(index, |image| {
+            image.scale = scale;
+            image.x = x;
+            image.y = y;
+        })
     }
 
     /// Move an unlocked canvas overlay by a document-pixel delta.
@@ -523,7 +584,7 @@ impl References {
             visible: true,
             opacity: 255,
             locked: false,
-            behind: false,
+            behind: true,
             panel: false,
             sample: false,
             x: 0.0,
@@ -690,7 +751,7 @@ fn parse_sidecar(bytes: &[u8]) -> Result<Vec<Record>> {
         if !(-MAX_OFFSET..=MAX_OFFSET).contains(&x) || !(-MAX_OFFSET..=MAX_OFFSET).contains(&y) {
             return Err(Error::BadReference);
         }
-        if !(MIN_SCALE..=MAX_SCALE).contains(&scale) {
+        if !(MIN_REFERENCE_SCALE..=MAX_REFERENCE_SCALE).contains(&scale) {
             return Err(Error::BadReference);
         }
         records.push(Record {
@@ -905,6 +966,81 @@ mod tests {
     }
 
     #[test]
+    fn a_new_reference_sits_behind_the_art() {
+        let dir = scratch("behind");
+        let mut refs = References::new();
+        refs.add_file(&red_png(&dir)).unwrap();
+        assert!(refs.behind(0));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fit_to_canvas_scales_down_and_centers() {
+        let dir = scratch("fit");
+        let wide = dir.join("wide.png");
+        write_png(&wide, 64, 32, &vec![Rgba::new(255, 0, 0, 255); 64 * 32]);
+        let mut refs = References::new();
+        refs.add_file(&wide).unwrap();
+        refs.fit_to_canvas(0, 32, 32).unwrap();
+        assert_eq!(refs.scale(0), 0.5);
+        assert_eq!(refs.placement(0), Some((0.0, 8.0)));
+
+        // A large image on a small canvas goes below the old 0.25 floor.
+        let big = dir.join("big.png");
+        write_png(&big, 2048, 1, &vec![Rgba::new(0, 255, 0, 255); 2048]);
+        refs.add_file(&big).unwrap();
+        refs.fit_to_canvas(1, 32, 32).unwrap();
+        assert_eq!(refs.scale(1), MIN_REFERENCE_SCALE);
+        assert_eq!(refs.placement(1).unwrap().0, 0.0);
+
+        // A tiny image stops at the largest scale and stays centered.
+        refs.add_file(&red_png(&dir)).unwrap();
+        refs.fit_to_canvas(2, 1024, 1024).unwrap();
+        assert_eq!(refs.scale(2), MAX_REFERENCE_SCALE);
+        assert_eq!(refs.placement(2), Some((504.0, 508.0)));
+
+        assert!(refs.fit_to_canvas(9, 32, 32).is_err());
+        assert!(refs.fit_to_canvas(0, 0, 32).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_typed_width_or_height_keeps_the_aspect_ratio() {
+        let dir = scratch("size");
+        let wide = dir.join("wide.png");
+        write_png(&wide, 200, 100, &vec![Rgba::new(255, 0, 0, 255); 200 * 100]);
+        let mut refs = References::new();
+        refs.add_file(&wide).unwrap();
+        assert_eq!(refs.display_size(0), Some((200.0, 100.0)));
+        refs.set_display_width(0, 50.0).unwrap();
+        assert_eq!(refs.scale(0), 0.25);
+        assert_eq!(refs.display_size(0), Some((50.0, 25.0)));
+        refs.set_display_height(0, 100.0).unwrap();
+        assert_eq!(refs.display_size(0), Some((200.0, 100.0)));
+        // Past the scale limits the size stops at the limit.
+        refs.set_display_width(0, 1.0).unwrap();
+        assert_eq!(refs.scale(0), MIN_REFERENCE_SCALE);
+        assert!(refs.set_display_width(0, 0.0).is_err());
+        assert!(refs.set_display_width(0, f32::NAN).is_err());
+        assert!(refs.set_display_width(5, 10.0).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn scale_reaches_one_sixty_fourth_and_round_trips() {
+        let dir = scratch("small-scale");
+        let doc_path = dir.join("sprite.oxypix");
+        let mut refs = References::new();
+        refs.add_file(&red_png(&dir)).unwrap();
+        refs.set_scale(0, 0.001).unwrap();
+        assert_eq!(refs.scale(0), MIN_REFERENCE_SCALE);
+        refs.write_sidecar(&doc_path).unwrap();
+        let loaded = References::read_sidecar(&doc_path).unwrap();
+        assert_eq!(loaded.scale(0), MIN_REFERENCE_SCALE);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_reference_beside_the_document_follows_the_folder() {
         let root = scratch("relative");
         let before = root.join("before");
@@ -1034,6 +1170,7 @@ mod tests {
         let png = red_png(&dir);
         let mut refs = References::new();
         refs.add_file(&png).unwrap();
+        refs.set_behind(0, false).unwrap();
         let document = Some(Rgba::new(0, 0, 255, 255));
         let clear = Some(Rgba::CLEAR);
         assert_eq!(refs.pick_color(document, 0, 0), document);

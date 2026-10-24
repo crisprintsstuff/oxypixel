@@ -145,6 +145,10 @@ pub const BINDINGS: &[Binding] = &[
         action: "Pick a color without changing tools",
     },
     Binding {
+        keys: "Ctrl+drag",
+        action: "Move the reference image under the pointer. Without Ctrl, tools draw over it",
+    },
+    Binding {
         keys: "P",
         action: "Pixel-perfect pencil. One-pixel strokes drop the extra diagonal corner",
     },
