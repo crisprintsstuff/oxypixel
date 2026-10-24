@@ -12,11 +12,12 @@ OxyPixel is a local editor. It does not phone home, and it does not execute scri
 
 - `.oxypix` parsing rejects bad magic, unknown versions, truncated sections, trailing bytes, and counts that would exceed the pixel budget. Those checks happen before the pixel buffers are allocated.
 - PNG, BMP, and GIF decoding goes through the `image` crate with a maximum dimension of 1024 and an allocation cap.
+- Reference images are PNG or JPEG only. Each side is at most 2048 pixels, the decoded buffer is capped, and at most eight are kept. Their sidecar is capped at 256 KiB and is not part of the `.oxypix` parser.
 - Files larger than 80 MiB are rejected from their size before they are read into the parser.
 - Palette files (GIMP `.gpl`, hex `.hex` or `.txt`, and JASC `.pal`) are read as text under that same size cap. A color count above 256 is rejected before the document palette is replaced. The JASC count is checked before those color lines are stored.
 - The project forbids `unsafe` in its own crates.
 
-Image decoding still depends on `image` and the `png`, `gif`, and `bmp` crates. Keep those updated when a decoder advisory is published.
+Image decoding still depends on `image` and the `png`, `jpeg`, `gif`, and `bmp` crates. Keep those updated when a decoder advisory is published.
 
 ## Threat model
 

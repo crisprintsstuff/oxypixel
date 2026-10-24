@@ -4,9 +4,10 @@ use eframe::egui::{
     self, Color32, Painter, PointerButton, Pos2, Rect, Sense, Stroke, StrokeKind, TextureHandle,
     TextureOptions, Vec2,
 };
-use oxypixel_core::{source_over, Editor, MouseButton, Rgba, Tool};
+use oxypixel_core::{source_over, Editor, MouseButton, References, Rgba, Tool};
 
 use crate::cache::FrameComposites;
+use crate::refsview::{self, RefTextures};
 use crate::theme::{self, AMBER};
 
 /// How many neighboring frames onion skin will look at, in one direction.
@@ -44,6 +45,9 @@ pub struct ViewState {
     pub fit_next: bool,
     pub panel: Rect,
     texture: Option<TextureHandle>,
+    checker: Option<TextureHandle>,
+    checker_w: u32,
+    checker_h: u32,
     cache_valid: bool,
     cached_gen: u64,
     cached_frame: usize,
@@ -53,6 +57,8 @@ pub struct ViewState {
     panning: bool,
     sampling: bool,
     pan_last: Pos2,
+    moving_ref: Option<usize>,
+    move_last: Pos2,
 }
 
 impl Default for ViewState {
@@ -66,6 +72,9 @@ impl Default for ViewState {
             fit_next: true,
             panel: Rect::ZERO,
             texture: None,
+            checker: None,
+            checker_w: 0,
+            checker_h: 0,
             cache_valid: false,
             cached_gen: 0,
             cached_frame: 0,
@@ -75,6 +84,8 @@ impl Default for ViewState {
             panning: false,
             sampling: false,
             pan_last: Pos2::ZERO,
+            moving_ref: None,
+            move_last: Pos2::ZERO,
         }
     }
 }
@@ -226,6 +237,8 @@ pub fn show_canvas(
     editor: &mut Editor,
     view: &mut ViewState,
     composites: &mut FrameComposites,
+    refs: &mut References,
+    ref_textures: &mut RefTextures,
     allow_draw: bool,
 ) -> Option<(i32, i32)> {
     let width = editor.document().width();
@@ -235,34 +248,42 @@ pub fn show_canvas(
     if view.fit_next {
         view.fit(width, height);
     }
+    ref_textures.sync(ui.ctx(), refs);
     ensure_texture(ui, editor, view, composites, width, height);
+    ensure_checker(ui, view, width, height);
 
     let origin = rect.min + view.pan;
     let screen = Vec2::new(width as f32 * view.zoom, height as f32 * view.zoom);
     let doc_rect = Rect::from_min_size(origin, screen);
     let painter = ui.painter_at(rect);
-    if let Some(texture) = &view.texture {
-        let uv = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0));
-        if view.tiled {
-            for ty in -1..=1 {
-                for tx in -1..=1 {
-                    if tx == 0 && ty == 0 {
-                        continue;
-                    }
-                    let corner = origin
-                        + Vec2::new(
-                            tx as f32 * width as f32 * view.zoom,
-                            ty as f32 * height as f32 * view.zoom,
-                        );
-                    painter.image(
-                        texture.id(),
-                        Rect::from_min_size(corner, screen),
-                        uv,
-                        Color32::WHITE,
+    let uv = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0));
+    // Neighbor copies are the cel only. Reference overlays stay on the real canvas.
+    if view.tiled {
+        for ty in -1..=1 {
+            for tx in -1..=1 {
+                if tx == 0 && ty == 0 {
+                    continue;
+                }
+                let corner = origin
+                    + Vec2::new(
+                        tx as f32 * width as f32 * view.zoom,
+                        ty as f32 * height as f32 * view.zoom,
                     );
+                let tile = Rect::from_min_size(corner, screen);
+                if let Some(texture) = &view.checker {
+                    painter.image(texture.id(), tile, uv, Color32::WHITE);
+                }
+                if let Some(texture) = &view.texture {
+                    painter.image(texture.id(), tile, uv, Color32::WHITE);
                 }
             }
         }
+    }
+    if let Some(texture) = &view.checker {
+        painter.image(texture.id(), doc_rect, uv, Color32::WHITE);
+    }
+    refsview::paint_overlays(&painter, refs, ref_textures, origin, view.zoom, true);
+    if let Some(texture) = &view.texture {
         painter.image(texture.id(), doc_rect, uv, Color32::WHITE);
     }
     if view.tiled {
@@ -273,6 +294,8 @@ pub fn show_canvas(
             StrokeKind::Outside,
         );
     }
+    refsview::paint_overlays(&painter, refs, ref_textures, origin, view.zoom, false);
+    refsview::paint_active_outline(&painter, refs, origin, view.zoom);
     draw_grid(&painter, view, origin, rect, width, height);
     if let Some(sel) = editor.selection_preview() {
         let r = Rect::from_min_max(
@@ -306,9 +329,17 @@ pub fn show_canvas(
     });
     if response.hovered() {
         let space = ui.input(|i| i.key_down(egui::Key::Space));
-        let icon = if view.panning {
+        let picking = ui.input(|i| i.modifiers.alt) || editor.tool() == Tool::Eyedropper;
+        let over_ref = response.hover_pos().is_some_and(|pos| {
+            view.zoom > 0.0 && {
+                let rel = pos - origin;
+                refs.hit_movable(rel.x / view.zoom, rel.y / view.zoom)
+                    .is_some()
+            }
+        });
+        let icon = if view.panning || view.moving_ref.is_some() {
             egui::CursorIcon::Grabbing
-        } else if space {
+        } else if space || (over_ref && !picking) {
             egui::CursorIcon::Grab
         } else if !allow_draw {
             egui::CursorIcon::NotAllowed
@@ -348,7 +379,7 @@ pub fn show_canvas(
         paint_playback_banner(&painter, rect);
     }
 
-    handle_pointer(ui, &response, editor, view, origin, allow_draw);
+    handle_pointer(ui, &response, editor, view, refs, origin, allow_draw);
     hover
 }
 
@@ -392,6 +423,7 @@ fn handle_pointer(
     response: &egui::Response,
     editor: &mut Editor,
     view: &mut ViewState,
+    refs: &mut References,
     origin: Pos2,
     allow_draw: bool,
 ) {
@@ -425,13 +457,53 @@ fn handle_pointer(
         return;
     }
 
-    let at = |pos: Pos2| pixel_at(origin, view.zoom, pos);
+    let zoom = view.zoom;
+    let at = |pos: Pos2| pixel_at(origin, zoom, pos);
+    let doc_at = |pos: Pos2| {
+        let rel = pos - origin;
+        if zoom <= 0.0 {
+            return (0.0, 0.0);
+        }
+        (rel.x / zoom, rel.y / zoom)
+    };
+    let pointer_pos = response.interact_pointer_pos().or(response.hover_pos());
+    let primary_down = ui.input(|i| i.pointer.button_down(PointerButton::Primary));
+    let primary_pressed = ui.input(|i| i.pointer.button_pressed(PointerButton::Primary));
+    let picking = alt || editor.tool() == Tool::Eyedropper;
+    if let Some(index) = view.moving_ref {
+        if primary_down {
+            if let Some(pos) = pointer_pos {
+                let (dx, dy) = doc_at(pos);
+                let (lx, ly) = doc_at(view.move_last);
+                refs.nudge(index, dx - lx, dy - ly);
+                view.move_last = pos;
+            }
+        } else {
+            view.moving_ref = None;
+        }
+        return;
+    }
+    if primary_pressed && !picking {
+        if let Some(pos) = pointer_pos {
+            if let Some(index) = refs.hit_movable(doc_at(pos).0, doc_at(pos).1) {
+                refs.set_active(Some(index));
+                view.moving_ref = Some(index);
+                view.move_last = pos;
+                return;
+            }
+        }
+    }
     if response.drag_started() {
         if let Some(pos) = response.interact_pointer_pos() {
             let (x, y) = at(pos);
-            if alt {
-                editor.sample(x, y, button);
+            let picking = alt || editor.tool() == Tool::Eyedropper;
+            if picking {
+                sample_with_references(editor, refs, x, y, button);
                 view.sampling = true;
+            } else if let Some(index) = refs.hit_movable(doc_at(pos).0, doc_at(pos).1) {
+                refs.set_active(Some(index));
+                view.moving_ref = Some(index);
+                view.move_last = pos;
             } else {
                 editor.pointer_down(x, y, button, shift);
             }
@@ -440,20 +512,28 @@ fn handle_pointer(
         if let Some(pos) = response.interact_pointer_pos() {
             let (x, y) = at(pos);
             if view.sampling || alt {
-                editor.sample(x, y, button);
+                sample_with_references(editor, refs, x, y, button);
+            } else if let Some(index) = view.moving_ref {
+                let (dx, dy) = doc_at(pos);
+                let (lx, ly) = doc_at(view.move_last);
+                refs.nudge(index, dx - lx, dy - ly);
+                view.move_last = pos;
             } else {
                 editor.pointer_move(x, y, shift);
             }
         }
     }
     if response.drag_stopped() {
-        if let Some(pos) = response.interact_pointer_pos().or(response.hover_pos()) {
-            let (x, y) = at(pos);
-            if !view.sampling {
-                editor.pointer_up(x, y, shift);
+        if view.moving_ref.is_none() {
+            if let Some(pos) = response.interact_pointer_pos().or(response.hover_pos()) {
+                let (x, y) = at(pos);
+                if !view.sampling {
+                    editor.pointer_up(x, y, shift);
+                }
             }
         }
         view.sampling = false;
+        view.moving_ref = None;
     } else if response.clicked() || response.secondary_clicked() {
         if let Some(pos) = response.interact_pointer_pos().or(response.hover_pos()) {
             let (x, y) = at(pos);
@@ -462,14 +542,46 @@ fn handle_pointer(
             } else {
                 MouseButton::Primary
             };
-            if alt {
-                editor.sample(x, y, button);
+            let picking = alt || editor.tool() == Tool::Eyedropper;
+            if picking {
+                sample_with_references(editor, refs, x, y, button);
+            } else if let Some(index) = refs.hit_movable(doc_at(pos).0, doc_at(pos).1) {
+                refs.set_active(Some(index));
             } else {
                 editor.pointer_down(x, y, button, shift);
                 editor.pointer_up(x, y, shift);
             }
         }
     }
+}
+
+fn sample_with_references(
+    editor: &mut Editor,
+    refs: &References,
+    x: i32,
+    y: i32,
+    button: MouseButton,
+) {
+    let document = document_pixel(editor, x, y);
+    let picked = refs.pick_color(document, x, y);
+    if picked != document {
+        if let Some(color) = picked {
+            match button {
+                MouseButton::Primary => editor.set_primary(color),
+                MouseButton::Secondary => editor.set_secondary(color),
+            }
+            return;
+        }
+    }
+    editor.sample(x, y, button);
+}
+
+fn document_pixel(editor: &Editor, x: i32, y: i32) -> Option<Rgba> {
+    if x < 0 || y < 0 {
+        return None;
+    }
+    let doc = editor.document();
+    doc.composite_pixel(doc.active_frame(), x as u32, y as u32)
 }
 
 fn ensure_texture(
@@ -517,6 +629,25 @@ fn ensure_texture(
     }
 }
 
+fn ensure_checker(ui: &egui::Ui, view: &mut ViewState, width: u32, height: u32) {
+    if view.checker.is_some() && view.checker_w == width && view.checker_h == height {
+        return;
+    }
+    let mut bytes = Vec::with_capacity((width as usize) * (height as usize) * 4);
+    for y in 0..height {
+        for x in 0..width {
+            bytes.extend_from_slice(&checker(x, y).to_bytes());
+        }
+    }
+    let image = egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &bytes);
+    view.checker = Some(
+        ui.ctx()
+            .load_texture("oxypixel-checker", image, TextureOptions::NEAREST),
+    );
+    view.checker_w = width;
+    view.checker_h = height;
+}
+
 fn display_rgba(editor: &Editor, skin: OnionSkin, composites: &mut FrameComposites) -> Vec<u8> {
     let doc = editor.document();
     let width = doc.width();
@@ -536,9 +667,8 @@ fn display_rgba(editor: &Editor, skin: OnionSkin, composites: &mut FrameComposit
     let pixels = (width as usize).saturating_mul(height as usize);
     let mut out = Vec::with_capacity(pixels.saturating_mul(4));
     for i in 0..pixels {
-        let x = (i as u32) % width.max(1);
-        let y = (i as u32) / width.max(1);
-        let mut color = checker(x, y);
+        // The checkerboard is its own texture so a reference can sit between it and the art.
+        let mut color = Rgba::CLEAR;
         paint_ghosts(
             &mut color,
             composites,

@@ -28,6 +28,7 @@ In the 0.5.0 tree and covered by tests or by the release workflow.
 | Undo | Up to 50 steps and 256 MiB, including the selection rectangle. Slider drags coalesce | `history.rs` |
 | `.oxypix` | Version 1, little-endian, caps before allocation, trailing bytes rejected | `io/oxypix.rs`, `docs/FORMAT.md` |
 | Raster | PNG, BMP, and GIF import and export. GIF import is one composited layer. Spritesheet and 2×/4× nearest PNG | `io/raster.rs` |
+| References | PNG and JPEG overlays or a floating panel. Placement is a sidecar, not a `.oxypix` field. Export, merge, and the eyedropper skip them unless Sample is on | `reference.rs`, `refsview.rs` |
 | CLI | `export-png`, `export-bmp`, `export-gif`, `export-sheet`, `export-palette`, and `import-palette`. Failures print and exit. Missing file must not hang | `cli.rs`, `tests/cli.rs` |
 | Palette files | GIMP `.gpl`, hex `.hex` (one `RRGGBB` per line, `RRGGBBAA` when alpha is not 255), and JASC `.pal`. Import replaces the palette and is one undo step. More than 256 colors is an error | `io/palette.rs`, `editor.rs`, `app.rs` |
 | Window | egui 0.31 glow, nearest-neighbor canvas, whole-pixel zoom, a grid when the cells are readable, pan, shortcuts, tool icons with their shortcut letter, a preview panel beside the canvas | `app.rs`, `canvas.rs`, `preview.rs` |
@@ -184,7 +185,7 @@ Pixel-perfect is off until the user turns it on (checkbox, or P). A one-pixel pe
 
 **Wrap a stroke around the canvas for a tile.** Status: done. Area: `crates/oxypixel-core/src/draw.rs`, `crates/oxypixel-core/src/editor.rs`, `crates/oxypixel/src/canvas.rs`.
 
-Wrap is off until the user turns it on (checkbox, or T). Pencil, eraser, line, rectangle, ellipse, and fill that leave an edge continue on the opposite edge, including the shape preview. Mirror still reflects across the canvas center. Tiled view (checkbox, or Shift+T) draws the same cel 3 by 3 so the seam is visible. Export writes that one cel. The wrap math is tested in `draw.rs`.
+Wrap is off until the user turns it on (checkbox, or T). Pencil, eraser, line, rectangle, ellipse, and fill that leave an edge continue on the opposite edge, including the shape preview. Mirror still reflects across the canvas center. Tiled view (checkbox, or Shift+T) draws the same cel 3 by 3 so the seam is visible. Reference overlays stay on the real canvas and are not repeated. Export writes that one cel. The wrap math is tested in `draw.rs`.
 
 ### OX-P15
 
@@ -198,7 +199,9 @@ Open recent keeps ten paths. A repeated file name shows the parent folder, and a
 
 ### OX-P17
 
-**A reference image that export skips.** Import image as layer fits the bitmap into the canvas and stores a normal layer, so PNG, GIF, and the spritesheet include those pixels. A later task should keep a reference above the stack for the session, let it be moved and scaled, and leave it out of the composite those exporters write. It is not a new field in the file.
+**A reference image that export skips.** Status: done. Area: `crates/oxypixel-core/src/reference.rs`, `crates/oxypixel/src/refsview.rs`.
+
+File → Load reference, or a dropped JPEG, keeps the picture beside the document. Up to eight can be shown. Each one is either an overlay (drag to move it, scale and opacity sliders, lock, show or hide, behind or above the art) or a floating panel. Sample, off by default, lets the eyedropper read that image. Copy onto layer is the explicit way those pixels become a layer, and only then do export, merge, and composite include them. Tiled view repeats the cel and leaves the reference where it was placed. The `.oxypix` version stays 1. Version 1 rejects trailing bytes, so Save writes paths and placement to `<file>.oxypix.refs` next to the document. An image inside the document's folder is stored relative to it. A reference change marks the document unsaved, and Discard drops it. A dropped PNG still imports, as before; a PNG reference comes from File → Load reference. A sidecar that could not be read is left on disk until the references change. The pixels stay in the PNG or JPEG. A missing sidecar means there are no references. A missing image keeps the placement and is marked missing.
 
 ### OX-P18
 
