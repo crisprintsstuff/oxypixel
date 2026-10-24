@@ -45,6 +45,10 @@ pub enum Error {
     EmptyClipboard,
     #[error("unsupported image format (import PNG, BMP, or GIF)")]
     UnsupportedFormat,
+    #[error("a reference image must be a PNG or JPEG")]
+    BadReferenceImage,
+    #[error("the reference sidecar is not valid")]
+    BadReference,
     #[error("could not decode the image: {0}")]
     Image(String),
     #[error("file error: {0}")]

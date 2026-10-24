@@ -8,7 +8,7 @@ use eframe::egui::{self, Color32, RichText, ViewportCommand};
 use oxypixel_core::{
     advance, decode_first_rgba, export_bmp, export_gif, export_palette, export_png_scaled,
     export_spritesheet_scaled, fit_into, import_image, import_palette, load_oxypix, save_oxypix,
-    Editor, Error, Fit, PaletteFormat, Rgba, Tool, Transform, MAX_DIMENSION,
+    Editor, Error, Fit, PaletteFormat, References, Rgba, Tool, Transform, MAX_DIMENSION,
 };
 
 use crate::cache::FrameComposites;
@@ -19,6 +19,7 @@ use crate::native;
 use crate::preview::PreviewPanel;
 use crate::recent;
 use crate::recovery;
+use crate::refsview::{self, ListAction, RefTextures};
 use crate::session;
 use crate::shortcuts::{self, Command};
 use crate::theme::AMBER;
@@ -56,6 +57,7 @@ enum PathKind {
     Save,
     ImportDocument,
     ImportLayer,
+    LoadReference,
     ExportPng,
     ExportBmp,
     ExportGif,
@@ -127,6 +129,9 @@ pub struct OxyApp {
     recovery: Option<recovery::RecoveryWriter>,
     pending_recoveries: Vec<recovery::RecoveryEntry>,
     recovery_choice: usize,
+    references: References,
+    ref_textures: RefTextures,
+    refs_saved: u64,
 }
 
 enum UpdateMessage {
@@ -199,6 +204,9 @@ impl OxyApp {
             recovery,
             pending_recoveries: Vec::new(),
             recovery_choice: 0,
+            references: References::new(),
+            ref_textures: RefTextures::default(),
+            refs_saved: 0,
         };
         app.hex = app.editor.primary().to_hex();
         if let Some(path) = open {
@@ -215,7 +223,7 @@ impl OxyApp {
             .and_then(|p| p.file_name())
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "Untitled".to_string());
-        if self.editor.is_dirty() {
+        if self.has_unsaved_changes() {
             format!("OxyPixel - {name} *")
         } else {
             format!("OxyPixel - {name}")
@@ -297,6 +305,7 @@ impl OxyApp {
                 self.editor.replace_document(doc);
                 self.remember_file(&path);
                 self.save_path = Some(path.clone());
+                self.load_reference_sidecar(&path);
                 self.bind_recovery_slot(Some(&path));
                 self.view.fit_next = true;
                 self.playing = false;
@@ -308,6 +317,7 @@ impl OxyApp {
     }
 
     fn save_to(&mut self, path: PathBuf) -> bool {
+        let same_path = self.save_path.as_deref() == Some(path.as_path());
         match save_oxypix(self.editor.document(), &path) {
             Ok(()) => {
                 self.editor.mark_clean();
@@ -315,6 +325,11 @@ impl OxyApp {
                 self.forget_recovery();
                 self.save_path = Some(path.clone());
                 self.bind_recovery_slot(Some(&path));
+                // An unread sidecar (corrupt, or newer) stays on disk until the
+                // references change or the document moves.
+                if self.references_unsaved() || !same_path {
+                    self.write_reference_sidecar(&path);
+                }
                 self.note_ok("Saved.");
                 true
             }
@@ -330,7 +345,7 @@ impl eframe::App for OxyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.send_viewport_cmd(ViewportCommand::Title(self.title()));
         if ctx.input(|i| i.viewport().close_requested())
-            && self.editor.is_dirty()
+            && self.has_unsaved_changes()
             && !self.allow_quit
         {
             ctx.send_viewport_cmd(ViewportCommand::CancelClose);
@@ -354,9 +369,26 @@ impl eframe::App for OxyApp {
                 &mut self.editor,
                 &mut self.view,
                 &mut self.composites,
+                &mut self.references,
+                &mut self.ref_textures,
                 allow_draw,
             );
         });
+        let alt = ctx.input(|input| input.modifiers.alt);
+        if let Some((color, secondary)) = refsview::show_panels(
+            ctx,
+            &self.references,
+            &self.ref_textures,
+            self.editor.tool(),
+            alt,
+        ) {
+            if secondary {
+                self.editor.set_secondary(color);
+            } else {
+                self.editor.set_primary(color);
+                self.hex = color.to_hex();
+            }
+        }
         self.show_dialog(ctx);
         self.consider_autosave(ctx);
     }
@@ -539,24 +571,99 @@ impl OxyApp {
                 .filter_map(|file| file.path.clone())
                 .collect()
         });
-        let Some(path) = dropped.into_iter().next() else {
+        if dropped.is_empty() {
             return;
-        };
-        match extension_of(&path).as_str() {
-            "oxypix" => self.request_open_at(path),
-            "png" | "bmp" | "gif" => {
-                if self.editor.is_dirty() {
-                    let _ = self.import_layer(&path);
-                    if let Some(err) = self.dialog_error.take() {
-                        self.note_err(err);
+        }
+        let mut opened = false;
+        let mut imported = false;
+        let mut noted = false;
+        for path in dropped {
+            match drop_kind(&extension_of(&path)) {
+                DropKind::Open if !opened => {
+                    self.request_open_at(path);
+                    opened = true;
+                }
+                // One raster per drop, as before references: a second one would
+                // replace the document the first one just opened.
+                DropKind::Import if !imported => {
+                    self.import_dropped_raster(&path);
+                    imported = true;
+                }
+                DropKind::Open | DropKind::Import => {}
+                DropKind::Reference => {
+                    let _ = self.load_reference(&path);
+                }
+                DropKind::Unsupported => {
+                    if !noted {
+                        self.note_err("Drop a .oxypix, PNG, BMP, GIF, or JPEG file.");
+                        noted = true;
                     }
-                } else if self.import_document(&path) {
-                    self.view.fit_next = true;
-                } else if let Some(err) = self.dialog_error.take() {
-                    self.note_err(err);
                 }
             }
-            _ => self.note_err("Drop a .oxypix, PNG, BMP, or GIF file."),
+        }
+    }
+
+    fn import_dropped_raster(&mut self, path: &Path) {
+        if self.has_unsaved_changes() {
+            let _ = self.import_layer(path);
+            if let Some(err) = self.dialog_error.take() {
+                self.note_err(err);
+            }
+        } else if self.import_document(path) {
+            self.view.fit_next = true;
+        } else if let Some(err) = self.dialog_error.take() {
+            self.note_err(err);
+        }
+    }
+
+    fn load_reference(&mut self, path: &Path) -> bool {
+        match self.references.add_file(path) {
+            Ok(()) => {
+                self.note_dir(path);
+                self.note_ok(format!("Loaded reference {}.", path.display()));
+                true
+            }
+            Err(err) => {
+                self.note_err(err);
+                false
+            }
+        }
+    }
+
+    /// Reference changes since the sidecar was last read or written.
+    fn references_unsaved(&self) -> bool {
+        self.references.revision() != self.refs_saved
+    }
+
+    /// The document or its references have changes that Save would write.
+    fn has_unsaved_changes(&self) -> bool {
+        self.editor.is_dirty() || self.references_unsaved()
+    }
+
+    fn write_reference_sidecar(&mut self, path: &Path) {
+        match self.references.write_sidecar(path) {
+            Ok(()) => self.refs_saved = self.references.revision(),
+            Err(err) => self.note_err(err),
+        }
+    }
+
+    fn clear_references(&mut self) {
+        self.references = References::new();
+        self.ref_textures.clear();
+        self.refs_saved = 0;
+    }
+
+    fn load_reference_sidecar(&mut self, path: &Path) {
+        match References::read_sidecar(path) {
+            Ok(refs) => {
+                self.refs_saved = refs.revision();
+                self.references = refs;
+                self.ref_textures.clear();
+            }
+            Err(err) => {
+                self.note_err(err);
+                self.clear_references();
+            }
         }
     }
 
@@ -591,7 +698,7 @@ impl OxyApp {
     }
 
     fn request_new(&mut self) {
-        if self.editor.is_dirty() {
+        if self.has_unsaved_changes() {
             self.pending = Some(Pending::New);
             self.dialog = Some(DialogKind::Unsaved);
         } else {
@@ -601,7 +708,7 @@ impl OxyApp {
     }
 
     fn request_open(&mut self) {
-        if self.editor.is_dirty() {
+        if self.has_unsaved_changes() {
             self.pending = Some(Pending::Open);
             self.dialog = Some(DialogKind::Unsaved);
         } else {
@@ -610,7 +717,7 @@ impl OxyApp {
     }
 
     fn request_open_at(&mut self, path: PathBuf) {
-        if self.editor.is_dirty() {
+        if self.has_unsaved_changes() {
             self.pending_path = Some(path);
             self.pending = Some(Pending::OpenAt);
             self.dialog = Some(DialogKind::Unsaved);
@@ -630,7 +737,7 @@ impl OxyApp {
     }
 
     fn request_import(&mut self) {
-        if self.editor.is_dirty() {
+        if self.has_unsaved_changes() {
             self.pending = Some(Pending::Import);
             self.dialog = Some(DialogKind::Unsaved);
         } else {
@@ -639,7 +746,7 @@ impl OxyApp {
     }
 
     fn request_example(&mut self) {
-        if self.editor.is_dirty() {
+        if self.has_unsaved_changes() {
             self.pending = Some(Pending::Example);
             self.dialog = Some(DialogKind::Unsaved);
         } else {
@@ -648,7 +755,7 @@ impl OxyApp {
     }
 
     fn request_quit(&mut self, ctx: &egui::Context) {
-        if self.editor.is_dirty() {
+        if self.has_unsaved_changes() {
             self.pending = Some(Pending::Quit);
             self.dialog = Some(DialogKind::Unsaved);
         } else {
@@ -673,6 +780,7 @@ impl OxyApp {
     fn load_example(&mut self) {
         match Editor::demo() {
             Ok(editor) => {
+                self.clear_references();
                 self.detach_recovery();
                 let doc = editor.document().clone();
                 self.editor.replace_document(doc);
@@ -722,6 +830,7 @@ impl OxyApp {
             PathKind::Open
             | PathKind::ImportDocument
             | PathKind::ImportLayer
+            | PathKind::LoadReference
             | PathKind::ImportPalette => String::new(),
             PathKind::Save => self
                 .save_path
@@ -758,6 +867,7 @@ impl OxyApp {
             PathKind::Save => self.save_to(path),
             PathKind::ImportDocument => self.import_document(&path),
             PathKind::ImportLayer => self.import_layer(&path),
+            PathKind::LoadReference => self.load_reference(&path),
             PathKind::ExportPng => self.export_scaled(&path, true),
             PathKind::ExportBmp => self.export_frame(&path, export_bmp),
             PathKind::ExportGif => self.export_doc(&path, export_gif),
@@ -785,6 +895,7 @@ impl OxyApp {
     fn import_document(&mut self, path: &Path) -> bool {
         match import_image(path) {
             Ok(doc) => {
+                self.clear_references();
                 self.detach_recovery();
                 self.editor.replace_document(doc);
                 self.note_dir(path);
@@ -1027,6 +1138,7 @@ impl OxyApp {
         };
         match Editor::new(width, height) {
             Ok(editor) => {
+                self.clear_references();
                 self.detach_recovery();
                 let doc = editor.document().clone();
                 self.editor.replace_document(doc);
@@ -1096,6 +1208,10 @@ impl OxyApp {
                     }
                     if menu_item(ui, "Import image as layer…", "") {
                         self.open_path_dialog(PathKind::ImportLayer);
+                        ui.close_menu();
+                    }
+                    if menu_item(ui, "Load reference…", "") {
+                        self.open_path_dialog(PathKind::LoadReference);
                         ui.close_menu();
                     }
                     if menu_item(ui, "Export PNG…", "") {
@@ -1751,6 +1867,25 @@ impl OxyApp {
                         self.apply(|editor| editor.merge_down());
                     }
                 });
+                let width = self.editor.document().width();
+                let height = self.editor.document().height();
+                if let Some(action) =
+                    refsview::show_list(ui, &mut self.references, width, height)
+                {
+                    match action {
+                        ListAction::Copy { name, pixels } => {
+                            if self
+                                .apply(|editor| editor.insert_layer_pixels(&name, &pixels))
+                                .is_some()
+                            {
+                                self.note_ok(
+                                    "Copied the reference onto a new layer. Export includes that layer.",
+                                );
+                            }
+                        }
+                        ListAction::Error(err) => self.note_err(err),
+                    }
+                }
             });
     }
 
@@ -1989,7 +2124,8 @@ impl OxyApp {
             return None;
         }
         let doc = self.editor.document();
-        let color = doc.composite_pixel(doc.active_frame(), x as u32, y as u32)?;
+        let color = doc.composite_pixel(doc.active_frame(), x as u32, y as u32);
+        let color = self.references.pick_color(color, x, y)?;
         Some((x, y, color))
     }
 
@@ -2065,7 +2201,7 @@ impl OxyApp {
     }
 
     fn apply_update(&mut self, ctx: &egui::Context) {
-        if self.editor.is_dirty() {
+        if self.has_unsaved_changes() {
             self.note_err("Save or discard this drawing before installing the update.");
             return;
         }
@@ -2255,6 +2391,7 @@ impl OxyApp {
             PathKind::Save => "Save .oxypix",
             PathKind::ImportDocument => "Import image as a new document",
             PathKind::ImportLayer => "Import image as a layer",
+            PathKind::LoadReference => "Load reference image",
             PathKind::ExportPng => "Export PNG",
             PathKind::ExportBmp => "Export BMP",
             PathKind::ExportGif => "Export GIF",
@@ -2757,6 +2894,11 @@ impl OxyApp {
                 self.editor.replace_document(doc);
                 self.editor.mark_dirty();
                 self.save_path = entry.source.clone();
+                if let Some(path) = entry.source.clone() {
+                    self.load_reference_sidecar(&path);
+                } else {
+                    self.clear_references();
+                }
                 self.recovery_id = entry.id.clone();
                 self.recovery_suppress = false;
                 self.recovery_anchor_generation = self.editor.generation();
@@ -2971,7 +3113,7 @@ fn tool_hint(tool: Tool) -> &'static str {
         Tool::Eraser => "Drag to erase pixels on this layer.",
         Tool::Bucket => "Click a connected area on this layer to fill it.",
         Tool::Eyedropper => {
-            "Click the canvas to copy that color. Alt+click picks without switching tools."
+            "Click the canvas to copy that color. Alt+click picks without switching tools. A reference is included only when Sample is on."
         }
         Tool::Line => "Drag a straight line. Hold Shift for 45 degrees.",
         Tool::Rectangle => "Drag an outline. Hold Shift for a square.",
@@ -3000,6 +3142,27 @@ fn extension_of(path: &Path) -> String {
         .to_ascii_lowercase()
 }
 
+/// What a dropped file does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DropKind {
+    Open,
+    /// Opens the image, or adds it as a layer when the document has edits.
+    Import,
+    /// JPEG is not an import format, so a dropped JPEG becomes a reference.
+    /// A PNG reference comes from File → Load reference.
+    Reference,
+    Unsupported,
+}
+
+fn drop_kind(extension: &str) -> DropKind {
+    match extension {
+        "oxypix" => DropKind::Open,
+        "png" | "bmp" | "gif" => DropKind::Import,
+        "jpg" | "jpeg" => DropKind::Reference,
+        _ => DropKind::Unsupported,
+    }
+}
+
 fn parse_u32(text: &str, label: &str) -> Result<u32, String> {
     text.trim()
         .parse::<u32>()
@@ -3016,6 +3179,7 @@ fn filter_name(kind: PathKind, format: PaletteFormat) -> &'static str {
     match kind {
         PathKind::Open | PathKind::Save => "OxyPixel document",
         PathKind::ImportDocument | PathKind::ImportLayer => "Image",
+        PathKind::LoadReference => "Reference image",
         PathKind::ExportPng | PathKind::ExportSheet => "PNG",
         PathKind::ExportBmp => "BMP",
         PathKind::ExportGif => "GIF",
@@ -3032,6 +3196,7 @@ fn filter_ext(kind: PathKind, format: PaletteFormat) -> &'static [&'static str] 
     match kind {
         PathKind::Open | PathKind::Save => &["oxypix"],
         PathKind::ImportDocument | PathKind::ImportLayer => &["png", "bmp", "gif"],
+        PathKind::LoadReference => &["png", "jpg", "jpeg"],
         PathKind::ExportPng | PathKind::ExportSheet => &["png"],
         PathKind::ExportBmp => &["bmp"],
         PathKind::ExportGif => &["gif"],
@@ -3052,4 +3217,25 @@ fn replace_palette_extension(path: &str, ext: &str) -> String {
     let mut next = PathBuf::from(trimmed);
     next.set_extension(ext);
     next.display().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_dropped_png_imports_and_a_jpeg_loads_a_reference() {
+        assert_eq!(drop_kind("oxypix"), DropKind::Open);
+        assert_eq!(drop_kind("png"), DropKind::Import);
+        assert_eq!(drop_kind("bmp"), DropKind::Import);
+        assert_eq!(drop_kind("gif"), DropKind::Import);
+        assert_eq!(drop_kind("jpg"), DropKind::Reference);
+        assert_eq!(drop_kind("jpeg"), DropKind::Reference);
+        assert_eq!(drop_kind("txt"), DropKind::Unsupported);
+        assert_eq!(drop_kind(""), DropKind::Unsupported);
+        assert_eq!(
+            drop_kind(&extension_of(Path::new("Sprite.PNG"))),
+            DropKind::Import
+        );
+    }
 }

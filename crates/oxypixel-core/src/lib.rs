@@ -15,6 +15,7 @@ mod error;
 mod history;
 mod io;
 mod limits;
+mod reference;
 
 pub use animation::advance;
 pub use color::{source_over, Rgba};
@@ -34,3 +35,4 @@ pub use limits::{
     DEFAULT_FRAME_MS, FORMAT_VERSION, MAX_BRUSH, MAX_CEL_PIXELS, MAX_DIMENSION, MAX_FILE_BYTES,
     MAX_FRAMES, MAX_FRAME_MS, MAX_LAYERS, MAX_PALETTE, MAX_TOTAL_PIXELS, MIN_FRAME_MS,
 };
+pub use reference::{sidecar_path, References, MAX_REFERENCES};

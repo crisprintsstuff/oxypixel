@@ -17,6 +17,7 @@ mod native;
 mod preview;
 mod recent;
 mod recovery;
+mod refsview;
 mod session;
 mod shortcuts;
 mod theme;
