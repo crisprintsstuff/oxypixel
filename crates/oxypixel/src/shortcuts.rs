@@ -39,6 +39,7 @@ pub enum Command {
     TogglePixelPerfect,
     ToggleWrap,
     ToggleTiled,
+    ToggleSnap,
 }
 
 pub struct Binding {
@@ -156,6 +157,10 @@ pub const BINDINGS: &[Binding] = &[
         action: "Tiled view. Draw the canvas 3 by 3 so the seam is visible. Export is unchanged",
     },
     Binding {
+        keys: "S",
+        action: "Snap pencil, fill, and shapes to the nearest palette color. The eraser still clears",
+    },
+    Binding {
         keys: "Shift+drag",
         action: "Constrain lines to 45 degrees and shapes to squares",
     },
@@ -202,6 +207,7 @@ pub fn command_from(modifiers: Modifiers, key: Key) -> Option<Command> {
         (false, false, Key::P) => Some(Command::TogglePixelPerfect),
         (false, false, Key::T) => Some(Command::ToggleWrap),
         (false, true, Key::T) => Some(Command::ToggleTiled),
+        (false, false, Key::S) => Some(Command::ToggleSnap),
         (false, false, Key::OpenBracket) => Some(Command::BrushSmaller),
         (false, false, Key::CloseBracket) => Some(Command::BrushLarger),
         (false, false, Key::Enter) => Some(Command::PlayToggle),
@@ -368,6 +374,14 @@ mod tests {
         let mut shift = Modifiers::NONE;
         shift.shift = true;
         assert_eq!(command_from(shift, Key::T), Some(Command::ToggleTiled));
+        assert_eq!(
+            command_from(Modifiers::NONE, Key::S),
+            Some(Command::ToggleSnap)
+        );
+        assert_eq!(
+            command_from(Modifiers::COMMAND, Key::S),
+            Some(Command::Save)
+        );
         assert_eq!(
             command_from(shift, Key::H),
             Some(Command::Transform(Transform::FlipHorizontal))

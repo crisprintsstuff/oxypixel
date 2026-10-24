@@ -678,4 +678,24 @@ mod tests {
         assert_eq!(import_palette(&path).unwrap(), colors);
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn a_reordered_palette_round_trips_through_gpl_hex_and_pal() {
+        let mut colors = sample();
+        colors.reverse();
+        for format in [PaletteFormat::Gpl, PaletteFormat::Hex, PaletteFormat::Pal] {
+            let text = export_palette_string(&colors, format).unwrap();
+            let back = import_palette_bytes(text.as_bytes(), Some(format.extension())).unwrap();
+            if format == PaletteFormat::Pal {
+                let opaque: Vec<_> = colors
+                    .iter()
+                    .copied()
+                    .map(|color| Rgba::new(color.r, color.g, color.b, 255))
+                    .collect();
+                assert_eq!(back, opaque);
+            } else {
+                assert_eq!(back, colors);
+            }
+        }
+    }
 }

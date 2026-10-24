@@ -32,6 +32,7 @@ Letter shortcuts are ignored while a text field is focused. Escape leaves the te
 | P | Pixel-perfect pencil. One-pixel strokes drop the extra corner of a diagonal step |
 | T | Wrap drawing that leaves an edge onto the opposite edge |
 | Shift+T | Tiled view: the canvas repeated 3 by 3. Export is still one copy |
+| S | Snap pencil, fill, and shapes to the nearest palette color. The eraser still clears |
 | Shift+H | Flip the selection horizontally, or the active cel when nothing is selected |
 | Shift+V | Flip the selection vertically, or the active cel when nothing is selected |
 | Shift+. | Rotate that area 90 degrees clockwise |

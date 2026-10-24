@@ -27,7 +27,7 @@ Flip and rotate use the selection, or every pixel of the active cel when nothing
 
 ## Files
 
-`.oxypix` is a little-endian versioned blob. Version 1 is described in [FORMAT.md](FORMAT.md). Raster IO uses the `image` crate. GIF import uses that crate's composited frames. GIF export loops forever. Palette files are text, parsed in `io/palette.rs`: GIMP `.gpl`, a hex list (`.hex`), and JASC `.pal`. Import replaces the document palette and is one undo step. Reference placement is the sidecar described above. It is not parsed as part of the document.
+`.oxypix` is a little-endian versioned blob. Version 1 is described in [FORMAT.md](FORMAT.md). Raster IO uses the `image` crate. GIF import uses that crate's composited frames. GIF export loops forever. Palette files are text, parsed in `io/palette.rs`: GIMP `.gpl`, a hex list (`.hex`), and JASC `.pal`. Import replaces the document palette and is one undo step. Dragging a swatch records one undo step, and a ramp between two swatches does too. Snap, off until it is turned on, makes pencil, fill, and shapes stamp the nearest palette color. The eraser still clears. Export writes the swatches in their current order. Reference placement is the sidecar described above. It is not parsed as part of the document.
 
 ## GUI
 
