@@ -12,6 +12,8 @@ Infrastructure, then small fixes that already have a place in the code.
 
 OX-002, OX-011, and OX-012 are done, so this list is empty.
 
+Suggested order if a human picks proposals: OX-P20 and OX-P21 (small follow-ups to 0.6.0), OX-P6 (the window has no launch check), OX-P22, OX-P24, OX-P25, then OX-P23. OX-P27 waits for a format decision.
+
 ## Scorecard
 
 ### Done
@@ -209,8 +211,42 @@ File → Load reference, or a dropped JPEG, keeps the picture beside the documen
 
 **Blend modes on a layer, once the file format allows them.** Each layer already has an opacity, and compositing is source-over. A later task could add a few blend modes, such as multiply, screen, and add, stored on the layer. That needs a new `.oxypix` version, so it waits until a human accepts the format change.
 
+### OX-P20
+
+**Keep references in the recovery copy.** Autosave writes the document to a recovery `.oxypix`, but not the references. After a crash, a restored drawing has the references from its last Save, and an untitled drawing has none. A later task could write a `.refs` sidecar beside the recovery file, with absolute paths, and load it on restore. It stays out of the user's own folder until Save, and export still ignores it.
+
+### OX-P21
+
+**Keep the palette marks on the right swatch after undo.** After a swatch move or a ramp, undo and redo change the palette, but the selected swatch and the ramp end stay at their old indices. They are clamped, so nothing breaks, but they can point at a different color. A later task could remap or clear both marks when an undo or redo changes the palette. The same task can tighten two weak asserts in the P16 tests (`moving_a_swatch_is_one_undo…` and the `snaps_to_palette` check).
+
+### OX-P22
+
+**Fill tolerance and a global fill.** The bucket fills only pixels that match exactly and touch the start pixel. A later task could add a tolerance (0 is today's behavior) and a Global option that recolors every matching pixel on the cel. Both respect the selection, wrap, and Snap, and each fill is one undo step. The matching rule belongs in `draw.rs` with tests.
+
+### OX-P23
+
+**Magic wand, and selections that are not rectangles.** Select is a rectangle. A later task could store the selection as a mask in `oxypixel-core`, add a wand that picks touching pixels of one color (with the P22 tolerance), and let Shift add and Alt subtract. Move, nudge, flip, rotate, copy, clear, and the clip for stamps and fill then use the mask. The marquee follows the mask edge. Undo keeps storing the selection. This touches the most code of these proposals and should land before any lasso.
+
+### OX-P24
+
+**Shade along the palette.** P16 made ramps. A later task could add a shading mode to the pencil: left click replaces a pixel with the next swatch in the palette, right click with the previous one, and a pixel that is not in the palette is left alone. It is one undo step per stroke, and pixel-perfect, mirror, and wrap still apply. The rule is tested in `editor.rs`.
+
+### OX-P25
+
+**Spritesheet layout and a JSON description.** `export-sheet` and the window write one row of frames. A later task could add columns and padding, and write a `.json` file next to the PNG with each frame's rectangle and duration, so a game engine can load the sheet without hand-entered numbers. The CLI gets the same options and keeps failing with an exit code, not a dialog.
+
+### OX-P26
+
+**Scale a selection.** P9 flips and turns a selection; resizing it is still missing. A later task could scale the selected pixels by a whole-number factor up or down, or to a typed size, with nearest-neighbor sampling only. It is one undo step, and pixels that land outside the cel are dropped as in P9.
+
+### OX-P27
+
+**`.oxypix` version 2.** Frame names (P11) and blend modes (P18) both need a new version, because version 1 rejects trailing bytes. A later task could design version 2 once and fold those fields in, with room for later fields. It would also decide whether references stay a sidecar. Version 1 files must still open, and saving writes version 2 only when the document uses a version 2 field. This needs a human to accept the format change before work starts. Update [FORMAT.md](FORMAT.md) and the parse limits in the same change.
+
 ## Human only
 
 ### OX-H1
 
 **Authenticode signing and cutting a release.** Needs a certificate and a version decision. Agents do not push `v*` tags or run the release workflow to try this. The steps that already exist are in [docs/BUILD-WINDOWS.md](BUILD-WINDOWS.md) and `.github/workflows/release.yml`.
+
+A release starts in one of two ways, and each creates the `v<version>` tag on the commit it builds: push the tag on the version-bump merge commit, or run the Release workflow on `main` (Actions → Release → Run workflow). The version comes from `Cargo.toml`. 0.6.0 was released the second way, because a Claude Code cloud session could push branches but not tags. Use only one of the two for a release, so it builds once.
