@@ -11,12 +11,16 @@ use oxypixel_core::{
     Editor, Error, Fit, PaletteFormat, References, Rgba, Tool, Transform, MAX_DIMENSION,
 };
 
-use crate::canvas::{self, ViewState};
+use crate::cache::FrameComposites;
+use crate::canvas::{self, ViewState, ONION_FRAME_CAP};
 use crate::clipboard::{self, ClipboardRead};
+use crate::framestrip::ThumbCache;
 use crate::native;
+use crate::preview::PreviewPanel;
 use crate::recent;
 use crate::recovery;
 use crate::refsview::{self, ListAction, RefTextures};
+use crate::session;
 use crate::shortcuts::{self, Command};
 use crate::theme::AMBER;
 use crate::toolicons;
@@ -75,6 +79,9 @@ enum Pending {
 pub struct OxyApp {
     editor: Editor,
     view: ViewState,
+    composites: FrameComposites,
+    preview_panel: PreviewPanel,
+    thumbs: ThumbCache,
     save_path: Option<PathBuf>,
     note: Option<Note>,
     dialog: Option<DialogKind>,
@@ -149,6 +156,9 @@ impl OxyApp {
         let mut app = Self {
             editor,
             view: ViewState::default(),
+            composites: FrameComposites::default(),
+            preview_panel: PreviewPanel::new(session::load_preview_open()),
+            thumbs: ThumbCache::default(),
             save_path: None,
             note: None,
             dialog: None,
@@ -335,18 +345,22 @@ impl eframe::App for OxyApp {
             self.dialog = Some(DialogKind::Unsaved);
         }
         self.tick_playback(ctx);
+        self.preview_panel.tick(ctx, &self.editor);
         self.handle_drops(ctx);
         self.handle_shortcuts(ctx);
         self.top_bar(ctx);
         self.bottom_bar(ctx);
         self.tool_panel(ctx);
         self.side_panel(ctx);
+        self.preview_panel
+            .show(ctx, &self.editor, &mut self.view, &mut self.composites);
         let allow_draw = !self.playing && !matches!(self.dialog, Some(DialogKind::Recovery));
         egui::CentralPanel::default().show(ctx, |ui| {
             self.hover = canvas::show_canvas(
                 ui,
                 &mut self.editor,
                 &mut self.view,
+                &mut self.composites,
                 &mut self.references,
                 &mut self.ref_textures,
                 allow_draw,
@@ -1334,14 +1348,26 @@ impl OxyApp {
                         ui.close_menu();
                     }
                     if ui
-                        .button(if self.view.onion {
+                        .button(if self.view.onion.enabled {
                             "Hide onion skin"
                         } else {
                             "Show onion skin"
                         })
                         .clicked()
                     {
-                        self.view.onion = !self.view.onion;
+                        self.view.onion.enabled = !self.view.onion.enabled;
+                        ui.close_menu();
+                    }
+                    if ui
+                        .button(if self.preview_panel.open {
+                            "Hide preview"
+                        } else {
+                            "Show preview"
+                        })
+                        .clicked()
+                    {
+                        self.preview_panel.open = !self.preview_panel.open;
+                        session::save_preview_open(self.preview_panel.open);
                         ui.close_menu();
                     }
                 });
@@ -1799,29 +1825,27 @@ impl OxyApp {
                 if ui.button("Next").on_hover_text("Next frame").clicked() {
                     self.step_frame(1);
                 }
-                let count = self.editor.document().frame_count();
-                let active = self.editor.document().active_frame();
-                let strip = (ui.available_width() - 560.0).clamp(72.0, 320.0);
-                egui::ScrollArea::horizontal()
+                let strip = (ui.available_width() - 280.0).max(160.0);
+                let clicked = egui::ScrollArea::horizontal()
                     .id_salt("frame-strip")
                     .max_width(strip)
-                    .max_height(28.0)
+                    .max_height(60.0)
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            for index in 0..count {
-                                let label = format!("{}", index + 1);
-                                let selected = index == active;
-                                if ui
-                                    .selectable_label(selected, label)
-                                    .on_hover_text(format!("Frame {}", index + 1))
-                                    .clicked()
-                                {
-                                    self.playing = false;
-                                    let _ = self.editor.set_active_frame(index);
-                                }
-                            }
-                        });
-                    });
+                            crate::framestrip::show(
+                                ui,
+                                &self.editor,
+                                &mut self.composites,
+                                &mut self.thumbs,
+                            )
+                        })
+                        .inner
+                    })
+                    .inner;
+                if let Some(index) = clicked {
+                    self.playing = false;
+                    let _ = self.editor.set_active_frame(index);
+                }
                 if ui.button("Add frame").clicked() {
                     self.apply(|editor| editor.add_frame());
                 }
@@ -1831,8 +1855,20 @@ impl OxyApp {
                 if ui.button("Delete frame").clicked() {
                     self.apply(|editor| editor.delete_frame());
                 }
-                let mut ms = self.editor.document().frame_duration(active).unwrap_or(100);
-                let slider = ui.add(egui::Slider::new(&mut ms, 20..=1000).text("ms"));
+            });
+            ui.horizontal_wrapped(|ui| {
+                let (min_ms, max_ms) = crate::framestrip::duration_limits();
+                let active = self.editor.document().active_frame();
+                let mut ms = self
+                    .editor
+                    .document()
+                    .frame_duration(active)
+                    .unwrap_or(oxypixel_core::DEFAULT_FRAME_MS);
+                let slider = ui.add(
+                    egui::Slider::new(&mut ms, min_ms..=max_ms)
+                        .logarithmic(true)
+                        .text("ms"),
+                );
                 if slider.drag_started() {
                     self.editor.begin_coalesce();
                 }
@@ -1842,13 +1878,53 @@ impl OxyApp {
                 if slider.drag_stopped() {
                     self.editor.end_coalesce();
                 }
-                let mut onion = self.view.onion;
+                let mut onion = self.view.onion.enabled;
                 if ui
                     .checkbox(&mut onion, "Onion")
-                    .on_hover_text("Show the previous frame faintly under this one")
+                    .on_hover_text(
+                        "Ghost the frames before and after this one. The first frame does not show the last.",
+                    )
                     .changed()
                 {
-                    self.view.onion = onion;
+                    self.view.onion.enabled = onion;
+                }
+                let on = self.view.onion.enabled;
+                let mut previous = self.view.onion.previous.min(ONION_FRAME_CAP);
+                if ui
+                    .add_enabled(
+                        on,
+                        egui::Slider::new(&mut previous, 0..=ONION_FRAME_CAP).text("before"),
+                    )
+                    .on_hover_text("How many earlier frames to ghost")
+                    .changed()
+                {
+                    self.view.onion.previous = previous;
+                }
+                let mut next = self.view.onion.next.min(ONION_FRAME_CAP);
+                if ui
+                    .add_enabled(
+                        on,
+                        egui::Slider::new(&mut next, 0..=ONION_FRAME_CAP).text("after"),
+                    )
+                    .on_hover_text("How many later frames to ghost")
+                    .changed()
+                {
+                    self.view.onion.next = next;
+                }
+                let mut opacity = self.view.onion.opacity;
+                if ui
+                    .add_enabled(on, egui::Slider::new(&mut opacity, 0..=255).text("opacity"))
+                    .changed()
+                {
+                    self.view.onion.opacity = opacity;
+                }
+                let mut tint = self.view.onion.tint;
+                if ui
+                    .add_enabled(on, egui::Checkbox::new(&mut tint, "Tint"))
+                    .on_hover_text("Earlier frames lean rose, later frames lean teal")
+                    .changed()
+                {
+                    self.view.onion.tint = tint;
                 }
             });
             self.status_line(ui);

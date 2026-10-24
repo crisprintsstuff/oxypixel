@@ -7,14 +7,18 @@
 #![forbid(unsafe_code)]
 
 mod app;
+mod cache;
 mod canvas;
 mod cli;
 mod clipboard;
+mod framestrip;
 mod icon;
 mod native;
+mod preview;
 mod recent;
 mod recovery;
 mod refsview;
+mod session;
 mod shortcuts;
 mod theme;
 mod toolicons;

@@ -111,7 +111,8 @@ These match the current editor. Planned work is listed in [docs/ROADMAP.md](docs
 - Import and export the palette as GIMP `.gpl`, hex `.hex` (one `RRGGBB` per line), or JASC `.pal`. Import replaces the palette and can be undone
 - Layers with visibility, opacity, rename, reorder, duplicate, and merge down
 - Undo and redo, including the selection rectangle
-- Animation frames, playback, onion skin, GIF export, and a horizontal spritesheet
+- Animation frames with thumbnails, playback, onion skin for earlier and later frames, a duration up to 10 seconds, GIF export, and a horizontal spritesheet
+- A preview panel of the whole image, with its own playback, that pans the canvas when you click it
 - PNG and spritesheet export at 1×, 2×, or 4× nearest-neighbor
 - `.oxypix` documents, plus PNG, BMP, and GIF import and export
 - Reference images (PNG or JPEG) on the canvas or in a floating panel. They are left out of export unless you copy one onto a layer. Dropping a PNG or JPEG loads a reference. Paths and placement are stored beside the document, not inside the `.oxypix` file
