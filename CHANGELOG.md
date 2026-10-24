@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-24
+
 ### Added
 
 - The frame strip shows a thumbnail of each frame. Onion skin can ghost several frames before and after the current one, with opacity and a tint. It does not wrap the last frame onto the first.
