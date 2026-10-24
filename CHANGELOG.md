@@ -9,8 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The frame strip shows a thumbnail of each frame. Onion skin can ghost several frames before and after the current one, with opacity and a tint. It does not wrap the last frame onto the first.
+- View → Show preview opens a panel of the whole composited image beside the canvas. It can play the frames at their durations, a click or drag there pans the canvas, and an amber rectangle marks the viewport. The panel remembers whether it was left open. Tiled view repeats the canvas on the main view; the preview stays one tile.
 - Pixel-perfect pencil, off until you turn it on (P), drops the extra corner of a one-pixel diagonal step. A larger brush and the line tool are unchanged. Mirror follows the cleaned stroke, and the stroke is still one undo step.
 - Wrap (T) continues pencil, eraser, fill, lines, and shapes that leave an edge on the opposite edge, including the shape preview. Tiled view (Shift+T) draws the canvas 3 by 3 so the seam is visible. Export still writes one copy.
+
+### Changed
+
+- The frame duration slider runs from 20 ms to 10000 ms, which is the range stored in a `.oxypix` file.
 
 ## [0.5.0] - 2026-10-23
 
