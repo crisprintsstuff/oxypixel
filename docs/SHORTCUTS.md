@@ -45,6 +45,7 @@ Letter shortcuts are ignored while a text field is focused. Escape leaves the te
 | Space+drag, middle-drag | Pan |
 | Wheel | Zoom toward the pointer, one whole-pixel step |
 | Alt+click | Pick a color without changing tools |
+| Ctrl+drag | Move the reference image under the pointer. Without Ctrl, tools draw over it |
 | Shift while drawing a line or shape | 45-degree lines, square rectangles and ellipses |
 | Right-drag | Use the secondary color |
 | Ctrl+Q | Quit |

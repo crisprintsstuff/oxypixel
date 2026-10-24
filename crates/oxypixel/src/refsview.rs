@@ -3,7 +3,7 @@
 use eframe::egui::{
     self, Color32, Painter, Pos2, Rect, Sense, TextureHandle, TextureOptions, Vec2,
 };
-use oxypixel_core::{Error, References, Rgba, Tool};
+use oxypixel_core::{Error, References, Rgba, Tool, MAX_REFERENCE_SCALE, MIN_REFERENCE_SCALE};
 
 /// Textures for reference images. Rebuilt only when an id appears.
 #[derive(Default)]
@@ -63,7 +63,7 @@ pub fn show_list(
                 .weak(),
         );
         if refs.is_empty() {
-            ui.label("Load one from the File menu, or drop a PNG or JPEG.");
+            ui.label("Load one from the File menu, or drop a JPEG.");
             return;
         }
         let count = refs.len();
@@ -112,14 +112,37 @@ pub fn show_list(
             }
             let mut scale = refs.scale(index);
             if ui
-                .add(egui::Slider::new(&mut scale, 0.25..=8.0).text("Scale"))
+                .add(
+                    egui::Slider::new(&mut scale, MIN_REFERENCE_SCALE..=MAX_REFERENCE_SCALE)
+                        .logarithmic(true)
+                        .max_decimals(3)
+                        .text("Scale"),
+                )
                 .changed()
             {
                 let _ = refs.set_scale(index, scale);
             }
+            if let Some((mut width, mut height)) = refs.display_size(index) {
+                ui.horizontal(|ui| {
+                    ui.label("Size");
+                    let w = ui
+                        .add(egui::DragValue::new(&mut width).speed(1.0).max_decimals(1))
+                        .on_hover_text("Width on the canvas, in pixels. The height follows.");
+                    ui.label("×");
+                    let h = ui
+                        .add(egui::DragValue::new(&mut height).speed(1.0).max_decimals(1))
+                        .on_hover_text("Height on the canvas, in pixels. The width follows.");
+                    ui.label("px");
+                    if w.changed() {
+                        let _ = refs.set_display_width(index, width);
+                    } else if h.changed() {
+                        let _ = refs.set_display_height(index, height);
+                    }
+                });
+            }
             if let Some((x, y)) = refs.placement(index) {
                 ui.label(format!("{x:.0}, {y:.0}"))
-                    .on_hover_text("Document position. Drag the image on the canvas to move it.");
+                    .on_hover_text("Document position. Ctrl+drag the image on the canvas to move it.");
             }
             if ui
                 .checkbox(&mut sample, "Sample")
@@ -130,7 +153,16 @@ pub fn show_list(
             {
                 let _ = refs.set_sample(index, sample);
             }
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .add_enabled(!refs.missing(index), egui::Button::new("Fit to canvas"))
+                    .on_hover_text("Scale the image to fit the canvas and center it.")
+                    .clicked()
+                {
+                    if let Err(err) = refs.fit_to_canvas(index, canvas_w, canvas_h) {
+                        action = Some(ListAction::Error(err));
+                    }
+                }
                 if ui
                     .add_enabled(!refs.missing(index), egui::Button::new("Copy onto layer"))
                     .on_hover_text(

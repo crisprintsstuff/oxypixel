@@ -1454,12 +1454,11 @@ impl OxyApp {
                 });
                 ui.separator();
                 let mut size = self.editor.brush();
+                // The label sits on its own line. Beside the slider it made the row
+                // wider than the panel, which left an unpainted strip by the canvas.
+                ui.label("Brush");
                 if ui
-                    .add(
-                        egui::Slider::new(&mut size, 1..=oxypixel_core::MAX_BRUSH)
-                            .suffix(" px")
-                            .text("Brush"),
-                    )
+                    .add(egui::Slider::new(&mut size, 1..=oxypixel_core::MAX_BRUSH).suffix(" px"))
                     .on_hover_text("Brush size. [ and ] change it too.")
                     .changed()
                 {

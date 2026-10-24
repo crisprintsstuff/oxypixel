@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Drawing over a reference image works. A press on a reference used to grab it and move it, so the pencil could not trace it unless Lock was on. Now Ctrl+drag moves a reference, and without Ctrl every tool draws.
+- A new reference starts behind the art, so strokes are not hidden under it.
+- The empty black strip between the tools panel and the canvas is gone. The brush slider's label made that row wider than the panel; it now sits on its own line, and the tool hint no longer cuts off.
+
+### Added
+
+- Fit to canvas scales a reference to the document and centers it. The Scale slider now reaches 1/64, so a 2000-pixel image fits a 32-pixel canvas.
+- A reference's size can be typed in canvas pixels. Change the width or the height and the other follows, so the image keeps its shape.
+
 ## [0.6.0] - 2026-10-24
 
 ### Added
