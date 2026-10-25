@@ -12,7 +12,7 @@ Infrastructure, then small fixes that already have a place in the code.
 
 OX-002, OX-011, and OX-012 are done, so this list is empty.
 
-Suggested order if a human picks proposals: OX-P6 (the window has no launch check), OX-P22, OX-P24, OX-P25, then OX-P23. OX-P20 and OX-P21 are done. OX-P27 waits for a format decision.
+Suggested order if a human picks proposals: OX-P22, OX-P24, OX-P25, then OX-P23. OX-P20, OX-P21, and OX-P6 are done. OX-P27 waits for a format decision.
 
 ## Scorecard
 
@@ -40,7 +40,7 @@ In the 0.6.1 tree and covered by tests or by the release workflow.
 | Windows package | Per-user NSIS installer and portable exe. Static CRT. Unsigned | `installer/oxypixel.nsi`, `release.yml` |
 | Portable exe resources | The tagged Windows build embeds an icon and VERSIONINFO from `oxypixel.rc` when `rc.exe` is on `PATH`. A cross-build without `rc.exe`, `llvm-rc`, or `windres` does not | `build.rs`, [README.md](../README.md), [BUILD-WINDOWS.md](BUILD-WINDOWS.md) |
 | Linux package | `oxypixel-<version>-linux-x86_64.tar.gz` and `oxypixel-<version>-linux-x86_64.deb` | `scripts/package-linux.sh`, `scripts/package-deb.sh`, `release.yml` |
-| CI | One Windows job per pull request. `push` is `main` only; tags stay on `release.yml`. Docs-only changes skip the matrix. Ubuntu also runs `make check-windows`. `ubuntu-latest` and `windows-latest`, fmt, clippy `-D warnings`, tests, release build. Job timeout 15 minutes | `.github/workflows/ci.yml`, `Makefile` |
+| CI | One Windows job per pull request. `push` is `main` only; tags stay on `release.yml`. Docs-only changes skip the matrix. Ubuntu also runs `make check-windows`. `ubuntu-latest` and `windows-latest`, fmt, clippy `-D warnings`, tests, release build. Windows then launches the release exe and closes it. Job timeout 15 minutes | `.github/workflows/ci.yml`, `Makefile` |
 
 ### Partial
 
@@ -133,7 +133,9 @@ The document palette can be replaced from a file and written back out. GIMP `.gp
 
 ### OX-P6
 
-**A Windows launch smoke test in CI.** The Windows job builds the app but never starts it. A later task could launch that build, confirm the process starts, and close it without a modal dialog. It should not add a control socket.
+**A Windows launch smoke test in CI.** Status: done. Area: `.github/workflows/ci.yml`, `crates/oxypixel/src/native.rs`.
+
+After the release build, the `windows-latest` job starts `target\release\oxypixel.exe`, waits up to 45 seconds for a window titled `OxyPixel - …`, closes it the way a user would, and expects exit code 0 within 15 seconds. A process that exits during startup, never shows that window, or does not exit after the close fails the step with its stderr. `OXYPIXEL_NO_DIALOG=1` turns the startup error box into a stderr line, since nothing on the runner can click it. `APPDATA` points at a temp folder, so recent files and recovery copies stay off the runner profile. There is no control socket; the step uses the window title and an ordinary close.
 
 ### OX-P7
 

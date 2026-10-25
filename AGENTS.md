@@ -41,7 +41,7 @@ Both crates set `unsafe_code = "forbid"`.
 
 **Bad input returns `oxypixel_core::Error`.** A truncated file, a hostile size, a missing path, or a drag from `i32::MIN` must not panic. Caps in `limits.rs` are checked before large allocations. Do not add `unwrap`, `expect`, `panic!`, `todo!`, or `unreachable!` on a path that sees a file, a pointer coordinate, or a network response. Tests may unwrap. `Editor`'s default of a 64×64 canvas and the package-version parse may use `expect` because those inputs are literals in this repo.
 
-**Headless paths never open a modal dialog.** `cli::fail` prints to stderr and returns exit code 1. On Windows, `rfd` error boxes call `MessageBoxW` and block until a click. A headless runner never clicks, so `cargo test` waits until the job timeout. `native::alert` is only for when the editor window itself cannot start. Export commands, unit tests, and CI must not call it.
+**Headless paths never open a modal dialog.** `cli::fail` prints to stderr and returns exit code 1. On Windows, `rfd` error boxes call `MessageBoxW` and block until a click. A headless runner never clicks, so `cargo test` waits until the job timeout. `native::alert` is only for when the editor window itself cannot start. Export commands and unit tests must not call it. The CI launch check sets `OXYPIXEL_NO_DIALOG=1`, which keeps that error on stderr instead of a box.
 
 **Every bug fix gets a regression test.** Prefer `oxypixel-core` unit tests for editing and file behavior. CLI failures belong in `crates/oxypixel/tests/cli.rs`. The missing-file export test must keep a deadline and kill a hung process.
 

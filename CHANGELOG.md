@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A document opened by a relative path, such as `oxypixel art.oxypix` from a terminal, no longer loses its reference images after a Save As into another folder.
 - After undoing or redoing a swatch move or a ramp, the selected swatch and the ramp end stay on the color they marked instead of the slot.
 
+### Changed
+
+- The Windows CI job starts the release build, waits for its window, and closes it, so a build that cannot open its window fails the pull request. `OXYPIXEL_NO_DIALOG=1` keeps a startup error on stderr instead of in a message box.
+
 ## [0.6.1] - 2026-10-24
 
 ### Fixed
