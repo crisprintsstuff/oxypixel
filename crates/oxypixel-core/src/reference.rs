@@ -462,6 +462,14 @@ impl References {
         }
     }
 
+    /// The sidecar text for a document at `document`, even when the list is empty.
+    ///
+    /// Crash recovery stores this beside its copy, so an empty list is kept as
+    /// "no references" rather than as a missing file.
+    pub fn sidecar_bytes(&self, document: &Path) -> Result<Vec<u8>> {
+        self.encode(document_dir(document))
+    }
+
     /// Write `<document>.oxypix.refs`, or delete it when the list is empty.
     pub fn write_sidecar(&self, document: &Path) -> Result<()> {
         let path = sidecar_path(document);
@@ -511,7 +519,7 @@ impl References {
         let mut refs = Self::new();
         for mut record in records {
             if record.path.is_relative() {
-                record.path = dir.join(&record.path);
+                record.path = absolute_path(&dir.join(&record.path));
             }
             let mut image = match refs.decode_file(&record.path) {
                 Ok(image) => image,
@@ -576,7 +584,7 @@ impl References {
         self.next_id = self.next_id.saturating_add(1);
         Ok(Image {
             id,
-            path: path.to_path_buf(),
+            path: absolute_path(path),
             width,
             height,
             pixels,
@@ -604,10 +612,11 @@ impl References {
 
     /// An image inside `dir` is written relative to it, so the folder can move.
     fn encode(&self, dir: &Path) -> Result<Vec<u8>> {
+        let dir = absolute_path(dir);
         let mut out = Vec::new();
         out.extend(format!("{MAGIC}\n{}\n", self.items.len()).into_bytes());
         for image in &self.items {
-            let stored = image.path.strip_prefix(dir).unwrap_or(&image.path);
+            let stored = image.path.strip_prefix(&dir).unwrap_or(&image.path);
             let path = stored.to_str().ok_or(Error::BadReference)?.as_bytes();
             if path.is_empty() || path.len() > MAX_PATH_BYTES || path.contains(&b'\n') {
                 return Err(Error::BadReference);
@@ -682,9 +691,18 @@ pub fn sidecar_path(document: &Path) -> PathBuf {
     }
 }
 
+/// `path` from the current directory, so a document opened as `art.oxypix`
+/// still finds its images after a Save As or from the recovery folder.
+fn absolute_path(path: &Path) -> PathBuf {
+    std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
 /// The folder a sidecar's relative paths start from.
 fn document_dir(document: &Path) -> &Path {
-    document.parent().unwrap_or(Path::new(""))
+    match document.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    }
 }
 
 struct Record {
@@ -1001,6 +1019,53 @@ mod tests {
 
         assert!(refs.fit_to_canvas(9, 32, 32).is_err());
         assert!(refs.fit_to_canvas(0, 0, 32).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_relative_document_keeps_working_paths_in_another_folder() {
+        // `oxypixel trace.oxypix` from a terminal opens a relative path. The
+        // test runs in the crate directory, so build the fixture there.
+        let local = PathBuf::from(format!("refs-relative-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&local);
+        std::fs::create_dir_all(&local).unwrap();
+        let image = local.join("ref.png");
+        write_png(&image, 1, 1, &[Rgba::new(255, 0, 0, 255)]);
+        let doc_path = local.join("trace.oxypix");
+        let mut refs = References::new();
+        refs.add_file(&image).unwrap();
+        refs.write_sidecar(&doc_path).unwrap();
+        let loaded = References::read_sidecar(&doc_path).unwrap();
+        assert!(!loaded.missing(0));
+
+        // Save As into another folder, as crash recovery does.
+        let elsewhere = scratch("relative-elsewhere");
+        let copy = elsewhere.join("copy.oxypix");
+        loaded.write_sidecar(&copy).unwrap();
+        let moved = References::read_sidecar(&copy).unwrap();
+        let _ = std::fs::remove_dir_all(&local);
+        let _ = std::fs::remove_dir_all(&elsewhere);
+        assert_eq!(moved.len(), 1);
+        assert!(!moved.missing(0));
+    }
+
+    #[test]
+    fn sidecar_bytes_keep_an_empty_list_and_read_back() {
+        let dir = scratch("bytes");
+        let doc_path = dir.join("copy.oxypix");
+        let empty = References::new().sidecar_bytes(&doc_path).unwrap();
+        std::fs::write(sidecar_path(&doc_path), &empty).unwrap();
+        assert!(References::read_sidecar(&doc_path).unwrap().is_empty());
+
+        let mut refs = References::new();
+        refs.add_file(&red_png(&dir)).unwrap();
+        refs.set_opacity(0, 90).unwrap();
+        let bytes = refs.sidecar_bytes(&doc_path).unwrap();
+        std::fs::write(sidecar_path(&doc_path), &bytes).unwrap();
+        let loaded = References::read_sidecar(&doc_path).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded.opacity(0), 90);
+        assert!(!loaded.missing(0));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

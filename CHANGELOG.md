@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Crash recovery keeps reference images. Their placement is saved with each recovery copy, and moving a reference alone now triggers autosave. Restoring brings them back where they were, and the next Save writes them beside the document.
+- A document opened by a relative path, such as `oxypixel art.oxypix` from a terminal, no longer loses its reference images after a Save As into another folder.
+
 ## [0.6.1] - 2026-10-24
 
 ### Fixed

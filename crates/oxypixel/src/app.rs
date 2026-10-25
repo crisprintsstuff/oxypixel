@@ -124,6 +124,10 @@ pub struct OxyApp {
     recovery_suppress: bool,
     recovery_id: String,
     recovery_anchor_generation: u64,
+    /// Reference revision in the last recovery copy. A newer one counts as an edit.
+    recovery_anchor_refs: u64,
+    /// Reference revision in the copy being written.
+    recovery_pending_refs: u64,
     recovery_anchor_at: Option<Instant>,
     recovery_in_flight: bool,
     recovery: Option<recovery::RecoveryWriter>,
@@ -199,6 +203,8 @@ impl OxyApp {
             recovery_suppress: false,
             recovery_id: recovery::untitled_id(),
             recovery_anchor_generation,
+            recovery_anchor_refs: 0,
+            recovery_pending_refs: 0,
             recovery_anchor_at: None,
             recovery_in_flight: false,
             recovery,
@@ -398,9 +404,9 @@ impl eframe::App for OxyApp {
             .pending_recoveries
             .iter()
             .any(|entry| entry.id == self.recovery_id);
-        if self.recovery_suppress || (!self.editor.is_dirty() && !pending_current) {
+        if self.recovery_suppress || (!self.has_unsaved_changes() && !pending_current) {
             self.forget_recovery();
-        } else if self.editor.is_dirty() && self.autosave_enabled {
+        } else if self.has_unsaved_changes() && self.autosave_enabled {
             self.flush_recovery();
         }
         if let Some(writer) = self.recovery.as_mut() {
@@ -2688,6 +2694,7 @@ impl OxyApp {
             None => recovery::untitled_id(),
         };
         self.recovery_anchor_generation = self.editor.generation();
+        self.recovery_anchor_refs = self.references.revision();
         self.recovery_anchor_at = None;
         self.recovery_in_flight = false;
     }
@@ -2703,6 +2710,7 @@ impl OxyApp {
         }
         self.recovery_in_flight = false;
         self.recovery_anchor_generation = self.editor.generation();
+        self.recovery_anchor_refs = self.references.revision();
         self.recovery_anchor_at = None;
         self.pending_recoveries.retain(|entry| entry.id != id);
         if self.pending_recoveries.is_empty() && self.dialog == Some(DialogKind::Recovery) {
@@ -2761,6 +2769,7 @@ impl OxyApp {
                     self.recovery_in_flight = false;
                     if epoch == current_epoch {
                         self.recovery_anchor_generation = generation;
+                        self.recovery_anchor_refs = self.recovery_pending_refs;
                         self.recovery_anchor_at = Some(Instant::now());
                     }
                 }
@@ -2782,11 +2791,12 @@ impl OxyApp {
 
     fn consider_autosave(&mut self, ctx: &egui::Context) {
         self.poll_recovery();
-        let dirty = self.editor.is_dirty();
+        let dirty = self.has_unsaved_changes();
         let generation = self.editor.generation();
         if !dirty {
             self.recovery_anchor_at = None;
             self.recovery_anchor_generation = generation;
+            self.recovery_anchor_refs = self.references.revision();
             return;
         }
         if !self.autosave_enabled
@@ -2810,7 +2820,9 @@ impl OxyApp {
             .recovery_anchor_at
             .map(|start| start.elapsed())
             .unwrap_or_default();
-        let edits = generation.saturating_sub(self.recovery_anchor_generation);
+        let refs_changed = self.references.revision() != self.recovery_anchor_refs;
+        let edits =
+            generation.saturating_sub(self.recovery_anchor_generation) + u64::from(refs_changed);
         let busy = self.editor.gesture_active() || self.editor.coalesce_active();
         if recovery::should_write(recovery::AutosaveQuery {
             enabled: true,
@@ -2842,6 +2854,7 @@ impl OxyApp {
             name: self.document_name(),
             source: self.save_path.clone(),
             saved_unix: recovery::unix_now(),
+            refs: self.recovery_refs(&dir),
         };
         let document = self.editor.document().clone();
         let epoch = writer.epoch();
@@ -2856,6 +2869,7 @@ impl OxyApp {
             .is_ok()
         {
             self.recovery_in_flight = true;
+            self.recovery_pending_refs = self.references.revision();
         }
     }
 
@@ -2863,7 +2877,9 @@ impl OxyApp {
         let Some(dir) = recovery::directory() else {
             return;
         };
-        if self.editor.generation() == self.recovery_anchor_generation {
+        if self.editor.generation() == self.recovery_anchor_generation
+            && self.references.revision() == self.recovery_anchor_refs
+        {
             if let Some(path) = recovery::oxypix_path(&dir, &self.recovery_id) {
                 if path.is_file() {
                     return;
@@ -2878,6 +2894,7 @@ impl OxyApp {
             name: self.document_name(),
             source: self.save_path.clone(),
             saved_unix: recovery::unix_now(),
+            refs: self.recovery_refs(&dir),
         };
         if let Err(err) = recovery::store_document(&dir, &record, self.editor.document()) {
             self.note_err(format!("Could not write the recovery copy: {err}"));
@@ -2893,14 +2910,11 @@ impl OxyApp {
                 self.editor.replace_document(doc);
                 self.editor.mark_dirty();
                 self.save_path = entry.source.clone();
-                if let Some(path) = entry.source.clone() {
-                    self.load_reference_sidecar(&path);
-                } else {
-                    self.clear_references();
-                }
+                self.restore_recovery_references(&entry);
                 self.recovery_id = entry.id.clone();
                 self.recovery_suppress = false;
                 self.recovery_anchor_generation = self.editor.generation();
+                self.recovery_anchor_refs = self.references.revision();
                 self.recovery_anchor_at = None;
                 self.recovery_in_flight = false;
                 self.pending_recoveries.retain(|item| item.id != entry.id);
@@ -2915,6 +2929,34 @@ impl OxyApp {
                 }
             }
             Err(err) => self.dialog_error = Some(err.to_string()),
+        }
+    }
+
+    /// The reference list as recovery stores it beside `{id}.oxypix`.
+    fn recovery_refs(&self, dir: &Path) -> Vec<u8> {
+        recovery::oxypix_path(dir, &self.recovery_id)
+            .and_then(|copy| self.references.sidecar_bytes(&copy).ok())
+            .unwrap_or_default()
+    }
+
+    /// Prefer the references saved with the recovery copy. A copy from before
+    /// they were saved there falls back to the document's own sidecar.
+    fn restore_recovery_references(&mut self, entry: &recovery::RecoveryEntry) {
+        if oxypixel_core::sidecar_path(&entry.file).is_file() {
+            match References::read_sidecar(&entry.file) {
+                Ok(refs) => {
+                    self.references = refs;
+                    self.ref_textures.clear();
+                    // These may differ from the document's sidecar, so Save writes them.
+                    self.refs_saved = u64::MAX;
+                    return;
+                }
+                Err(err) => self.note_err(err),
+            }
+        }
+        match entry.source.clone() {
+            Some(path) => self.load_reference_sidecar(&path),
+            None => self.clear_references(),
         }
     }
 
