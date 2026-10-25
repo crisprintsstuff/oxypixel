@@ -12,7 +12,7 @@ Infrastructure, then small fixes that already have a place in the code.
 
 OX-002, OX-011, and OX-012 are done, so this list is empty.
 
-Suggested order if a human picks proposals: OX-P21 (a small follow-up to 0.6.0; OX-P20 is done), OX-P6 (the window has no launch check), OX-P22, OX-P24, OX-P25, then OX-P23. OX-P27 waits for a format decision.
+Suggested order if a human picks proposals: OX-P6 (the window has no launch check), OX-P22, OX-P24, OX-P25, then OX-P23. OX-P20 and OX-P21 are done. OX-P27 waits for a format decision.
 
 ## Scorecard
 
@@ -219,7 +219,9 @@ Each recovery copy gets a `{id}.oxypix.refs` beside it, written in the same back
 
 ### OX-P21
 
-**Keep the palette marks on the right swatch after undo.** After a swatch move or a ramp, undo and redo change the palette, but the selected swatch and the ramp end stay at their old indices. They are clamped, so nothing breaks, but they can point at a different color. A later task could remap or clear both marks when an undo or redo changes the palette. The same task can tighten two weak asserts in the P16 tests (`moving_a_swatch_is_one_undo…` and the `snaps_to_palette` check).
+**Keep the palette marks on the right swatch after undo.** Status: done. Area: `crates/oxypixel/src/app.rs`, `crates/oxypixel-core/src/editor.rs`.
+
+When an undo or redo changes the palette, the selected swatch and the ramp end follow their color: the same index if it still holds that color, otherwise the nearest index that does, the earlier one on a tie. A ramp end whose color is gone is cleared; a selected swatch whose color is gone stays where it was, clamped to the palette. `follow_palette_mark` is unit tested, and the P16 tests now assert that a swatch dropped on itself records no step and that Snap reports the nearest swatch.
 
 ### OX-P22
 

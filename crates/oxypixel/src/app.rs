@@ -486,10 +486,10 @@ impl OxyApp {
             Command::SaveAs => self.open_path_dialog(PathKind::Save),
             Command::Quit => self.request_quit(ctx),
             Command::Undo => {
-                self.editor.undo();
+                self.undo_step(false);
             }
             Command::Redo => {
-                self.editor.redo();
+                self.undo_step(true);
             }
             Command::SelectAll => self.editor.select_all(),
             Command::Deselect => self.editor.deselect(),
@@ -1267,11 +1267,11 @@ impl OxyApp {
                 });
                 ui.menu_button("Edit", |ui| {
                     if menu_item_enabled(ui, "Undo", "Ctrl+Z", self.editor.can_undo()) {
-                        self.editor.undo();
+                        self.undo_step(false);
                         ui.close_menu();
                     }
                     if menu_item_enabled(ui, "Redo", "Ctrl+Y", self.editor.can_redo()) {
-                        self.editor.redo();
+                        self.undo_step(true);
                         ui.close_menu();
                     }
                     if menu_item(ui, "Swap colors", "X") {
@@ -1430,7 +1430,7 @@ impl OxyApp {
                         .on_disabled_hover_text("Ctrl+Z")
                         .clicked()
                     {
-                        self.editor.undo();
+                        self.undo_step(false);
                     }
                     if ui
                         .add_enabled(self.editor.can_redo(), egui::Button::new("Redo"))
@@ -1438,7 +1438,7 @@ impl OxyApp {
                         .on_disabled_hover_text("Ctrl+Y")
                         .clicked()
                     {
-                        self.editor.redo();
+                        self.undo_step(true);
                     }
                 });
                 self.ensure_tool_icons(ui.ctx());
@@ -3072,6 +3072,28 @@ impl OxyApp {
         }
     }
 
+    /// Undo or redo, then keep the palette marks on the colors they pointed at.
+    fn undo_step(&mut self, redo: bool) {
+        let before = self.editor.document().palette().to_vec();
+        let changed = if redo {
+            self.editor.redo()
+        } else {
+            self.editor.undo()
+        };
+        if !changed {
+            return;
+        }
+        let after = self.editor.document().palette();
+        if after == before.as_slice() {
+            return;
+        }
+        self.swatch = follow_palette_mark(&before, after, self.swatch).unwrap_or(self.swatch);
+        self.ramp_end = self
+            .ramp_end
+            .and_then(|end| follow_palette_mark(&before, after, end));
+        self.clamp_palette_marks();
+    }
+
     fn clamp_palette_marks(&mut self) {
         let len = self.editor.document().palette().len();
         if len == 0 {
@@ -3087,6 +3109,23 @@ impl OxyApp {
             self.ramp_end = None;
         }
     }
+}
+
+/// Where the swatch at `index` in `before` sits in `after`, by color.
+///
+/// The same index wins when it still holds that color. Otherwise the nearest
+/// index with that color, the earlier one on a tie. `None` when the color is gone.
+fn follow_palette_mark(before: &[Rgba], after: &[Rgba], index: usize) -> Option<usize> {
+    let color = *before.get(index)?;
+    if after.get(index) == Some(&color) {
+        return Some(index);
+    }
+    after
+        .iter()
+        .enumerate()
+        .filter(|(_, swatch)| **swatch == color)
+        .min_by_key(|(at, _)| at.abs_diff(index))
+        .map(|(at, _)| at)
 }
 
 /// Drag payload for one palette swatch.
@@ -3263,6 +3302,30 @@ fn replace_palette_extension(path: &str, ext: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn palette_marks_follow_their_color_through_undo() {
+        let a = Rgba::new(10, 0, 0, 255);
+        let b = Rgba::new(0, 20, 0, 255);
+        let c = Rgba::new(0, 0, 30, 255);
+        let d = Rgba::new(40, 40, 40, 255);
+        // Undo of moving `a` from 0 to 3.
+        let moved = [b, c, d, a];
+        let back = [a, b, c, d];
+        assert_eq!(follow_palette_mark(&moved, &back, 3), Some(0));
+        assert_eq!(follow_palette_mark(&moved, &back, 0), Some(1));
+        // A color that is still at its index stays put.
+        assert_eq!(follow_palette_mark(&back, &[a, c, c, d], 3), Some(3));
+        // Undo of a ramp that replaced the span: a ramp color is gone.
+        let ramp = [a, Rgba::new(5, 10, 15, 255), d];
+        assert_eq!(follow_palette_mark(&ramp, &back, 1), None);
+        assert_eq!(follow_palette_mark(&ramp, &back, 2), Some(3));
+        // Duplicates: the nearest copy, the earlier one on a tie.
+        assert_eq!(follow_palette_mark(&[b, a, b], &[a, b, c, b], 0), Some(1));
+        assert_eq!(follow_palette_mark(&[c, a, c], &[c, a, a, c], 1), Some(1));
+        assert_eq!(follow_palette_mark(&[a], &[b, a, c, a], 0), Some(1));
+        assert_eq!(follow_palette_mark(&[a], &[b], 5), None);
+    }
 
     #[test]
     fn a_dropped_png_imports_and_a_jpeg_loads_a_reference() {

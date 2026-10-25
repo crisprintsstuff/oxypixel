@@ -2026,8 +2026,11 @@ mod tests {
             Rgba::new(40, 50, 60, 255),
         ];
         ed.set_palette(colors.clone()).unwrap();
+        // Dropping a swatch on itself records nothing: one undo removes the
+        // palette itself and leaves no step behind it.
         assert!(ed.move_palette_color(0, 0).is_ok());
         assert!(ed.undo());
+        assert!(!ed.can_undo());
         assert_ne!(ed.document().palette(), colors.as_slice());
         assert!(ed.redo());
         assert_eq!(ed.document().palette(), colors.as_slice());
@@ -2117,7 +2120,8 @@ mod tests {
         let chosen = Rgba::new(0, 200, 40, 255);
         ed.set_primary(chosen);
         ed.set_snap_to_palette(true);
-        assert!(!ed.snaps_to_palette() || ed.hover_color(false) == green);
+        assert!(ed.snaps_to_palette());
+        assert_eq!(ed.hover_color(false), green);
 
         ed.pointer_down(0, 0, MouseButton::Primary, false);
         ed.pointer_up(0, 0, false);
