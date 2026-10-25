@@ -101,7 +101,7 @@ Help, then Check for updates, downloads the tar.gz for an unpacked copy and the 
 These match the current editor. Planned work is listed in [docs/ROADMAP.md](docs/ROADMAP.md) and is not included here.
 
 - Pixel canvas with nearest-neighbor zoom on whole-pixel steps, pan, and an optional grid
-- Pencil, eraser, fill, eyedropper, line, rectangle, ellipse, and rectangular selection
+- Pencil, eraser, fill, eyedropper, line, rectangle, ellipse, and rectangular selection. Fill has a tolerance for near colors and a global mode that recolors every match on the layer
 - Move, nudge, flip, and rotate a selection (or the active cel when nothing is selected). A 90° turn swaps the sides and stays centered; pixels that do not fit are dropped. Copy publishes a straight-alpha image to the system clipboard and keeps an in-memory patch. Paste uses the system image, or that patch when the clipboard has no image
 - Canvas resize and crop
 - Horizontal and vertical mirror while drawing

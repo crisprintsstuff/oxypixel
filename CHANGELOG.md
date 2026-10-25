@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The fill tool has a Tolerance slider (0 to 255) that also takes near colors, and a Global fill option that recolors every matching pixel on the layer instead of one connected area. Both stay inside the selection, and each fill is one undo step.
+
 ### Fixed
 
 - Crash recovery keeps reference images. Their placement is saved with each recovery copy, and moving a reference alone now triggers autosave. Restoring brings them back where they were, and the next Save writes them beside the document.

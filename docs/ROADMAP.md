@@ -12,7 +12,7 @@ Infrastructure, then small fixes that already have a place in the code.
 
 OX-002, OX-011, and OX-012 are done, so this list is empty.
 
-Suggested order if a human picks proposals: OX-P22, OX-P24, OX-P25, then OX-P23. OX-P20, OX-P21, and OX-P6 are done. OX-P27 waits for a format decision.
+Suggested order if a human picks proposals: OX-P24, OX-P25, then OX-P23. OX-P20, OX-P21, OX-P6, and OX-P22 are done. OX-P27 waits for a format decision.
 
 ## Scorecard
 
@@ -22,7 +22,7 @@ In the 0.6.1 tree and covered by tests or by the release workflow.
 
 | Area | What exists | Where |
 | --- | --- | --- |
-| Tools | Pencil, eraser, fill, eyedropper, line, rectangle, ellipse, rectangular select. Brush 1–16. Filled or outline shapes. Optional one-pixel pixel-perfect pencil | `editor.rs`, `draw.rs` |
+| Tools | Pencil, eraser, fill, eyedropper, line, rectangle, ellipse, rectangular select. Brush 1–16. Filled or outline shapes. Optional one-pixel pixel-perfect pencil. Fill tolerance 0–255 and a global fill | `editor.rs`, `draw.rs` |
 | Selection | Drag to move, arrow nudge, flip, rotate, system-clipboard and in-memory copy and paste, clear, select all. The status line shows the selection size | `editor.rs`, `clipboard.rs`, `app.rs` |
 | Canvas | Resize and crop. Mirror horizontal and vertical while stamping. Optional wrap, and a 3×3 tiled view that export ignores | `document.rs`, `editor.rs`, `canvas.rs` |
 | Layers | Add, delete, duplicate, reorder, rename, visibility, opacity, merge down. At most 32 | `document.rs` |
@@ -227,7 +227,9 @@ When an undo or redo changes the palette, the selected swatch and the ramp end f
 
 ### OX-P22
 
-**Fill tolerance and a global fill.** The bucket fills only pixels that match exactly and touch the start pixel. A later task could add a tolerance (0 is today's behavior) and a Global option that recolors every matching pixel on the cel. Both respect the selection, wrap, and Snap, and each fill is one undo step. The matching rule belongs in `draw.rs` with tests.
+**Fill tolerance and a global fill.** Status: done. Area: `crates/oxypixel-core/src/draw.rs`, `crates/oxypixel-core/src/editor.rs`, `crates/oxypixel/src/app.rs`.
+
+With the fill tool, the tools panel shows Global fill and a Tolerance slider from 0 to 255. A pixel matches when each RGBA channel is within the tolerance of the clicked pixel, so 0 is the exact fill from before. Global recolors every match on the active cel instead of the connected area. Both stay inside the selection; wrap applies to a connected fill, and Snap picks the ink. Each fill is one undo step, and both settings are session state, not saved in the file. `fill_matches` and both modes are tested in `draw.rs`, and the undo step in `editor.rs`.
 
 ### OX-P23
 

@@ -84,6 +84,8 @@ pub struct Editor {
     pixel_perfect: bool,
     wrap: bool,
     snap_palette: bool,
+    fill_tolerance: u8,
+    fill_global: bool,
     /// Cel pixels from before the current pixel-perfect stroke.
     pencil_base: Option<Vec<Rgba>>,
     selection: Option<PixelRect>,
@@ -135,6 +137,8 @@ impl Editor {
             pixel_perfect: false,
             wrap: false,
             snap_palette: false,
+            fill_tolerance: 0,
+            fill_global: false,
             pencil_base: None,
             selection: None,
             clipboard: None,
@@ -236,6 +240,24 @@ impl Editor {
     }
 
     /// Pencil, fill, and shapes stamp the nearest palette color. Off until the user turns it on.
+    /// Largest per-channel difference the bucket still treats as the clicked color.
+    pub fn fill_tolerance(&self) -> u8 {
+        self.fill_tolerance
+    }
+
+    pub fn set_fill_tolerance(&mut self, tolerance: u8) {
+        self.fill_tolerance = tolerance;
+    }
+
+    /// The bucket recolors every matching pixel on the cel, not one connected area.
+    pub fn fills_globally(&self) -> bool {
+        self.fill_global
+    }
+
+    pub fn set_fill_global(&mut self, global: bool) {
+        self.fill_global = global;
+    }
+
     pub fn snaps_to_palette(&self) -> bool {
         self.snap_palette
     }
@@ -1338,7 +1360,7 @@ impl Editor {
             return;
         };
         let i = (y as u32 * width + x as u32) as usize;
-        if cel.get(i).copied() == Some(color) {
+        if self.fill_tolerance == 0 && cel.get(i).copied() == Some(color) {
             return;
         }
         let snapshot = self.snapshot();
@@ -1356,6 +1378,8 @@ impl Editor {
             FillLimits {
                 selection,
                 wrap: self.wrap,
+                tolerance: self.fill_tolerance,
+                global: self.fill_global,
             },
         ) {
             self.doc = snapshot.doc;
@@ -2014,6 +2038,40 @@ mod tests {
         assert_eq!(cel_pixel(&tile, 2, 0), ink);
         assert_eq!(cel_pixel(&tile, 3, 0), ink);
         assert_eq!(tile.document().width(), 4);
+    }
+
+    #[test]
+    fn bucket_tolerance_and_global_are_one_undo_step() {
+        let mut ed = Editor::new(3, 1).unwrap();
+        let base = Rgba::new(50, 50, 50, 255);
+        let near = Rgba::new(54, 50, 50, 255);
+        let wall = Rgba::new(250, 0, 0, 255);
+        ed.set_tool(Tool::Pencil);
+        for (x, color) in [(0, base), (1, wall), (2, near)] {
+            ed.set_primary(color);
+            ed.pointer_down(x, 0, MouseButton::Primary, false);
+            ed.pointer_up(x, 0, false);
+        }
+        let ink = Rgba::new(0, 0, 255, 255);
+        ed.set_primary(ink);
+        ed.set_tool(Tool::Bucket);
+        assert_eq!(ed.fill_tolerance(), 0);
+        assert!(!ed.fills_globally());
+
+        ed.set_fill_global(true);
+        ed.pointer_down(0, 0, MouseButton::Primary, false);
+        assert_eq!(cel_pixel(&ed, 0, 0), ink);
+        assert_eq!(cel_pixel(&ed, 2, 0), near);
+        assert!(ed.undo());
+
+        ed.set_fill_tolerance(4);
+        ed.pointer_down(0, 0, MouseButton::Primary, false);
+        assert_eq!(cel_pixel(&ed, 0, 0), ink);
+        assert_eq!(cel_pixel(&ed, 1, 0), wall);
+        assert_eq!(cel_pixel(&ed, 2, 0), ink);
+        assert!(ed.undo());
+        assert_eq!(cel_pixel(&ed, 0, 0), base);
+        assert_eq!(cel_pixel(&ed, 2, 0), near);
     }
 
     #[test]
