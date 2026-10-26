@@ -71,18 +71,18 @@ Help, then Check for updates, can download a newer release and restart into it a
 
 Each release publishes two Linux files.
 
-`oxypixel-<version>-linux-x86_64.tar.gz` holds the x86_64 `oxypixel` and `oxypack` executables, `LICENSE`, and `README.txt`. Unpack it and run the program from that directory. For 0.8.0:
+`oxypixel-<version>-linux-x86_64.tar.gz` holds the x86_64 `oxypixel` and `oxypack` executables, `LICENSE`, and `README.txt`. Unpack it and run the program from that directory. For 0.8.5:
 
 ```bash
-tar -xzf oxypixel-0.8.0-linux-x86_64.tar.gz
-cd oxypixel-0.8.0-linux-x86_64
+tar -xzf oxypixel-0.8.5-linux-x86_64.tar.gz
+cd oxypixel-0.8.5-linux-x86_64
 ./oxypixel
 ```
 
-`oxypixel-<version>-linux-x86_64.deb` installs `/usr/bin/oxypixel`, `/usr/bin/oxypack`, a desktop entry, a 32×32 icon, and the `.oxypix` mime type. For 0.8.0 the Debian package version is `0.8.0-1`:
+`oxypixel-<version>-linux-x86_64.deb` installs `/usr/bin/oxypixel`, `/usr/bin/oxypack`, a desktop entry, a 32×32 icon, and the `.oxypix` mime type. For 0.8.5 the Debian package version is `0.8.5-1`:
 
 ```bash
-sudo apt install ./oxypixel-0.8.0-linux-x86_64.deb
+sudo apt install ./oxypixel-0.8.5-linux-x86_64.deb
 sudo apt remove oxypixel
 ```
 
@@ -166,7 +166,7 @@ oxypack sprites/ hero.oxypix --trim --dedupe -o atlas.png
 
 Inputs are `.png`, `.bmp`, `.gif`, `.oxypix`, and Aseprite `.aseprite` / `.ase` files, or folders of them. An Aseprite file is drawn the way Aseprite flattens it for export: visible layers with their opacity, hidden and reference layers left out. Blend modes other than Normal are drawn as Normal and tilemap layers are skipped; `oxypack` says so on stderr when a file uses them. Aseprite tags are written to `meta.frameTags` with their direction and repeat count, numbered by the sprites' order in the JSON, so a tag still points at the right frames when several files share one atlas. `--padding N` (default 1) leaves clear pixels between sprites, `--max-width N` (default 2048) caps the width, `--trim` crops each sprite to its ink and records the offset, `--dedupe` stores repeated frames once, `--pot` rounds the size up to powers of two, `--packer maxrects` fills the gaps rows leave for a shorter atlas, and `--no-json` writes only the PNG. The command never opens a window, so it fits build scripts and CI. The Pack sprites window takes files and folders (from the system dialog or a typed path), shows the packed atlas, and saves the same PNG and JSON the command would. On Windows the installer puts `oxypack.exe` in `%LOCALAPPDATA%\OxyPixel`, and there is also a standalone `oxypack-<version>-windows-x86_64.exe` download; the Linux archive has `./oxypack` beside `./oxypixel`, and the `.deb` installs `/usr/bin/oxypack`. From source: `cargo build --release -p oxypack`.
 
-Tested on Linux: a tester ran the `oxypack` command from the 0.7.5 Linux build before 0.8.0 shipped. The `.aseprite` reading, frame tags, MaxRects, and the Pack sprites window are new in 0.8.0 and have not had an outside test yet; reports are welcome in an issue.
+Outside tests: a tester ran the `oxypack` command from the 0.7.5 Linux build. With 0.8.0, `.aseprite` files saved by Aseprite 1.13.18.6 packed to the same frames as Aseprite's own export. Reports on other files and versions are welcome in an issue.
 
 ## Build from source
 

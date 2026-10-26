@@ -1,6 +1,6 @@
 # Roadmap and scorecard
 
-Status date: 2026-10-26. Version in tree: 0.8.0 (`Cargo.toml`). GitHub issues: none open. This file is the work list for [AGENTS.md](../AGENTS.md).
+Status date: 2026-10-26. Version in tree: 0.8.5 (`Cargo.toml`). GitHub issues: none open. This file is the work list for [AGENTS.md](../AGENTS.md).
 
 Rows are taken from the code and the docs. **Proposal** means the item is a reasonable next step, not a commitment and not an open issue. Do not start a proposal unless a human asks for it.
 
@@ -18,7 +18,7 @@ Suggested order if a human picks proposals: OX-P20, OX-P21, OX-P6, OX-P22, OX-P2
 
 ### Done
 
-In the 0.8.0 tree and covered by tests or by the release workflow.
+In the 0.8.5 tree and covered by tests or by the release workflow.
 
 | Area | What exists | Where |
 | --- | --- | --- |
@@ -262,7 +262,7 @@ Export spritesheet takes Columns (0 is one row, as before), Padding (clear pixel
 
 **OxyPack, a companion sprite packer.** Status: done. Area: `crates/oxypack/`, `crates/oxypixel/src/packview.rs`.
 
-Done: the `oxypack` library and command described in the scorecard, and the editor's File, then Pack sprites… window, which calls the same `pack_files` and `write_atlas`. Tested in `crates/oxypack/src/pack.rs`, `aseprite.rs`, `files.rs`, `main.rs`, `tests/cli.rs`, and `crates/oxypixel/src/packview.rs`. It stays in this repository and uses only the core's public API. Releases ship `oxypack-<version>-windows-x86_64.exe` (listed in `SHA256SUMS-windows.txt`, not in the updater's `SHA256SUMS.txt`), `oxypack` in the Linux tar.gz, and `/usr/bin/oxypack` in the `.deb`. The Windows installer puts `oxypack.exe` beside `oxypixel.exe` without changing `PATH`. A tester ran the 0.7.5 `oxypack` command on Linux.
+Done: the `oxypack` library and command described in the scorecard, and the editor's File, then Pack sprites… window, which calls the same `pack_files` and `write_atlas`. Tested in `crates/oxypack/src/pack.rs`, `aseprite.rs`, `files.rs`, `main.rs`, `tests/cli.rs`, and `crates/oxypixel/src/packview.rs`. It stays in this repository and uses only the core's public API. Releases ship `oxypack-<version>-windows-x86_64.exe` (listed in `SHA256SUMS-windows.txt`, not in the updater's `SHA256SUMS.txt`), `oxypack` in the Linux tar.gz, and `/usr/bin/oxypack` in the `.deb`. The Windows installer puts `oxypack.exe` beside `oxypixel.exe` without changing `PATH`. A tester ran the 0.7.5 `oxypack` command on Linux. With 0.8.0, `.aseprite` files from Aseprite 1.13.18.6 packed to the same frames as Aseprite's own export.
 
 Still open, each needing a decision: true group blending and blend modes other than Normal for `.aseprite` files, tilemap layers, and tags for `.oxypix` files, which have no place to store them until `.oxypix` version 2 (OX-P27).
 
