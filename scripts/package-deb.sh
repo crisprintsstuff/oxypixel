@@ -20,9 +20,8 @@ fi
 target_dir="${CARGO_TARGET_DIR:-$root/target}"
 export CARGO_TARGET_DIR="$target_dir"
 
-bin="$target_dir/release/oxypixel"
-if [[ ! -x "$bin" ]]; then
-  cargo build --release -p oxypixel
+if [[ ! -x "$target_dir/release/oxypixel" || ! -x "$target_dir/release/oxypack" ]]; then
+  cargo build --release -p oxypixel -p oxypack
 fi
 
 if ! command -v dpkg-shlibdeps >/dev/null 2>&1; then
@@ -77,6 +76,7 @@ done
 listing=$(dpkg-deb -c "$out")
 for path in \
   ./usr/bin/oxypixel \
+  ./usr/bin/oxypack \
   ./usr/share/applications/oxypixel.desktop \
   ./usr/share/icons/hicolor/32x32/apps/oxypixel.png \
   ./usr/share/mime/packages/oxypixel.xml \
@@ -88,10 +88,12 @@ do
     exit 1
   fi
 done
-if ! printf '%s\n' "$listing" | grep -E '^-..x.* \./usr/bin/oxypixel$' >/dev/null; then
-  echo "/usr/bin/oxypixel is not marked executable" >&2
-  printf '%s\n' "$listing" >&2
-  exit 1
-fi
+for exe in oxypixel oxypack; do
+  if ! printf '%s\n' "$listing" | grep -E "^-..x.* \./usr/bin/${exe}$" >/dev/null; then
+    echo "/usr/bin/${exe} is not marked executable" >&2
+    printf '%s\n' "$listing" >&2
+    exit 1
+  fi
+done
 
 echo "Wrote ${out}"

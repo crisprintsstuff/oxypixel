@@ -26,7 +26,7 @@ jobs:
       - name: Test and build
         run: |
           cargo test --workspace
-          cargo build --release -p oxypixel
+          cargo build --release -p oxypixel -p oxypack
       - name: Install NSIS
         shell: pwsh
         run: |
@@ -52,6 +52,7 @@ jobs:
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item target/release/oxypixel.exe dist/oxypixel.exe
           Copy-Item target/release/oxypixel.exe "dist/oxypixel-$version-windows-x86_64.exe"
+          Copy-Item target/release/oxypack.exe "dist/oxypack-$version-windows-x86_64.exe"
           Copy-Item installer/oxypixel.ico dist/oxypixel.ico
           if (-not $env:MAKENSIS -or -not (Test-Path -LiteralPath $env:MAKENSIS)) {
             throw "MAKENSIS is not set to an existing makensis.exe"
@@ -67,7 +68,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "makensis exited with $LASTEXITCODE" }
           $files = @(
             "dist/oxypixel-$version-windows-x86_64.exe",
-            "dist/OxyPixel-$version-Setup.exe"
+            "dist/OxyPixel-$version-Setup.exe",
+            "dist/oxypack-$version-windows-x86_64.exe"
           )
           Get-FileHash $files -Algorithm SHA256 |
             ForEach-Object { "{0}  {1}" -f $_.Hash.ToLower(), (Split-Path $_.Path -Leaf) } |
@@ -75,6 +77,7 @@ jobs:
           Set-Content -Path dist/release-names.txt -Value @(
             "oxypixel-$version-windows-x86_64.exe",
             "OxyPixel-$version-Setup.exe",
+            "oxypack-$version-windows-x86_64.exe",
             "SHA256SUMS-windows.txt"
           )
       - uses: actions/upload-artifact@v4
@@ -83,6 +86,7 @@ jobs:
           path: |
             dist/oxypixel-*-windows-x86_64.exe
             dist/OxyPixel-*-Setup.exe
+            dist/oxypack-*-windows-x86_64.exe
             dist/SHA256SUMS-windows.txt
 
   linux:
@@ -135,6 +139,9 @@ jobs:
           test -f "dist/${setup}"
           test -f "dist/${linux}"
           test -f "dist/${deb}"
+          test -f "dist/oxypack-${version}-windows-x86_64.exe"
+          # SHA256SUMS.txt lists the editor's four packages only; the updater
+          # reads it. The oxypack exe is in SHA256SUMS-windows.txt.
           # The updater matches these basenames exactly. The first three stay
           # in the 0.3.0 order. The .deb is last. PackageKind looks up a full
           # name, so the extra line does not hide the tar.gz.
@@ -194,6 +201,7 @@ jobs:
             dist/OxyPixel-*-Setup.exe
             dist/oxypixel-*-linux-x86_64.tar.gz
             dist/oxypixel-*-linux-x86_64.deb
+            dist/oxypack-*-windows-x86_64.exe
             dist/SHA256SUMS-windows.txt
             dist/SHA256SUMS-linux.txt
             dist/SHA256SUMS.txt

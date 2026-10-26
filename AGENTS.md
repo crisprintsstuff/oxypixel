@@ -97,6 +97,7 @@ A release is a human decision. Agents do not bump the version, tag, or upload in
 | Files | `crates/oxypixel-core/src/io/` |
 | Window | `crates/oxypixel/src/app.rs`, `canvas.rs`, `theme.rs`, `toolicons.rs`, `shortcuts.rs`, `icon.rs` |
 | Platform | `crates/oxypixel/src/native.rs`, `recent.rs`, `cli.rs`, `update.rs`, `build.rs`, `crates/oxypixel/tests/` |
+| Packer | `crates/oxypack/` |
 | Release | `installer/`, `scripts/`, `.github/workflows/release.yml` |
 | Docs | `docs/`, `AGENTS.md`, `README.md`, `CONTRIBUTING.md` |
 

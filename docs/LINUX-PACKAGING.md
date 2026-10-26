@@ -1,6 +1,6 @@
 # Linux packaging
 
-A tagged release ships `oxypixel-<version>-linux-x86_64.tar.gz` (the x86_64 executable, `LICENSE`, and a short run note) and `oxypixel-<version>-linux-x86_64.deb`, built by [scripts/package-deb.sh](../scripts/package-deb.sh). The `.deb` version is the workspace package version plus Debian revision 1 (`<version>-1`). RPM, AppImage, and Flatpak are still only a plan.
+A tagged release ships `oxypixel-<version>-linux-x86_64.tar.gz` (the x86_64 `oxypixel` and `oxypack` executables, `LICENSE`, and a short run note) and `oxypixel-<version>-linux-x86_64.deb`, built by [scripts/package-deb.sh](../scripts/package-deb.sh). The `.deb` version is the workspace package version plus Debian revision 1 (`<version>-1`). RPM, AppImage, and Flatpak are still only a plan.
 
 ## Why cargo-deb
 
@@ -35,6 +35,7 @@ The `.deb` also depends on the libraries the binary links. On Ubuntu 24.04 that 
 | Path | Source |
 | --- | --- |
 | `/usr/bin/oxypixel` | `target/release/oxypixel` |
+| `/usr/bin/oxypack` | `target/release/oxypack` |
 | `/usr/share/applications/oxypixel.desktop` | `docs/linux/oxypixel.desktop` |
 | `/usr/share/icons/hicolor/32x32/apps/oxypixel.png` | `docs/linux/oxypixel.png`, the 32×32 image from `installer/oxypixel.ico` |
 | `/usr/share/mime/packages/oxypixel.xml` | `docs/linux/oxypixel-mime.xml` (`application/x-oxypix`, suffix `.oxypix`) |
