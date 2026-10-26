@@ -2,11 +2,12 @@ use crate::document::Document;
 use crate::draw::PixelRect;
 use crate::limits::{MAX_UNDO, MAX_UNDO_BYTES};
 
-/// Document plus the selection rectangle, so undo puts the marquee back too.
+/// Document plus the selection, so undo puts the marquee back too.
 #[derive(Clone, Debug)]
 pub(crate) struct Snapshot {
     pub doc: Document,
     pub selection: Option<PixelRect>,
+    pub selection_mask: Option<Vec<bool>>,
 }
 
 #[derive(Debug, Default)]
@@ -60,5 +61,8 @@ fn trim(stack: &mut Vec<Snapshot>) {
 }
 
 fn byte_size(stack: &[Snapshot]) -> usize {
-    stack.iter().map(|snap| snap.doc.pixel_bytes()).sum()
+    stack
+        .iter()
+        .map(|snap| snap.doc.pixel_bytes() + snap.selection_mask.as_ref().map_or(0, Vec::len))
+        .sum()
 }

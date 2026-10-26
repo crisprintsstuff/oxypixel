@@ -163,6 +163,15 @@ pub fn rgba(tool: Tool) -> Vec<u8> {
             pix.fill_rect(2, 12, 2, 2, TEAL);
             pix.fill_rect(12, 12, 2, 2, TEAL);
         }
+        Tool::Wand => {
+            pix.line(2, 13, 9, 6, PAPER);
+            pix.line(3, 13, 9, 7, AMBER);
+            pix.put(11, 4, TEAL);
+            pix.line(11, 1, 11, 3, TEAL);
+            pix.line(11, 5, 11, 7, TEAL);
+            pix.line(8, 4, 10, 4, TEAL);
+            pix.line(12, 4, 14, 4, TEAL);
+        }
     }
     pix.px.to_vec()
 }
@@ -182,6 +191,7 @@ mod tests {
             Tool::Rectangle,
             Tool::Ellipse,
             Tool::Select,
+            Tool::Wand,
         ] {
             let px = rgba(tool);
             assert_eq!(px.len(), SIZE * SIZE * 4);

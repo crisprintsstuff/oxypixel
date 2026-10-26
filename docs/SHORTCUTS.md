@@ -12,6 +12,7 @@ Letter shortcuts are ignored while a text field is focused. Escape leaves the te
 | R | Rectangle |
 | O | Ellipse |
 | M | Rectangular selection |
+| W | Magic wand: select the area the fill tool would reach |
 | X | Swap colors |
 | [ ] | Brush size |
 | Ctrl+Z | Undo |
@@ -45,7 +46,8 @@ Letter shortcuts are ignored while a text field is focused. Escape leaves the te
 | Comma, period | Previous or next frame |
 | Space+drag, middle-drag | Pan |
 | Wheel | Zoom toward the pointer, one whole-pixel step |
-| Alt+click | Pick a color without changing tools |
+| Alt+click | Pick a color without changing tools. With select or the wand, cut the new area out of the selection |
+| Shift+drag, Shift+click | With select or the wand, add the new area to the selection |
 | Ctrl+drag | Move the reference image under the pointer. Without Ctrl, tools draw over it |
 | Shift while drawing a line or shape | 45-degree lines, square rectangles and ellipses |
 | Right-drag | Use the secondary color |

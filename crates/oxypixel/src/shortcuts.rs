@@ -212,6 +212,7 @@ pub fn command_from(modifiers: Modifiers, key: Key) -> Option<Command> {
         (false, false, Key::R) => Some(Command::Tool(Tool::Rectangle)),
         (false, false, Key::O) => Some(Command::Tool(Tool::Ellipse)),
         (false, false, Key::M) => Some(Command::Tool(Tool::Select)),
+        (false, false, Key::W) => Some(Command::Tool(Tool::Wand)),
         (false, false, Key::X) => Some(Command::SwapColors),
         (false, false, Key::P) => Some(Command::TogglePixelPerfect),
         (false, false, Key::D) => Some(Command::ToggleShade),

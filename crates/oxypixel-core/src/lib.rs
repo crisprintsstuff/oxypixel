@@ -16,6 +16,7 @@ mod history;
 mod io;
 mod limits;
 mod reference;
+mod selection;
 
 pub use animation::advance;
 pub use color::{source_over, Rgba};
@@ -41,3 +42,4 @@ pub use limits::{
 pub use reference::{
     sidecar_path, References, MAX_REFERENCES, MAX_REFERENCE_SCALE, MIN_REFERENCE_SCALE,
 };
+pub use selection::{OutlineEdge, SelectMode};

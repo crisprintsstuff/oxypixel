@@ -93,7 +93,7 @@ A release is a human decision. Agents do not bump the version, tag, or upload in
 | Area | Paths |
 | --- | --- |
 | Document | `crates/oxypixel-core/src/document.rs`, `history.rs`, `limits.rs`, `error.rs`, `color.rs`, `animation.rs` |
-| Tools | `crates/oxypixel-core/src/editor.rs`, `draw.rs` |
+| Tools | `crates/oxypixel-core/src/editor.rs`, `draw.rs`, `selection.rs` |
 | Files | `crates/oxypixel-core/src/io/` |
 | Window | `crates/oxypixel/src/app.rs`, `canvas.rs`, `theme.rs`, `toolicons.rs`, `shortcuts.rs`, `icon.rs` |
 | Platform | `crates/oxypixel/src/native.rs`, `recent.rs`, `cli.rs`, `update.rs`, `build.rs`, `crates/oxypixel/tests/` |

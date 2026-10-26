@@ -133,7 +133,8 @@ The maintainer develops OxyPixel with AI coding agents. The written rules for th
 | Keys | Action |
 | --- | --- |
 | B, E, G, I | Pencil, eraser, fill, eyedropper |
-| L, R, O, M | Line, rectangle, ellipse, select |
+| L, R, O, M, W | Line, rectangle, ellipse, select, magic wand |
+| Shift / Alt with M or W | Add to / cut from the selection |
 | Ctrl+Z / Ctrl+Y | Undo / redo |
 | Ctrl+C / Ctrl+V | Copy / paste the selection image |
 | Arrow keys | Nudge the selection |

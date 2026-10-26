@@ -4,7 +4,9 @@ use eframe::egui::{
     self, Color32, Painter, PointerButton, Pos2, Rect, Sense, Stroke, StrokeKind, TextureHandle,
     TextureOptions, Vec2,
 };
-use oxypixel_core::{source_over, Editor, MouseButton, References, Rgba, Tool};
+use oxypixel_core::{
+    source_over, Editor, MouseButton, OutlineEdge, PixelRect, References, Rgba, SelectMode, Tool,
+};
 
 use crate::cache::FrameComposites;
 use crate::refsview::{self, RefTextures};
@@ -297,22 +299,14 @@ pub fn show_canvas(
     refsview::paint_overlays(&painter, refs, ref_textures, origin, view.zoom, false);
     refsview::paint_active_outline(&painter, refs, origin, view.zoom);
     draw_grid(&painter, view, origin, rect, width, height);
-    if let Some(sel) = editor.selection_preview() {
-        let r = Rect::from_min_max(
-            origin + Vec2::new(sel.x as f32 * view.zoom, sel.y as f32 * view.zoom),
-            origin
-                + Vec2::new(
-                    (sel.x + sel.width as i32) as f32 * view.zoom,
-                    (sel.y + sel.height as i32) as f32 * view.zoom,
-                ),
-        );
-        painter.rect_stroke(
-            r,
-            0.0,
-            Stroke::new(1.0_f32, theme::INK),
-            StrokeKind::Outside,
-        );
-        painter.rect_stroke(r, 0.0, Stroke::new(1.0_f32, AMBER), StrokeKind::Inside);
+    let drag = editor.marquee_drag();
+    // A plain marquee drag replaces the selection, so only the drag is drawn.
+    // Shift and Alt drags show the selection they add to or cut from as well.
+    if !matches!(drag, Some((_, SelectMode::Replace))) {
+        paint_outline(&painter, editor.selection_outline(), origin, view.zoom);
+    }
+    if let Some((sel, _)) = drag {
+        paint_marquee(&painter, sel, origin, view.zoom);
     }
 
     let raw_hover = response
@@ -329,7 +323,7 @@ pub fn show_canvas(
     });
     if response.hovered() {
         let space = ui.input(|i| i.key_down(egui::Key::Space));
-        let picking = ui.input(|i| i.modifiers.alt) || editor.tool() == Tool::Eyedropper;
+        let picking = picks_color(editor.tool(), ui.input(|i| i.modifiers.alt));
         let ctrl = ui.input(|i| i.modifiers.command);
         let over_ref = grabs_reference(ctrl, picking)
             && response.hover_pos().is_some_and(|pos| {
@@ -389,7 +383,7 @@ fn hover_rect(tool: Tool, brush: u32, x: i32, y: i32, origin: Pos2, zoom: f32) -
             let half = (size / 2) as i32;
             (x - half, y - half, size)
         }
-        Tool::Bucket | Tool::Eyedropper | Tool::Select => (x, y, 1),
+        Tool::Bucket | Tool::Eyedropper | Tool::Select | Tool::Wand => (x, y, 1),
     };
     Some(Rect::from_min_size(
         origin + Vec2::new(left as f32 * zoom, top as f32 * zoom),
@@ -468,7 +462,8 @@ fn handle_pointer(
     let pointer_pos = response.interact_pointer_pos().or(response.hover_pos());
     let primary_down = ui.input(|i| i.pointer.button_down(PointerButton::Primary));
     let primary_pressed = ui.input(|i| i.pointer.button_pressed(PointerButton::Primary));
-    let picking = alt || editor.tool() == Tool::Eyedropper;
+    let picking = picks_color(editor.tool(), alt);
+    editor.set_select_mode(select_mode(shift, alt));
     if let Some(index) = view.moving_ref {
         if primary_down {
             if let Some(pos) = pointer_pos {
@@ -495,7 +490,6 @@ fn handle_pointer(
     if response.drag_started() {
         if let Some(pos) = response.interact_pointer_pos() {
             let (x, y) = at(pos);
-            let picking = alt || editor.tool() == Tool::Eyedropper;
             if picking {
                 sample_with_references(editor, refs, x, y, button);
                 view.sampling = true;
@@ -513,7 +507,7 @@ fn handle_pointer(
     } else if response.dragged() {
         if let Some(pos) = response.interact_pointer_pos() {
             let (x, y) = at(pos);
-            if view.sampling || alt {
+            if view.sampling || picking {
                 sample_with_references(editor, refs, x, y, button);
             } else if let Some(index) = view.moving_ref {
                 let (dx, dy) = doc_at(pos);
@@ -544,7 +538,6 @@ fn handle_pointer(
             } else {
                 MouseButton::Primary
             };
-            let picking = alt || editor.tool() == Tool::Eyedropper;
             if picking {
                 sample_with_references(editor, refs, x, y, button);
             } else if let Some(index) = refs
@@ -556,6 +549,54 @@ fn handle_pointer(
                 editor.pointer_down(x, y, button, shift);
                 editor.pointer_up(x, y, shift);
             }
+        }
+    }
+}
+
+/// Whether a press picks a color. Alt picks with every tool except the two
+/// selection tools, where it subtracts from the selection instead.
+fn picks_color(tool: Tool, alt: bool) -> bool {
+    tool == Tool::Eyedropper || (alt && !matches!(tool, Tool::Select | Tool::Wand))
+}
+
+/// Shift adds to the selection and Alt cuts from it. Alt wins when both are held.
+fn select_mode(shift: bool, alt: bool) -> SelectMode {
+    if alt {
+        SelectMode::Subtract
+    } else if shift {
+        SelectMode::Add
+    } else {
+        SelectMode::Replace
+    }
+}
+
+fn paint_marquee(painter: &Painter, sel: PixelRect, origin: Pos2, zoom: f32) {
+    let r = Rect::from_min_max(
+        origin + Vec2::new(sel.x as f32 * zoom, sel.y as f32 * zoom),
+        origin
+            + Vec2::new(
+                (sel.x + sel.width as i32) as f32 * zoom,
+                (sel.y + sel.height as i32) as f32 * zoom,
+            ),
+    );
+    painter.rect_stroke(
+        r,
+        0.0,
+        Stroke::new(1.0_f32, theme::INK),
+        StrokeKind::Outside,
+    );
+    painter.rect_stroke(r, 0.0, Stroke::new(1.0_f32, AMBER), StrokeKind::Inside);
+}
+
+/// The selection border: a dark line under an amber one, so it shows on light and dark art.
+fn paint_outline(painter: &Painter, edges: &[OutlineEdge], origin: Pos2, zoom: f32) {
+    let at = |x: i32, y: i32| origin + Vec2::new(x as f32 * zoom, y as f32 * zoom);
+    for (width, color) in [(3.0_f32, theme::INK), (1.0, AMBER)] {
+        for edge in edges {
+            painter.line_segment(
+                [at(edge.x0, edge.y0), at(edge.x1, edge.y1)],
+                Stroke::new(width, color),
+            );
         }
     }
 }
@@ -1004,7 +1045,7 @@ fn hover_paint(tool: Tool, color: Rgba) -> HoverPaint {
                 stroke,
             }
         }
-        Tool::Bucket | Tool::Eyedropper | Tool::Select => HoverPaint {
+        Tool::Bucket | Tool::Eyedropper | Tool::Select | Tool::Wand => HoverPaint {
             fill: None,
             stroke: theme::TEAL,
         },
@@ -1034,6 +1075,19 @@ mod tests {
         assert!(grabs_reference(true, false));
         assert!(!grabs_reference(true, true));
         assert!(!grabs_reference(false, true));
+    }
+
+    #[test]
+    fn alt_subtracts_with_the_selection_tools_and_picks_with_the_rest() {
+        assert!(picks_color(Tool::Pencil, true));
+        assert!(picks_color(Tool::Eyedropper, false));
+        assert!(!picks_color(Tool::Pencil, false));
+        assert!(!picks_color(Tool::Select, true));
+        assert!(!picks_color(Tool::Wand, true));
+        assert_eq!(select_mode(false, false), SelectMode::Replace);
+        assert_eq!(select_mode(true, false), SelectMode::Add);
+        assert_eq!(select_mode(false, true), SelectMode::Subtract);
+        assert_eq!(select_mode(true, true), SelectMode::Subtract);
     }
 
     #[test]

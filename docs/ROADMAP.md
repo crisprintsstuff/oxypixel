@@ -12,7 +12,7 @@ Infrastructure, then small fixes that already have a place in the code.
 
 OX-002, OX-011, and OX-012 are done, so this list is empty.
 
-Suggested order if a human picks proposals: OX-P23. OX-P20, OX-P21, OX-P6, OX-P22, OX-P24, and OX-P25 are done. OX-P27 waits for a format decision.
+Suggested order if a human picks proposals: OX-P20, OX-P21, OX-P6, OX-P22, OX-P24, OX-P25, and OX-P23 are done. OX-P27 waits for a format decision.
 
 ## Scorecard
 
@@ -23,7 +23,7 @@ In the 0.6.1 tree and covered by tests or by the release workflow.
 | Area | What exists | Where |
 | --- | --- | --- |
 | Tools | Pencil, eraser, fill, eyedropper, line, rectangle, ellipse, rectangular select. Brush 1–16. Filled or outline shapes. Optional one-pixel pixel-perfect pencil. Fill tolerance 0–255 and a global fill. Shading along the palette (D) | `editor.rs`, `draw.rs` |
-| Selection | Drag to move, arrow nudge, flip, rotate, system-clipboard and in-memory copy and paste, clear, select all. The status line shows the selection size | `editor.rs`, `clipboard.rs`, `app.rs` |
+| Selection | Rectangle and magic wand, Shift to add and Alt to cut out, so a selection can be any shape. Drag to move, arrow nudge, flip, rotate, system-clipboard and in-memory copy and paste, clear, select all. The status line shows the selection size | `editor.rs`, `selection.rs`, `clipboard.rs`, `app.rs`, `canvas.rs` |
 | Canvas | Resize and crop. Mirror horizontal and vertical while stamping. Optional wrap, and a 3×3 tiled view that export ignores | `document.rs`, `editor.rs`, `canvas.rs` |
 | Layers | Add, delete, duplicate, reorder, rename, visibility, opacity, merge down. At most 32 | `document.rs` |
 | Frames | Add, duplicate, duration 20–10000 ms on the slider, playback clock, thumbnails, onion skin for earlier and later frames | `animation.rs`, `canvas.rs`, `framestrip.rs` |
@@ -233,7 +233,9 @@ With the fill tool, the tools panel shows Global fill and a Tolerance slider fro
 
 ### OX-P23
 
-**Magic wand, and selections that are not rectangles.** Select is a rectangle. A later task could store the selection as a mask in `oxypixel-core`, add a wand that picks touching pixels of one color (with the P22 tolerance), and let Shift add and Alt subtract. Move, nudge, flip, rotate, copy, clear, and the clip for stamps and fill then use the mask. The marquee follows the mask edge. Undo keeps storing the selection. This touches the most code of these proposals and should land before any lasso.
+**Magic wand, and selections that are not rectangles.** Status: done. Area: `crates/oxypixel-core/src/selection.rs`, `crates/oxypixel-core/src/editor.rs`, `crates/oxypixel-core/src/draw.rs`, `crates/oxypixel/src/canvas.rs`, `crates/oxypixel/src/app.rs`.
+
+The selection is its bounding rectangle plus an optional mask, one flag per pixel of that rectangle; a marquee and Select All store no mask. `Editor::set_selection` is the only place it changes, and it trims the mask to what it selects, drops a mask that fills its rectangle, and keeps the outline edges so the canvas does not trace them every frame. The wand (W) selects what `fill_region` reaches from the clicked pixel on the active cel, with the fill tool's Tolerance, Global, and wrap; the bucket fills the same region. Shift adds a marquee or wand area and Alt cuts it out (Alt no longer picks a color with these two tools); combining works on the canvas, so the parts of a selection hanging off it are dropped. Moving, nudging, copying, and clearing touch only selected pixels, and a move or paste leaves the unselected pixels of the rectangle as they were. Flips and turns turn the mask with the pixels. Undo snapshots carry the mask, and a selection change by itself is still not an undo step. The in-memory clipboard keeps the mask; the system clipboard gets the rectangle with clear pixels outside it. The selection stays session state, not saved in the file. The mask helpers are tested in `selection.rs`, the wand, Shift/Alt, masked move, clear, clip, paste, and flip in `editor.rs`, and the modifier mapping in `canvas.rs`. A lasso can build on the same mask.
 
 ### OX-P24
 

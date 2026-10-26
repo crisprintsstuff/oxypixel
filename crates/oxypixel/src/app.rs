@@ -1465,6 +1465,7 @@ impl OxyApp {
                     (Tool::Rectangle, "R"),
                     (Tool::Ellipse, "O"),
                     (Tool::Select, "M"),
+                    (Tool::Wand, "W"),
                 ];
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
@@ -1493,14 +1494,14 @@ impl OxyApp {
                 if fill.changed() {
                     self.editor.set_shape_filled(filled);
                 }
-                let bucket = self.editor.tool() == Tool::Bucket;
+                let bucket = matches!(self.editor.tool(), Tool::Bucket | Tool::Wand);
                 let mut global = self.editor.fills_globally();
                 if ui
                     .add_enabled(bucket, egui::Checkbox::new(&mut global, "Global fill"))
                     .on_hover_text(
                         "Fill every matching pixel on this layer, not only the connected area.",
                     )
-                    .on_disabled_hover_text("Switch to fill (G) to use this.")
+                    .on_disabled_hover_text("Switch to fill (G) or the wand (W) to use this.")
                     .changed()
                 {
                     self.editor.set_fill_global(global);
@@ -1512,7 +1513,7 @@ impl OxyApp {
                     .on_hover_text(
                         "How far each color channel may differ from the clicked pixel. 0 fills one exact color.",
                     )
-                    .on_disabled_hover_text("Switch to fill (G) to use this.")
+                    .on_disabled_hover_text("Switch to fill (G) or the wand (W) to use this.")
                     .changed()
                 {
                     self.editor.set_fill_tolerance(tolerance);
@@ -1586,6 +1587,7 @@ impl OxyApp {
             Tool::Rectangle,
             Tool::Ellipse,
             Tool::Select,
+            Tool::Wand,
         ];
         let icons = tools
             .into_iter()
@@ -3258,7 +3260,8 @@ fn tool_hint(tool: Tool) -> &'static str {
         Tool::Line => "Drag a straight line. Hold Shift for 45 degrees.",
         Tool::Rectangle => "Drag an outline. Hold Shift for a square.",
         Tool::Ellipse => "Drag an outline. Hold Shift for a circle.",
-        Tool::Select => "Drag a rectangle. Drag inside it to move those pixels. Arrows nudge.",
+        Tool::Select => "Drag a rectangle. Drag inside it to move those pixels. Shift adds, Alt cuts out. Arrows nudge.",
+        Tool::Wand => "Click to select the area fill would reach, with its Tolerance and Global. Shift adds, Alt cuts out.",
     }
 }
 
@@ -3272,6 +3275,7 @@ fn tool_name(tool: Tool) -> &'static str {
         Tool::Rectangle => "Rectangle",
         Tool::Ellipse => "Ellipse",
         Tool::Select => "Select",
+        Tool::Wand => "Wand",
     }
 }
 
