@@ -239,7 +239,6 @@ impl Editor {
         self.wrap = enabled;
     }
 
-    /// Pencil, fill, and shapes stamp the nearest palette color. Off until the user turns it on.
     /// Largest per-channel difference the bucket still treats as the clicked color.
     pub fn fill_tolerance(&self) -> u8 {
         self.fill_tolerance
@@ -258,6 +257,7 @@ impl Editor {
         self.fill_global = global;
     }
 
+    /// Pencil, fill, and shapes stamp the nearest palette color. Off until the user turns it on.
     pub fn snaps_to_palette(&self) -> bool {
         self.snap_palette
     }
