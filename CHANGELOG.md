@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-10-26
+
 ### Added
 
 - Animation tags. Tags… under the frame strip names ranges of frames, with a direction (forward, reverse, ping-pong, or ping-pong reverse) and a repeat count; tagged frames get a mark on the strip. Each change is one undo step, and duplicating or deleting frames moves the tags with them. `export-sheet --json` and OxyPack write them to `meta.frameTags`.
