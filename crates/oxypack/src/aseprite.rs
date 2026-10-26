@@ -53,6 +53,18 @@ pub enum Direction {
     PingPongReverse,
 }
 
+impl Direction {
+    /// The word Aseprite writes in `frameTags`.
+    pub fn json_name(self) -> &'static str {
+        match self {
+            Self::Forward => "forward",
+            Self::Reverse => "reverse",
+            Self::PingPong => "pingpong",
+            Self::PingPongReverse => "pingpong_reverse",
+        }
+    }
+}
+
 /// A named frame range.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tag {

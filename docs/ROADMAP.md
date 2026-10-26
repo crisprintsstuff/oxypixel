@@ -264,7 +264,6 @@ Export spritesheet takes Columns (0 is one row, as before), Padding (clear pixel
 
 Done: the `oxypack` command-line tool described in the scorecard, tested in `crates/oxypack/src/pack.rs`, `src/main.rs`, and `tests/cli.rs`. It stays in this repository and uses only the core's public API. Releases ship `oxypack-<version>-windows-x86_64.exe` (listed in `SHA256SUMS-windows.txt`, not in the updater's `SHA256SUMS.txt`), `oxypack` in the Linux tar.gz, and `/usr/bin/oxypack` in the `.deb`. The Windows installer does not include it. Each of these needs a human decision before work starts:
 
-- **Animation tags.** Write `frameTags` in `meta` from tags in `.aseprite` files, or from a sidecar for `.oxypix`.
 - **A window.** A small egui front end to pick inputs, preview the atlas, and save. It could share widgets with the editor.
 
 ## Human only

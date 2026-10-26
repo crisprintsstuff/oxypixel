@@ -14,8 +14,8 @@ mod aseprite;
 mod pack;
 
 use pack::{
-    atlas_json, atlas_png_bytes, pack_sprites, sprites_from_aseprite, sprites_from_document,
-    unique_names, PackOptions, Packer, Sprite,
+    atlas_json, atlas_png_bytes, frame_tags, pack_sprites, sprites_from_aseprite,
+    sprites_from_document, unique_names, PackOptions, Packer, Sprite,
 };
 
 const HELP: &str = concat!(
@@ -151,9 +151,9 @@ fn collect(inputs: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
     Ok(files)
 }
 
-/// The sprites in one file. Notes about what could not be drawn exactly go
-/// to stderr.
-fn load(path: &Path) -> Result<Vec<Sprite>, String> {
+/// The sprites in one file and its animation tags, counted from its first
+/// frame. Notes about what could not be drawn exactly go to stderr.
+fn load(path: &Path) -> Result<(Vec<Sprite>, Vec<aseprite::Tag>), String> {
     let stem = path
         .file_stem()
         .map(|stem| stem.to_string_lossy().into_owned())
@@ -169,7 +169,7 @@ fn load(path: &Path) -> Result<Vec<Sprite>, String> {
         for note in &file.notes {
             eprintln!("oxypack: {}: {note}", path.display());
         }
-        return Ok(sprites_from_aseprite(&file, &stem));
+        return Ok((sprites_from_aseprite(&file, &stem), file.tags));
     }
     let is_doc = ext == "oxypix";
     let doc = if is_doc {
@@ -178,7 +178,9 @@ fn load(path: &Path) -> Result<Vec<Sprite>, String> {
         import_image(path)
     }
     .map_err(|err| format!("{}: {err}", path.display()))?;
-    sprites_from_document(&doc, &stem).map_err(|err| format!("{}: {err}", path.display()))
+    let sprites =
+        sprites_from_document(&doc, &stem).map_err(|err| format!("{}: {err}", path.display()))?;
+    Ok((sprites, Vec::new()))
 }
 
 /// Read a file no larger than the core's file cap.
@@ -194,8 +196,11 @@ fn read_limited(path: &Path) -> Result<Vec<u8>, String> {
 fn run(args: &Args) -> Result<String, String> {
     let files = collect(&args.inputs)?;
     let mut sprites = Vec::new();
+    let mut tags = Vec::new();
     for file in &files {
-        sprites.extend(load(file)?);
+        let (more, file_tags) = load(file)?;
+        tags.extend(frame_tags(&file_tags, sprites.len()));
+        sprites.extend(more);
     }
     unique_names(&mut sprites);
     let atlas = pack_sprites(&sprites, args.options).map_err(|err| err.to_string())?;
@@ -208,7 +213,7 @@ fn run(args: &Args) -> Result<String, String> {
     std::fs::write(&args.output, png).map_err(|err| format!("{}: {err}", args.output.display()))?;
     if args.json {
         let path = args.output.with_extension("json");
-        std::fs::write(&path, atlas_json(&atlas, &image))
+        std::fs::write(&path, atlas_json(&atlas, &image, &tags))
             .map_err(|err| format!("{}: {err}", path.display()))?;
     }
     Ok(format!(
@@ -316,6 +321,62 @@ mod tests {
         assert!(parse(&strings(&["a.png", "-o", "x.png", "--packer"])).is_err());
         assert!(matches!(parse(&strings(&["--help"])), Ok(Parsed::Help)));
         assert!(matches!(parse(&strings(&["-V"])), Ok(Parsed::Version)));
+    }
+
+    #[test]
+    fn aseprite_frames_and_tags_follow_the_files_before_them() {
+        use aseprite::tests::{cel, file, layer, tags};
+        let dir = std::env::temp_dir().join(format!("oxypack-tags-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let doc = oxypixel_core::Document::new(2, 2).unwrap();
+        std::fs::write(
+            dir.join("a coin.png"),
+            oxypixel_core::export_png_bytes(&doc, 0).unwrap(),
+        )
+        .unwrap();
+        let red = [255, 0, 0, 255];
+        let ase = file(
+            1,
+            1,
+            32,
+            0,
+            vec![
+                (
+                    90,
+                    vec![
+                        layer(1, 0, 0, 0, 255, "art"),
+                        cel(0, 0, 0, 255, 1, 1, &red),
+                        tags(&[(1, 2, 0, 0, "walk")]),
+                    ],
+                ),
+                (90, vec![cel(0, 0, 0, 255, 1, 1, &red)]),
+                (40, vec![]),
+            ],
+        );
+        std::fs::write(dir.join("b hero.aseprite"), ase).unwrap();
+        let args = Args {
+            inputs: vec![dir.clone()],
+            output: dir.join("atlas.png"),
+            options: PackOptions::default(),
+            json: true,
+        };
+        let summary = run(&args).unwrap();
+        assert!(
+            summary.contains("packed 4 sprites from 2 files"),
+            "{summary}"
+        );
+        let json = std::fs::read_to_string(dir.join("atlas.json")).unwrap();
+        for name in ["\"a coin\"", "\"b hero 0\"", "\"b hero 2\""] {
+            assert!(json.contains(name), "{json}");
+        }
+        assert!(json.contains("\"duration\": 40"));
+        // The coin is sprite 0, so the hero's frames 1 to 2 are sprites 2 to 3.
+        assert!(
+            json.contains("\"frameTags\": [{\"name\": \"walk\", \"from\": 2, \"to\": 3, \"direction\": \"forward\"}]"),
+            "{json}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

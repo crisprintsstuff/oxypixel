@@ -136,6 +136,33 @@ impl Placement {
     }
 }
 
+/// An animation tag over a range of sprites, for `meta.frameTags`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FrameTag {
+    pub name: String,
+    /// First and last sprite, both included, as indexes into the packed
+    /// sprites (the order of `frames` in the JSON).
+    pub from: usize,
+    pub to: usize,
+    pub direction: crate::aseprite::Direction,
+    /// How many times the range plays. 0 is forever and is not written.
+    pub repeat: u16,
+}
+
+/// The tags of one file's sprites, moved to where those sprites start in the
+/// whole list.
+pub fn frame_tags(tags: &[crate::aseprite::Tag], first_sprite: usize) -> Vec<FrameTag> {
+    tags.iter()
+        .map(|tag| FrameTag {
+            name: tag.name.clone(),
+            from: first_sprite + tag.from as usize,
+            to: first_sprite + tag.to as usize,
+            direction: tag.direction,
+            repeat: tag.repeat,
+        })
+        .collect()
+}
+
 /// A packed atlas: the pixels and where each input sprite is, in input order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Atlas {
@@ -543,8 +570,10 @@ pub fn atlas_png_bytes(atlas: &Atlas) -> Result<Vec<u8>> {
 /// The atlas description as a JSON hash: `frames` maps each sprite name to its
 /// rectangle, trim offset, source size, and duration, then `meta` names the
 /// image. Phaser, PixiJS, Godot importers, and Aseprite's own exporter use
-/// this layout. Names must be unique; see [`unique_names`].
-pub fn atlas_json(atlas: &Atlas, image: &str) -> String {
+/// this layout. Names must be unique; see [`unique_names`]. `tags` become
+/// `meta.frameTags`, as Aseprite writes them; the list is empty when no
+/// input had tags.
+pub fn atlas_json(atlas: &Atlas, image: &str, tags: &[FrameTag]) -> String {
     let mut out = String::from("{\n  \"frames\": {\n");
     for (index, p) in atlas.placements.iter().enumerate() {
         out.push_str(&format!(
@@ -569,12 +598,30 @@ pub fn atlas_json(atlas: &Atlas, image: &str) -> String {
             "\n"
         });
     }
+    let tag_list: Vec<String> = tags
+        .iter()
+        .map(|tag| {
+            let repeat = if tag.repeat == 0 {
+                String::new()
+            } else {
+                format!(", \"repeat\": \"{}\"", tag.repeat)
+            };
+            format!(
+                "{{\"name\": {}, \"from\": {}, \"to\": {}, \"direction\": \"{}\"{repeat}}}",
+                json_string(&tag.name),
+                tag.from,
+                tag.to,
+                tag.direction.json_name(),
+            )
+        })
+        .collect();
     out.push_str(&format!(
-        "  }},\n  \"meta\": {{\"app\": \"OxyPack\", \"version\": \"{}\", \"image\": {}, \"format\": \"RGBA8888\", \"size\": {{\"w\": {}, \"h\": {}}}, \"scale\": \"1\"}}\n}}\n",
+        "  }},\n  \"meta\": {{\"app\": \"OxyPack\", \"version\": \"{}\", \"image\": {}, \"format\": \"RGBA8888\", \"size\": {{\"w\": {}, \"h\": {}}}, \"scale\": \"1\", \"frameTags\": [{}]}}\n}}\n",
         env!("CARGO_PKG_VERSION"),
         json_string(image),
         atlas.width,
         atlas.height,
+        tag_list.join(", "),
     ));
     out
 }
@@ -836,7 +883,32 @@ mod tests {
         let mut dot = solid("dot \"x\"", 3, 3, 5);
         dot.pixels[0] = Rgba::CLEAR;
         let atlas = pack_sprites(&[solid("a", 2, 2, 1), dot], options).unwrap();
-        let text = atlas_json(&atlas, "atlas.png");
+        let text = atlas_json(&atlas, "atlas.png", &[]);
+        assert!(text.contains("\"frameTags\": []"));
+        let tags = frame_tags(
+            &[
+                crate::aseprite::Tag {
+                    name: "run \"fast\"".into(),
+                    from: 0,
+                    to: 1,
+                    direction: crate::aseprite::Direction::PingPong,
+                    repeat: 2,
+                },
+                crate::aseprite::Tag {
+                    name: "idle".into(),
+                    from: 1,
+                    to: 1,
+                    direction: crate::aseprite::Direction::Reverse,
+                    repeat: 0,
+                },
+            ],
+            5,
+        );
+        assert_eq!((tags[0].from, tags[0].to, tags[1].from), (5, 6, 6));
+        let text = atlas_json(&atlas, "atlas.png", &tags);
+        assert!(text.contains(
+            "\"frameTags\": [{\"name\": \"run \\\"fast\\\"\", \"from\": 5, \"to\": 6, \"direction\": \"pingpong\", \"repeat\": \"2\"}, {\"name\": \"idle\", \"from\": 6, \"to\": 6, \"direction\": \"reverse\"}]"
+        ), "{text}");
         assert!(text.contains("\"a\": {\"frame\": {\"x\": 4, \"y\": 0, \"w\": 2, \"h\": 2}"));
         assert!(text.contains("\"dot \\\"x\\\"\": {\"frame\": {\"x\": 0, \"y\": 0, \"w\": 3, \"h\": 3}, \"rotated\": false, \"trimmed\": false"));
         assert!(text.contains("\"image\": \"atlas.png\""));
