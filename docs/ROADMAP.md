@@ -1,6 +1,6 @@
 # Roadmap and scorecard
 
-Status date: 2026-10-26. Version in tree: 0.8.5 (`Cargo.toml`). GitHub issues: none open. This file is the work list for [AGENTS.md](../AGENTS.md).
+Status date: 2026-10-26. Version in tree: 0.8.6 (`Cargo.toml`). GitHub issues: none open. This file is the work list for [AGENTS.md](../AGENTS.md).
 
 Rows are taken from the code and the docs. **Proposal** means the item is a reasonable next step, not a commitment and not an open issue. Do not start a proposal unless a human asks for it.
 
@@ -18,7 +18,7 @@ Suggested order if a human picks proposals: OX-P20, OX-P21, OX-P6, OX-P22, OX-P2
 
 ### Done
 
-In the 0.8.5 tree and covered by tests or by the release workflow.
+In the 0.8.6 tree and covered by tests or by the release workflow.
 
 | Area | What exists | Where |
 | --- | --- | --- |

@@ -5,7 +5,7 @@ Unicode true
 ManifestDPIAware true
 
 !define APPNAME "OxyPixel"
-!define VERSION "0.8.5"
+!define VERSION "0.8.6"
 !define PUBLISHER "OxyPixel contributors"
 !define REGPATH "Software\Microsoft\Windows\CurrentVersion\Uninstall\OxyPixel"
 
@@ -79,8 +79,8 @@ BrandingText "${APPNAME} ${VERSION}"
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
 
-VIProductVersion "0.8.5.0"
-VIFileVersion "0.8.5.0"
+VIProductVersion "0.8.6.0"
+VIFileVersion "0.8.6.0"
 VIAddVersionKey "ProductName" "OxyPixel"
 VIAddVersionKey "CompanyName" "${PUBLISHER}"
 VIAddVersionKey "FileDescription" "OxyPixel installer"
