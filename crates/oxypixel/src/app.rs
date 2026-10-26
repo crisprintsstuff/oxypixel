@@ -1479,6 +1479,30 @@ impl OxyApp {
                 if fill.changed() {
                     self.editor.set_shape_filled(filled);
                 }
+                let bucket = self.editor.tool() == Tool::Bucket;
+                let mut global = self.editor.fills_globally();
+                if ui
+                    .add_enabled(bucket, egui::Checkbox::new(&mut global, "Global fill"))
+                    .on_hover_text(
+                        "Fill every matching pixel on this layer, not only the connected area.",
+                    )
+                    .on_disabled_hover_text("Switch to fill (G) to use this.")
+                    .changed()
+                {
+                    self.editor.set_fill_global(global);
+                }
+                ui.add_enabled(bucket, egui::Label::new("Tolerance"));
+                let mut tolerance = self.editor.fill_tolerance();
+                if ui
+                    .add_enabled(bucket, egui::Slider::new(&mut tolerance, 0..=255))
+                    .on_hover_text(
+                        "How far each color channel may differ from the clicked pixel. 0 fills one exact color.",
+                    )
+                    .on_disabled_hover_text("Switch to fill (G) to use this.")
+                    .changed()
+                {
+                    self.editor.set_fill_tolerance(tolerance);
+                }
                 let mut mirror_x = self.editor.mirror_x();
                 if ui
                     .checkbox(&mut mirror_x, "Mirror H")
@@ -3191,7 +3215,7 @@ fn tool_hint(tool: Tool) -> &'static str {
     match tool {
         Tool::Pencil => "Left-drag draws. Right-drag uses the second color.",
         Tool::Eraser => "Drag to erase pixels on this layer.",
-        Tool::Bucket => "Click a connected area on this layer to fill it.",
+        Tool::Bucket => "Click an area on this layer to fill it. Tolerance takes near colors; Global fills every match.",
         Tool::Eyedropper => {
             "Click the canvas to copy that color. Alt+click picks without switching tools. A reference is included only when Sample is on."
         }

@@ -376,15 +376,32 @@ pub(crate) fn pixel_perfect_path(points: &[(i32, i32)]) -> Vec<(i32, i32)> {
     kept
 }
 
-/// Where a fill is allowed to spread.
+/// Where a fill is allowed to spread, and which pixels count as the same color.
+#[derive(Clone, Copy, Default)]
 pub(crate) struct FillLimits {
     pub selection: Option<PixelRect>,
     pub wrap: bool,
+    /// Largest per-channel RGBA difference from the start pixel that still
+    /// fills. 0 is an exact match.
+    pub tolerance: u8,
+    /// Fill every matching pixel on the cel, not only the connected ones.
+    pub global: bool,
+}
+
+/// Whether `pixel` is within `tolerance` of `target` on every RGBA channel.
+pub(crate) fn fill_matches(target: Rgba, pixel: Rgba, tolerance: u8) -> bool {
+    let near = |a: u8, b: u8| a.abs_diff(b) <= tolerance;
+    near(target.r, pixel.r)
+        && near(target.g, pixel.g)
+        && near(target.b, pixel.b)
+        && near(target.a, pixel.a)
 }
 
 /// Four-connected fill on one cel. Pixels outside `limits.selection` are walls.
 ///
 /// When `limits.wrap` is set, a step past an edge continues on the opposite edge.
+/// `limits.tolerance` widens what counts as the start color, and
+/// `limits.global` recolors every match on the cel instead of a connected area.
 /// Returns whether any pixel changed.
 pub(crate) fn flood_fill(
     pixels: &mut [Rgba],
@@ -395,7 +412,12 @@ pub(crate) fn flood_fill(
     color: Rgba,
     limits: FillLimits,
 ) -> bool {
-    let FillLimits { selection, wrap } = limits;
+    let FillLimits {
+        selection,
+        wrap,
+        tolerance,
+        global,
+    } = limits;
     let Some(len) = (width as usize).checked_mul(height as usize) else {
         return false;
     };
@@ -415,8 +437,23 @@ pub(crate) fn flood_fill(
     }
     let start = (y as u32 * width + x as u32) as usize;
     let target = pixels[start];
-    if target == color {
+    if target == color && tolerance == 0 {
         return false;
+    }
+    if global {
+        let mut changed = false;
+        for (i, pixel) in pixels.iter_mut().enumerate() {
+            let px = (i % width as usize) as i32;
+            let py = (i / width as usize) as i32;
+            if selection.is_some_and(|sel| !sel.contains(px, py)) {
+                continue;
+            }
+            if fill_matches(target, *pixel, tolerance) && *pixel != color {
+                *pixel = color;
+                changed = true;
+            }
+        }
+        return changed;
     }
     let mut stack = vec![(x, y)];
     let mut seen = vec![false; pixels.len()];
@@ -429,12 +466,14 @@ pub(crate) fn flood_fill(
             continue;
         }
         let i = (cy as u32 * width + cx as u32) as usize;
-        if seen[i] || pixels[i] != target {
+        if seen[i] || !fill_matches(target, pixels[i], tolerance) {
             continue;
         }
         seen[i] = true;
-        pixels[i] = color;
-        changed = true;
+        if pixels[i] != color {
+            pixels[i] = color;
+            changed = true;
+        }
         push_fill_neighbor(&mut stack, cx + 1, cy, width, height, wrap);
         push_fill_neighbor(&mut stack, cx - 1, cy, width, height, wrap);
         push_fill_neighbor(&mut stack, cx, cy + 1, width, height, wrap);
@@ -521,6 +560,7 @@ mod tests {
             FillLimits {
                 selection: None,
                 wrap: false,
+                ..Default::default()
             },
         ));
         assert_eq!(pixels[0], Rgba::new(0, 0, 2, 255));
@@ -539,6 +579,7 @@ mod tests {
             FillLimits {
                 selection: Some(sel),
                 wrap: false,
+                ..Default::default()
             },
         );
         assert_eq!(pixels[0].r, 9);
@@ -714,6 +755,97 @@ mod tests {
     }
 
     #[test]
+    fn fill_tolerance_takes_near_colors_and_stops_at_far_ones() {
+        let base = Rgba::new(100, 100, 100, 255);
+        let near = Rgba::new(108, 95, 100, 255);
+        let far = Rgba::new(140, 100, 100, 255);
+        let ink = Rgba::new(0, 0, 0, 255);
+        assert!(fill_matches(base, base, 0));
+        assert!(!fill_matches(base, near, 0));
+        assert!(fill_matches(base, near, 8));
+        assert!(!fill_matches(base, near, 7));
+        assert!(!fill_matches(base, Rgba::new(100, 100, 100, 250), 4));
+
+        // Row: base near far base. Tolerance 10 crosses `near` and stops at `far`.
+        let row = [base, near, far, base];
+        let mut pixels = row.to_vec();
+        let limits = FillLimits {
+            tolerance: 10,
+            ..Default::default()
+        };
+        assert!(flood_fill(&mut pixels, 4, 1, 0, 0, ink, limits));
+        assert_eq!(pixels, vec![ink, ink, far, base]);
+
+        // Tolerance 0 is the exact fill from before.
+        let mut exact = row.to_vec();
+        assert!(flood_fill(
+            &mut exact,
+            4,
+            1,
+            0,
+            0,
+            ink,
+            FillLimits::default()
+        ));
+        assert_eq!(exact, vec![ink, near, far, base]);
+
+        // Clicking a pixel already in the ink color still fills its near neighbors.
+        let mut same = vec![ink, Rgba::new(3, 3, 3, 255), far];
+        assert!(flood_fill(&mut same, 3, 1, 0, 0, ink, limits));
+        assert_eq!(same, vec![ink, ink, far]);
+        let mut nothing = vec![ink, far];
+        assert!(!flood_fill(&mut nothing, 2, 1, 0, 0, ink, limits));
+    }
+
+    #[test]
+    fn global_fill_reaches_disconnected_matches_inside_the_selection() {
+        let base = Rgba::new(10, 10, 10, 255);
+        let wall = Rgba::new(200, 0, 0, 255);
+        let ink = Rgba::new(0, 0, 255, 255);
+        // base wall base / wall wall base: the right column is cut off.
+        let start = vec![base, wall, base, wall, wall, base];
+        let mut pixels = start.clone();
+        let global = FillLimits {
+            global: true,
+            ..Default::default()
+        };
+        assert!(flood_fill(&mut pixels, 3, 2, 0, 0, ink, global));
+        assert_eq!(pixels, vec![ink, wall, ink, wall, wall, ink]);
+
+        let mut contiguous = start.clone();
+        assert!(flood_fill(
+            &mut contiguous,
+            3,
+            2,
+            0,
+            0,
+            ink,
+            FillLimits::default()
+        ));
+        assert_eq!(contiguous, vec![ink, wall, base, wall, wall, base]);
+
+        // The selection still bounds a global fill.
+        let mut selected = start.clone();
+        let limits = FillLimits {
+            selection: Some(PixelRect::from_corners(0, 0, 1, 1)),
+            global: true,
+            ..Default::default()
+        };
+        assert!(flood_fill(&mut selected, 3, 2, 0, 0, ink, limits));
+        assert_eq!(selected, vec![ink, wall, base, wall, wall, base]);
+
+        // A global fill with tolerance takes near colors anywhere.
+        let mut near = vec![base, wall, Rgba::new(14, 10, 6, 255)];
+        let limits = FillLimits {
+            global: true,
+            tolerance: 4,
+            ..Default::default()
+        };
+        assert!(flood_fill(&mut near, 3, 1, 0, 0, ink, limits));
+        assert_eq!(near, vec![ink, wall, ink]);
+    }
+
+    #[test]
     fn flood_fill_wraps_around_a_wall_on_the_near_side() {
         let wall = Rgba::new(1, 0, 0, 255);
         let ink = Rgba::new(0, 0, 9, 255);
@@ -728,6 +860,7 @@ mod tests {
             FillLimits {
                 selection: None,
                 wrap: true,
+                ..Default::default()
             },
         ));
         assert_eq!(pixels[0], ink);
@@ -746,6 +879,7 @@ mod tests {
             FillLimits {
                 selection: None,
                 wrap: false,
+                ..Default::default()
             },
         ));
         assert_eq!(blocked[0], ink);
