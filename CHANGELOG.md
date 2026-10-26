@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The Linux editor in the 0.7.5, 0.8.0, and 0.8.5 releases needed glibc 2.43, so it did not start on Ubuntu 24.04, Debian 12, and other current systems, and the `.deb` would not install there. The Linux release is built on Ubuntu 24.04 again (it had moved with GitHub's `ubuntu-latest`), and packaging now fails if a binary needs a glibc newer than 2.39. `oxypack` was not affected.
+
 ## [0.8.5] - 2026-10-26
 
 ### Changed

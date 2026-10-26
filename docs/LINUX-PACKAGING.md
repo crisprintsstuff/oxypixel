@@ -28,6 +28,8 @@ No GTK package is required. Browse asks the XDG desktop portal for a file dialog
 
 The `.deb` also depends on the libraries the binary links. On Ubuntu 24.04 that includes `libc6`.
 
+A binary needs the glibc of the system it was built on or newer, so the release job runs on `ubuntu-24.04`, not `ubuntu-latest`. `scripts/check-glibc.sh` reads each binary's versioned glibc symbols with `objdump -T` and fails `package-linux.sh` when one needs more than 2.39 (set `OXYPIXEL_MAX_GLIBC` to change the limit). The 0.7.5 to 0.8.5 Linux editors were built on a newer runner and needed glibc 2.43.
+
 ## `.deb` layout
 
 `scripts/package-deb.sh` writes `dist/oxypixel-<version>-linux-x86_64.deb`.
