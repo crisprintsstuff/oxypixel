@@ -71,18 +71,18 @@ Help, then Check for updates, can download a newer release and restart into it a
 
 Each release publishes two Linux files.
 
-`oxypixel-<version>-linux-x86_64.tar.gz` holds the x86_64 `oxypixel` and `oxypack` executables, `LICENSE`, and `README.txt`. Unpack it and run the program from that directory. For 0.7.5:
+`oxypixel-<version>-linux-x86_64.tar.gz` holds the x86_64 `oxypixel` and `oxypack` executables, `LICENSE`, and `README.txt`. Unpack it and run the program from that directory. For 0.8.0:
 
 ```bash
-tar -xzf oxypixel-0.7.5-linux-x86_64.tar.gz
-cd oxypixel-0.7.5-linux-x86_64
+tar -xzf oxypixel-0.8.0-linux-x86_64.tar.gz
+cd oxypixel-0.8.0-linux-x86_64
 ./oxypixel
 ```
 
-`oxypixel-<version>-linux-x86_64.deb` installs `/usr/bin/oxypixel`, `/usr/bin/oxypack`, a desktop entry, a 32×32 icon, and the `.oxypix` mime type. For 0.7.5 the Debian package version is `0.7.5-1`:
+`oxypixel-<version>-linux-x86_64.deb` installs `/usr/bin/oxypixel`, `/usr/bin/oxypack`, a desktop entry, a 32×32 icon, and the `.oxypix` mime type. For 0.8.0 the Debian package version is `0.8.0-1`:
 
 ```bash
-sudo apt install ./oxypixel-0.7.5-linux-x86_64.deb
+sudo apt install ./oxypixel-0.8.0-linux-x86_64.deb
 sudo apt remove oxypixel
 ```
 
