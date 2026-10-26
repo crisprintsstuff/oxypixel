@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-26
+
 ### Added
 
 - The fill tool has a Tolerance slider (0 to 255) that also takes near colors, and a Global fill option that recolors every matching pixel on the layer instead of one connected area. Both stay inside the selection, and each fill is one undo step.
