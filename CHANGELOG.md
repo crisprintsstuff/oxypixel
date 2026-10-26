@@ -7,9 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-26
+
 ### Added
 
 - The fill tool has a Tolerance slider (0 to 255) that also takes near colors, and a Global fill option that recolors every matching pixel on the layer instead of one connected area. Both stay inside the selection, and each fill is one undo step.
+- Shade (D) turns the pencil into a shading brush. The left button steps each pixel to the next swatch in the palette and the right button to the one before. A pixel changes once per stroke, colors not in the palette are left alone, and a stroke is one undo step.
+- Spritesheet export can lay frames out in a grid (Columns), leave clear pixels between them (Padding), and write a `.json` beside the PNG with each frame's rectangle and duration, in the JSON array sheet layout game engines read. `export-sheet` takes `--columns`, `--padding`, `--scale`, and `--json`. A one-row sheet is unchanged.
+- Magic wand (W) selects the area the fill tool would reach, using the same Tolerance and Global fill settings. Selections can now be any shape: Shift adds a marquee or wand area to the selection and Alt cuts it out. Move, nudge, flip, rotate, copy, paste, clear, and drawing all keep to the selected pixels, the outline follows their edge, and undo restores the shape.
 
 ### Fixed
 

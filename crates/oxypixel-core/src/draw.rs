@@ -378,14 +378,23 @@ pub(crate) fn pixel_perfect_path(points: &[(i32, i32)]) -> Vec<(i32, i32)> {
 
 /// Where a fill is allowed to spread, and which pixels count as the same color.
 #[derive(Clone, Copy, Default)]
-pub(crate) struct FillLimits {
+pub(crate) struct FillLimits<'a> {
     pub selection: Option<PixelRect>,
+    /// Which pixels of `selection` are selected, row by row. `None` is all of them.
+    pub mask: Option<&'a [bool]>,
     pub wrap: bool,
     /// Largest per-channel RGBA difference from the start pixel that still
     /// fills. 0 is an exact match.
     pub tolerance: u8,
     /// Fill every matching pixel on the cel, not only the connected ones.
     pub global: bool,
+}
+
+impl FillLimits<'_> {
+    fn allows(&self, x: i32, y: i32) -> bool {
+        self.selection
+            .is_none_or(|sel| crate::selection::mask_contains(sel, self.mask, x, y))
+    }
 }
 
 /// Whether `pixel` is within `tolerance` of `target` on every RGBA channel.
@@ -397,11 +406,67 @@ pub(crate) fn fill_matches(target: Rgba, pixel: Rgba, tolerance: u8) -> bool {
         && near(target.a, pixel.a)
 }
 
-/// Four-connected fill on one cel. Pixels outside `limits.selection` are walls.
+/// The pixels a fill from `(x, y)` would reach, one `bool` per cel pixel.
+/// `None` when the start is off the cel or outside the selection.
 ///
-/// When `limits.wrap` is set, a step past an edge continues on the opposite edge.
-/// `limits.tolerance` widens what counts as the start color, and
-/// `limits.global` recolors every match on the cel instead of a connected area.
+/// Pixels outside `limits.selection` are walls. When `limits.wrap` is set, a
+/// step past an edge continues on the opposite edge. `limits.tolerance` widens
+/// what counts as the start color, and `limits.global` takes every match on
+/// the cel instead of a connected area.
+pub(crate) fn fill_region(
+    pixels: &[Rgba],
+    width: u32,
+    height: u32,
+    x: i32,
+    y: i32,
+    limits: FillLimits,
+) -> Option<Vec<bool>> {
+    let len = (width as usize).checked_mul(height as usize)?;
+    if width == 0 || height == 0 || pixels.len() != len {
+        return None;
+    }
+    let (x, y) = if limits.wrap {
+        (wrap_coord(x, width as i32), wrap_coord(y, height as i32))
+    } else {
+        (x, y)
+    };
+    if x < 0 || y < 0 || x as u32 >= width || y as u32 >= height || !limits.allows(x, y) {
+        return None;
+    }
+    let target = pixels[(y as u32 * width + x as u32) as usize];
+    let tolerance = limits.tolerance;
+    let mut region = vec![false; len];
+    if limits.global {
+        for (i, pixel) in pixels.iter().enumerate() {
+            let px = (i % width as usize) as i32;
+            let py = (i / width as usize) as i32;
+            region[i] = limits.allows(px, py) && fill_matches(target, *pixel, tolerance);
+        }
+        return Some(region);
+    }
+    let mut stack = vec![(x, y)];
+    while let Some((cx, cy)) = stack.pop() {
+        if cx < 0 || cy < 0 || cx as u32 >= width || cy as u32 >= height {
+            continue;
+        }
+        if !limits.allows(cx, cy) {
+            continue;
+        }
+        let i = (cy as u32 * width + cx as u32) as usize;
+        if region[i] || !fill_matches(target, pixels[i], tolerance) {
+            continue;
+        }
+        region[i] = true;
+        let wrap = limits.wrap;
+        push_fill_neighbor(&mut stack, cx + 1, cy, width, height, wrap);
+        push_fill_neighbor(&mut stack, cx - 1, cy, width, height, wrap);
+        push_fill_neighbor(&mut stack, cx, cy + 1, width, height, wrap);
+        push_fill_neighbor(&mut stack, cx, cy - 1, width, height, wrap);
+    }
+    Some(region)
+}
+
+/// Four-connected fill on one cel, over the pixels [`fill_region`] reaches.
 /// Returns whether any pixel changed.
 pub(crate) fn flood_fill(
     pixels: &mut [Rgba],
@@ -412,72 +477,15 @@ pub(crate) fn flood_fill(
     color: Rgba,
     limits: FillLimits,
 ) -> bool {
-    let FillLimits {
-        selection,
-        wrap,
-        tolerance,
-        global,
-    } = limits;
-    let Some(len) = (width as usize).checked_mul(height as usize) else {
+    let Some(region) = fill_region(pixels, width, height, x, y, limits) else {
         return false;
     };
-    if width == 0 || height == 0 || pixels.len() != len {
-        return false;
-    }
-    let (x, y) = if wrap {
-        (wrap_coord(x, width as i32), wrap_coord(y, height as i32))
-    } else {
-        (x, y)
-    };
-    if x < 0 || y < 0 || x as u32 >= width || y as u32 >= height {
-        return false;
-    }
-    if selection.is_some_and(|sel| !sel.contains(x, y)) {
-        return false;
-    }
-    let start = (y as u32 * width + x as u32) as usize;
-    let target = pixels[start];
-    if target == color && tolerance == 0 {
-        return false;
-    }
-    if global {
-        let mut changed = false;
-        for (i, pixel) in pixels.iter_mut().enumerate() {
-            let px = (i % width as usize) as i32;
-            let py = (i / width as usize) as i32;
-            if selection.is_some_and(|sel| !sel.contains(px, py)) {
-                continue;
-            }
-            if fill_matches(target, *pixel, tolerance) && *pixel != color {
-                *pixel = color;
-                changed = true;
-            }
-        }
-        return changed;
-    }
-    let mut stack = vec![(x, y)];
-    let mut seen = vec![false; pixels.len()];
     let mut changed = false;
-    while let Some((cx, cy)) = stack.pop() {
-        if cx < 0 || cy < 0 || cx as u32 >= width || cy as u32 >= height {
-            continue;
-        }
-        if selection.is_some_and(|sel| !sel.contains(cx, cy)) {
-            continue;
-        }
-        let i = (cy as u32 * width + cx as u32) as usize;
-        if seen[i] || !fill_matches(target, pixels[i], tolerance) {
-            continue;
-        }
-        seen[i] = true;
-        if pixels[i] != color {
-            pixels[i] = color;
+    for (pixel, inside) in pixels.iter_mut().zip(region) {
+        if inside && *pixel != color {
+            *pixel = color;
             changed = true;
         }
-        push_fill_neighbor(&mut stack, cx + 1, cy, width, height, wrap);
-        push_fill_neighbor(&mut stack, cx - 1, cy, width, height, wrap);
-        push_fill_neighbor(&mut stack, cx, cy + 1, width, height, wrap);
-        push_fill_neighbor(&mut stack, cx, cy - 1, width, height, wrap);
     }
     changed
 }

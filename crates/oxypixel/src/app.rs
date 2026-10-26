@@ -7,8 +7,9 @@ use std::time::{Duration, Instant};
 use eframe::egui::{self, Color32, RichText, ViewportCommand};
 use oxypixel_core::{
     advance, decode_first_rgba, export_bmp, export_gif, export_palette, export_png_scaled,
-    export_spritesheet_scaled, fit_into, import_image, import_palette, load_oxypix, save_oxypix,
-    Editor, Error, Fit, PaletteFormat, References, Rgba, Tool, Transform, MAX_DIMENSION,
+    export_spritesheet_layout, fit_into, import_image, import_palette, load_oxypix, save_oxypix,
+    Editor, Error, Fit, PaletteFormat, References, Rgba, SheetLayout, Tool, Transform,
+    MAX_DIMENSION, MAX_FRAMES, MAX_SHEET_PADDING,
 };
 
 use crate::cache::FrameComposites;
@@ -96,6 +97,10 @@ pub struct OxyApp {
     canvas_x: String,
     canvas_y: String,
     export_scale: u32,
+    /// Spritesheet frames per row. 0 is one row.
+    sheet_columns: u32,
+    sheet_padding: u32,
+    sheet_json: bool,
     palette_format: PaletteFormat,
     recent: Vec<PathBuf>,
     last_dir: Option<PathBuf>,
@@ -179,6 +184,9 @@ impl OxyApp {
             canvas_x: "0".to_string(),
             canvas_y: "0".to_string(),
             export_scale: 1,
+            sheet_columns: 0,
+            sheet_padding: 0,
+            sheet_json: false,
             palette_format: PaletteFormat::Gpl,
             recent: recent_files,
             last_dir,
@@ -540,6 +548,7 @@ impl OxyApp {
             Command::TogglePixelPerfect => {
                 self.editor.set_pixel_perfect(!self.editor.pixel_perfect());
             }
+            Command::ToggleShade => self.editor.set_shade(!self.editor.shades()),
             Command::ToggleWrap => {
                 self.editor.set_wrap(!self.editor.wraps());
             }
@@ -1016,7 +1025,12 @@ impl OxyApp {
             let frame = self.editor.document().active_frame();
             export_png_scaled(self.editor.document(), frame, path, scale)
         } else {
-            export_spritesheet_scaled(self.editor.document(), path, scale)
+            let layout = SheetLayout {
+                scale,
+                columns: self.sheet_columns,
+                padding: self.sheet_padding,
+            };
+            export_spritesheet_layout(self.editor.document(), layout, path, self.sheet_json)
         };
         match result {
             Ok(()) => {
@@ -1451,6 +1465,7 @@ impl OxyApp {
                     (Tool::Rectangle, "R"),
                     (Tool::Ellipse, "O"),
                     (Tool::Select, "M"),
+                    (Tool::Wand, "W"),
                 ];
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
@@ -1479,14 +1494,14 @@ impl OxyApp {
                 if fill.changed() {
                     self.editor.set_shape_filled(filled);
                 }
-                let bucket = self.editor.tool() == Tool::Bucket;
+                let bucket = matches!(self.editor.tool(), Tool::Bucket | Tool::Wand);
                 let mut global = self.editor.fills_globally();
                 if ui
                     .add_enabled(bucket, egui::Checkbox::new(&mut global, "Global fill"))
                     .on_hover_text(
                         "Fill every matching pixel on this layer, not only the connected area.",
                     )
-                    .on_disabled_hover_text("Switch to fill (G) to use this.")
+                    .on_disabled_hover_text("Switch to fill (G) or the wand (W) to use this.")
                     .changed()
                 {
                     self.editor.set_fill_global(global);
@@ -1498,7 +1513,7 @@ impl OxyApp {
                     .on_hover_text(
                         "How far each color channel may differ from the clicked pixel. 0 fills one exact color.",
                     )
-                    .on_disabled_hover_text("Switch to fill (G) to use this.")
+                    .on_disabled_hover_text("Switch to fill (G) or the wand (W) to use this.")
                     .changed()
                 {
                     self.editor.set_fill_tolerance(tolerance);
@@ -1533,6 +1548,16 @@ impl OxyApp {
                 {
                     self.editor.set_pixel_perfect(perfect);
                 }
+                let mut shade = self.editor.shades();
+                if ui
+                    .checkbox(&mut shade, "Shade (D)")
+                    .on_hover_text(
+                        "The pencil steps each pixel one swatch along the palette: left to the next, right to the one before. Colors not in the palette stay.",
+                    )
+                    .changed()
+                {
+                    self.editor.set_shade(shade);
+                }
                 let mut wrap = self.editor.wraps();
                 if ui
                     .checkbox(&mut wrap, "Wrap (T)")
@@ -1562,6 +1587,7 @@ impl OxyApp {
             Tool::Rectangle,
             Tool::Ellipse,
             Tool::Select,
+            Tool::Wand,
         ];
         let icons = tools
             .into_iter()
@@ -2457,6 +2483,18 @@ impl OxyApp {
                     });
                     ui.label("Nearest neighbor. Each pixel stays a hard square.");
                 }
+                if self.path_kind == PathKind::ExportSheet {
+                    ui.horizontal(|ui| {
+                        ui.label("Columns");
+                        ui.add(egui::DragValue::new(&mut self.sheet_columns).range(0..=MAX_FRAMES as u32))
+                            .on_hover_text("Frames per row. 0 puts every frame in one row.");
+                        ui.label("Padding");
+                        ui.add(egui::DragValue::new(&mut self.sheet_padding).range(0..=MAX_SHEET_PADDING))
+                            .on_hover_text("Clear pixels between cells, after scaling.");
+                    });
+                    ui.checkbox(&mut self.sheet_json, "Also write .json")
+                        .on_hover_text("A file beside the PNG with each frame's rectangle and duration, for game engines.");
+                }
                 if self.path_kind == PathKind::ExportPalette {
                     ui.horizontal(|ui| {
                         ui.label("Format");
@@ -3222,7 +3260,8 @@ fn tool_hint(tool: Tool) -> &'static str {
         Tool::Line => "Drag a straight line. Hold Shift for 45 degrees.",
         Tool::Rectangle => "Drag an outline. Hold Shift for a square.",
         Tool::Ellipse => "Drag an outline. Hold Shift for a circle.",
-        Tool::Select => "Drag a rectangle. Drag inside it to move those pixels. Arrows nudge.",
+        Tool::Select => "Drag a rectangle. Drag inside it to move those pixels. Shift adds, Alt cuts out. Arrows nudge.",
+        Tool::Wand => "Click to select the area fill would reach, with its Tolerance and Global. Shift adds, Alt cuts out.",
     }
 }
 
@@ -3236,6 +3275,7 @@ fn tool_name(tool: Tool) -> &'static str {
         Tool::Rectangle => "Rectangle",
         Tool::Ellipse => "Ellipse",
         Tool::Select => "Select",
+        Tool::Wand => "Wand",
     }
 }
 

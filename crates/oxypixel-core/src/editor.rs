@@ -1,15 +1,16 @@
 //! Editing session: tools, selection, colors, and undo on top of a [`Document`].
 
-use crate::color::{color_ramp, nearest_palette_color, Rgba};
+use crate::color::{color_ramp, nearest_palette_color, shade_step, Rgba};
 use crate::document::Document;
 use crate::draw::{
-    brush_offsets, clamp_to_margin, constrain_line, constrain_square, ellipse_points, flood_fill,
-    line_points, pixel_perfect_path, rect_on_canvas, rect_points, transform_pixels, turned_rect,
-    wrap_coord, FillLimits, PixelRect, Transform,
+    brush_offsets, clamp_to_margin, constrain_line, constrain_square, ellipse_points, fill_region,
+    flood_fill, line_points, pixel_perfect_path, rect_on_canvas, rect_points, transform_pixels,
+    turned_rect, wrap_coord, FillLimits, PixelRect, Transform,
 };
 use crate::error::{Error, Result};
 use crate::history::{History, Snapshot};
 use crate::limits::{clamp_name, MAX_BRUSH};
+use crate::selection::{self, OutlineEdge, SelectMode};
 
 /// Drawing tool. Shape tools commit on pointer release. Pencil and eraser paint immediately.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -22,6 +23,8 @@ pub enum Tool {
     Rectangle,
     Ellipse,
     Select,
+    /// Select the area the fill tool would reach, with its tolerance and Global setting.
+    Wand,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,12 +54,14 @@ enum Gesture {
     Select {
         origin: (i32, i32),
         current: (i32, i32),
+        mode: SelectMode,
     },
-    /// Drag the current selection. `base` is the cel with the rectangle cleared,
-    /// so placing `patch` does not leave a copy behind.
+    /// Drag the current selection. `base` is the cel with the selected pixels
+    /// cleared, so placing `patch` does not leave a copy behind.
     MoveSel {
         anchor: (i32, i32),
         origin: PixelRect,
+        mask: Option<Vec<bool>>,
         base: Vec<Rgba>,
         patch: Vec<Rgba>,
     },
@@ -67,6 +72,8 @@ struct Clipboard {
     width: u32,
     height: u32,
     pixels: Vec<Rgba>,
+    /// Which pixels were selected when copied. `None` pastes the whole rectangle.
+    mask: Option<Vec<bool>>,
 }
 
 /// Editor state that is not part of the saved document: tool, colors, selection, history.
@@ -86,9 +93,16 @@ pub struct Editor {
     snap_palette: bool,
     fill_tolerance: u8,
     fill_global: bool,
+    shade: bool,
     /// Cel pixels from before the current pixel-perfect stroke.
     pencil_base: Option<Vec<Rgba>>,
+    /// Bounding rectangle of the selection. Change it only through [`Self::set_selection`].
     selection: Option<PixelRect>,
+    /// Which pixels of `selection` are selected, row by row. `None` is all of them.
+    selection_mask: Option<Vec<bool>>,
+    /// Outline of the selection, kept with it so the canvas does not trace it every frame.
+    selection_edges: Vec<OutlineEdge>,
+    select_mode: SelectMode,
     clipboard: Option<Clipboard>,
     gesture: Gesture,
     gesture_saved: bool,
@@ -139,8 +153,12 @@ impl Editor {
             snap_palette: false,
             fill_tolerance: 0,
             fill_global: false,
+            shade: false,
             pencil_base: None,
             selection: None,
+            selection_mask: None,
+            selection_edges: Vec::new(),
+            select_mode: SelectMode::Replace,
             clipboard: None,
             gesture: Gesture::None,
             gesture_saved: false,
@@ -257,6 +275,16 @@ impl Editor {
         self.fill_global = global;
     }
 
+    /// The pencil steps each pixel one swatch along the palette instead of
+    /// painting a color. Off until the user turns it on.
+    pub fn shades(&self) -> bool {
+        self.shade
+    }
+
+    pub fn set_shade(&mut self, enabled: bool) {
+        self.shade = enabled;
+    }
+
     /// Pencil, fill, and shapes stamp the nearest palette color. Off until the user turns it on.
     pub fn snaps_to_palette(&self) -> bool {
         self.snap_palette
@@ -324,12 +352,13 @@ impl Editor {
         Snapshot {
             doc: self.doc.clone(),
             selection: self.selection,
+            selection_mask: self.selection_mask.clone(),
         }
     }
 
     fn restore(&mut self, snapshot: Snapshot) {
         self.doc = snapshot.doc;
-        self.selection = snapshot.selection;
+        self.set_selection(snapshot.selection, snapshot.selection_mask);
         self.dirty = true;
         self.generation += 1;
     }
@@ -357,35 +386,114 @@ impl Editor {
         self.coalescing
     }
 
+    /// Bounding rectangle of the selection.
     pub fn selection(&self) -> Option<PixelRect> {
         self.selection
+    }
+
+    /// Whether the selection is not a plain rectangle.
+    pub fn selection_is_masked(&self) -> bool {
+        self.selection_mask.is_some()
+    }
+
+    /// Whether `(x, y)` is selected. False with no selection.
+    pub fn is_selected(&self, x: i32, y: i32) -> bool {
+        self.selection
+            .is_some_and(|sel| selection::mask_contains(sel, self.selection_mask.as_deref(), x, y))
+    }
+
+    /// Whether painting may touch `(x, y)`: it is selected, or nothing is.
+    fn in_selection(&self, x: i32, y: i32) -> bool {
+        self.selection.is_none() || self.is_selected(x, y)
     }
 
     /// The rectangle to draw. While a marquee is being dragged this is the drag, not the old selection.
     pub fn selection_preview(&self) -> Option<PixelRect> {
         match self.gesture {
-            Gesture::Select { origin, current } => Some(PixelRect::from_corners(
+            Gesture::Select {
+                origin, current, ..
+            } => Some(PixelRect::from_corners(
                 origin.0, origin.1, current.0, current.1,
             )),
             _ => self.selection,
         }
     }
 
+    /// The marquee being dragged and how it will combine, if one is.
+    pub fn marquee_drag(&self) -> Option<(PixelRect, SelectMode)> {
+        match self.gesture {
+            Gesture::Select {
+                origin,
+                current,
+                mode,
+            } => Some((
+                PixelRect::from_corners(origin.0, origin.1, current.0, current.1),
+                mode,
+            )),
+            _ => None,
+        }
+    }
+
+    /// Edges between selected and unselected pixels of the current selection.
+    pub fn selection_outline(&self) -> &[OutlineEdge] {
+        &self.selection_edges
+    }
+
+    /// How the next marquee or wand click combines with the selection. The canvas
+    /// sets this from the modifier keys: Shift adds, Alt subtracts.
+    pub fn select_mode(&self) -> SelectMode {
+        self.select_mode
+    }
+
+    pub fn set_select_mode(&mut self, mode: SelectMode) {
+        self.select_mode = mode;
+    }
+
+    /// The one place the selection changes, so the mask and outline stay with it.
+    fn set_selection(&mut self, rect: Option<PixelRect>, mask: Option<Vec<bool>>) {
+        let normalized = rect.and_then(|rect| selection::normalize(rect, mask));
+        let (rect, mask) = match normalized {
+            Some((rect, mask)) => (Some(rect), mask),
+            None => (None, None),
+        };
+        self.selection_edges = match rect {
+            Some(rect) => selection::outline(rect, mask.as_deref()),
+            None => Vec::new(),
+        };
+        self.selection = rect;
+        self.selection_mask = mask;
+    }
+
+    /// Combine a canvas-sized area with the selection by `mode`.
+    fn combine_selection(&mut self, area: Vec<bool>, mode: SelectMode) {
+        let (w, h) = (self.doc.width(), self.doc.height());
+        let current = self
+            .selection
+            .map(|sel| (sel, self.selection_mask.as_deref()));
+        match selection::combine(current, area, mode, w, h) {
+            Some((rect, mask)) => self.set_selection(Some(rect), mask),
+            None => self.set_selection(None, None),
+        }
+    }
+
     pub fn select_all(&mut self) {
         self.cancel_gesture();
-        self.selection = Some(PixelRect {
-            x: 0,
-            y: 0,
-            width: self.doc.width(),
-            height: self.doc.height(),
-        });
+        self.set_selection(
+            Some(PixelRect {
+                x: 0,
+                y: 0,
+                width: self.doc.width(),
+                height: self.doc.height(),
+            }),
+            None,
+        );
     }
 
     pub fn deselect(&mut self) {
         if matches!(self.gesture, Gesture::Select { .. }) {
             self.gesture = Gesture::None;
         }
-        self.selection = None;
+        self.set_selection(None, None);
     }
 
     pub fn cancel_gesture(&mut self) {
@@ -426,7 +534,9 @@ impl Editor {
         let (x, y) = self.clamp_pointer(x, y);
         match self.tool {
             Tool::Pencil | Tool::Eraser => {
-                let perfect = self.tool == Tool::Pencil && self.pixel_perfect;
+                // Shading rewrites the stroke from the pre-stroke cel, the same way
+                // pixel-perfect does, so going back over a pixel shades it once.
+                let perfect = self.tool == Tool::Pencil && (self.pixel_perfect || self.shade);
                 self.gesture = Gesture::Pencil {
                     button,
                     last: (x, y),
@@ -435,7 +545,7 @@ impl Editor {
                 };
                 let color = self.stroke_color(button);
                 if perfect {
-                    self.paint_pixel_perfect(&[(x, y)], color);
+                    self.paint_pixel_perfect(&[(x, y)], button);
                 } else {
                     self.paint(&[(x, y)], color, true);
                 }
@@ -457,12 +567,16 @@ impl Editor {
                 };
             }
             Tool::Select => {
-                if self.selection.is_some_and(|sel| sel.contains(x, y)) {
+                let mode = self.select_mode;
+                if mode == SelectMode::Replace && self.is_selected(x, y) {
                     if let Some(origin) = self.selection {
-                        if let Some((base, patch)) = self.capture_selection(origin) {
+                        let mask = self.selection_mask.clone();
+                        if let Some((base, patch)) = self.capture_selection(origin, mask.as_deref())
+                        {
                             self.gesture = Gesture::MoveSel {
                                 anchor: (x, y),
                                 origin,
+                                mask,
                                 base,
                                 patch,
                             };
@@ -473,8 +587,10 @@ impl Editor {
                 self.gesture = Gesture::Select {
                     origin: (x, y),
                     current: (x, y),
+                    mode,
                 };
             }
+            Tool::Wand => self.wand(x, y),
         }
     }
 
@@ -496,7 +612,7 @@ impl Editor {
                     if trail.last() != Some(&(x, y)) {
                         trail.push((x, y));
                     }
-                    self.paint_pixel_perfect(&trail, color);
+                    self.paint_pixel_perfect(&trail, button);
                 } else if (x, y) != last {
                     let points = line_points(last.0, last.1, x, y);
                     self.paint(&points, color, true);
@@ -522,16 +638,18 @@ impl Editor {
                     shift,
                 };
             }
-            Gesture::Select { origin, .. } => {
+            Gesture::Select { origin, mode, .. } => {
                 self.gesture = Gesture::Select {
                     origin,
                     current: (x, y),
+                    mode,
                 };
             }
             Gesture::MoveSel { .. } => {
                 let Gesture::MoveSel {
                     anchor,
                     origin,
+                    mask,
                     base,
                     patch,
                 } = std::mem::replace(&mut self.gesture, Gesture::None)
@@ -545,11 +663,12 @@ impl Editor {
                         self.push_undo();
                         self.gesture_saved = true;
                     }
-                    self.place_moved_selection(origin, &base, &patch, dx, dy);
+                    self.place_moved_selection(origin, mask.as_deref(), &base, &patch, dx, dy);
                 }
                 self.gesture = Gesture::MoveSel {
                     anchor,
                     origin,
+                    mask,
                     base,
                     patch,
                 };
@@ -579,9 +698,15 @@ impl Editor {
                 self.paint(&points, color, false);
                 self.gesture_saved = false;
             }
-            Gesture::Select { origin, .. } => {
-                self.selection = Some(PixelRect::from_corners(origin.0, origin.1, x, y));
+            Gesture::Select { origin, mode, .. } => {
+                let rect = PixelRect::from_corners(origin.0, origin.1, x, y);
                 self.gesture = Gesture::None;
+                if mode == SelectMode::Replace {
+                    self.set_selection(Some(rect), None);
+                } else {
+                    let (w, h) = (self.doc.width(), self.doc.height());
+                    self.combine_selection(selection::to_canvas(rect, None, w, h), mode);
+                }
             }
             Gesture::MoveSel { .. } => {
                 self.gesture = Gesture::None;
@@ -595,13 +720,14 @@ impl Editor {
         let Some(sel) = self.selection else {
             return false;
         };
-        let Some((_, patch)) = self.capture_selection(sel) else {
+        let Some((_, patch)) = self.capture_selection(sel, self.selection_mask.as_deref()) else {
             return false;
         };
         self.clipboard = Some(Clipboard {
             width: sel.width,
             height: sel.height,
             pixels: patch,
+            mask: self.selection_mask.clone(),
         });
         true
     }
@@ -614,13 +740,23 @@ impl Editor {
         let y = self.selection.map(|sel| sel.y).unwrap_or(0);
         self.cancel_gesture();
         self.push_undo();
-        self.blit_patch(x, y, clip.width, clip.height, &clip.pixels);
-        self.selection = Some(PixelRect {
+        self.blit_patch(
             x,
             y,
-            width: clip.width,
-            height: clip.height,
-        });
+            clip.width,
+            clip.height,
+            &clip.pixels,
+            clip.mask.as_deref(),
+        );
+        self.set_selection(
+            Some(PixelRect {
+                x,
+                y,
+                width: clip.width,
+                height: clip.height,
+            }),
+            clip.mask,
+        );
         self.dirty = true;
         self.generation += 1;
         Ok(())
@@ -653,6 +789,7 @@ impl Editor {
             width,
             height,
             pixels,
+            mask: None,
         });
         Ok(())
     }
@@ -665,6 +802,7 @@ impl Editor {
             width,
             height,
             pixels,
+            mask: None,
         });
         Ok(())
     }
@@ -676,12 +814,13 @@ impl Editor {
         let Some(sel) = self.selection else {
             return Err(Error::NoSelection);
         };
-        let Some((base, patch)) = self.capture_selection(sel) else {
+        let mask = self.selection_mask.clone();
+        let Some((base, patch)) = self.capture_selection(sel, mask.as_deref()) else {
             return Err(Error::NoSelection);
         };
         self.cancel_gesture();
         self.push_undo();
-        self.place_moved_selection(sel, &base, &patch, dx, dy);
+        self.place_moved_selection(sel, mask.as_deref(), &base, &patch, dx, dy);
         Ok(())
     }
 
@@ -705,7 +844,8 @@ impl Editor {
             width: canvas_w,
             height: canvas_h,
         });
-        let Some((base, patch)) = self.capture_selection(sel) else {
+        let mask = self.selection_mask.clone();
+        let Some((base, patch)) = self.capture_selection(sel, mask.as_deref()) else {
             return Err(Error::Index { what: "cel" });
         };
         let (_width, _height, turned) =
@@ -714,6 +854,16 @@ impl Editor {
                 value: u64::from(sel.width).saturating_mul(u64::from(sel.height)),
                 max: crate::limits::MAX_CEL_PIXELS,
             })?;
+        let turned_mask = match &mask {
+            Some(mask) => Some(
+                selection::transform_mask(sel.width, sel.height, mask, op).ok_or(Error::Limit {
+                    what: "pixels in a transform",
+                    value: u64::from(sel.width).saturating_mul(u64::from(sel.height)),
+                    max: crate::limits::MAX_CEL_PIXELS,
+                })?,
+            ),
+            None => None,
+        };
         let dest = turned_rect(sel, canvas_w, canvas_h, op);
         let kept = rect_on_canvas(dest, canvas_w, canvas_h).ok_or(Error::TransformOutside)?;
         let frame = self.doc.active_frame();
@@ -733,8 +883,20 @@ impl Editor {
                 cel.copy_from_slice(&base);
             }
         }
-        self.blit_patch(dest.x, dest.y, dest.width, dest.height, &turned);
-        self.selection = if had_selection { Some(kept) } else { None };
+        self.blit_patch(
+            dest.x,
+            dest.y,
+            dest.width,
+            dest.height,
+            &turned,
+            turned_mask.as_deref(),
+        );
+        if had_selection {
+            let kept_mask = turned_mask.map(|mask| selection::crop_mask(dest, &mask, kept));
+            self.set_selection(Some(kept), kept_mask);
+        } else {
+            self.set_selection(None, None);
+        }
         self.dirty = true;
         self.generation += 1;
         Ok(())
@@ -752,11 +914,17 @@ impl Editor {
             return Ok(());
         }
         self.structural(|doc| doc.resize(width, height, shift_x, shift_y))?;
-        self.selection = None;
+        self.set_selection(None, None);
         Ok(())
     }
 
-    fn capture_selection(&self, sel: PixelRect) -> Option<(Vec<Rgba>, Vec<Rgba>)> {
+    /// Copy the selected pixels out of the active cel. Returns the cel with them
+    /// cleared and the copied patch, which is clear where the mask is off.
+    fn capture_selection(
+        &self,
+        sel: PixelRect,
+        mask: Option<&[bool]>,
+    ) -> Option<(Vec<Rgba>, Vec<Rgba>)> {
         let frame = self.doc.active_frame();
         let layer = self.doc.active_layer();
         let cel = self.doc.cel(frame, layer).ok()?;
@@ -771,6 +939,9 @@ impl Editor {
                 if sx < 0 || sy < 0 || sx as u32 >= width || sy as u32 >= height {
                     continue;
                 }
+                if !selection::mask_contains(sel, mask, sx, sy) {
+                    continue;
+                }
                 let src = (sy as u32 * width + sx as u32) as usize;
                 patch[(y as u32 * sel.width + x as u32) as usize] = cel[src];
                 base[src] = Rgba::CLEAR;
@@ -782,6 +953,7 @@ impl Editor {
     fn place_moved_selection(
         &mut self,
         origin: PixelRect,
+        mask: Option<&[bool]>,
         base: &[Rgba],
         patch: &[Rgba],
         dx: i32,
@@ -802,18 +974,46 @@ impl Editor {
             origin.width,
             origin.height,
             patch,
+            mask,
         );
-        self.selection = Some(PixelRect {
+        let moved = PixelRect {
             x: origin.x + dx,
             y: origin.y + dy,
             width: origin.width,
             height: origin.height,
-        });
+        };
+        // A drag places the same shape every step, so shift its outline instead
+        // of tracing the mask again.
+        match self.selection {
+            Some(prev)
+                if (prev.width, prev.height) == (moved.width, moved.height)
+                    && self.selection_mask.as_deref() == mask =>
+            {
+                let (sx, sy) = (moved.x - prev.x, moved.y - prev.y);
+                for edge in &mut self.selection_edges {
+                    edge.x0 += sx;
+                    edge.x1 += sx;
+                    edge.y0 += sy;
+                    edge.y1 += sy;
+                }
+                self.selection = Some(moved);
+            }
+            _ => self.set_selection(Some(moved), mask.map(<[bool]>::to_vec)),
+        }
         self.dirty = true;
         self.generation += 1;
     }
 
-    fn blit_patch(&mut self, dest_x: i32, dest_y: i32, width: u32, height: u32, pixels: &[Rgba]) {
+    /// Write `pixels` at `dest`. Where `mask` is off the cel keeps its pixel.
+    fn blit_patch(
+        &mut self,
+        dest_x: i32,
+        dest_y: i32,
+        width: u32,
+        height: u32,
+        pixels: &[Rgba],
+        mask: Option<&[bool]>,
+    ) {
         let frame = self.doc.active_frame();
         let layer = self.doc.active_layer();
         let canvas_w = self.doc.width();
@@ -830,6 +1030,9 @@ impl Editor {
                 }
                 let src = (y as u32 * width + x as u32) as usize;
                 let dst = (dy as u32 * canvas_w + dx as u32) as usize;
+                if mask.is_some_and(|mask| !mask.get(src).copied().unwrap_or(false)) {
+                    continue;
+                }
                 if let Some(px) = pixels.get(src) {
                     cel[dst] = *px;
                 }
@@ -847,7 +1050,9 @@ impl Editor {
         let bottom = sel.y + sel.height as i32;
         for y in sel.y..bottom {
             for x in sel.x..right {
-                points.push((x, y));
+                if self.is_selected(x, y) {
+                    points.push((x, y));
+                }
             }
         }
         self.paint(&points, None, false);
@@ -857,7 +1062,7 @@ impl Editor {
     pub fn replace_document(&mut self, doc: Document) {
         self.doc = doc;
         self.history.clear();
-        self.selection = None;
+        self.set_selection(None, None);
         self.cancel_gesture();
         self.end_coalesce();
         self.dirty = false;
@@ -1085,7 +1290,7 @@ impl Editor {
             }
             Err(err) => {
                 self.doc = snapshot.doc;
-                self.selection = snapshot.selection;
+                self.set_selection(snapshot.selection, snapshot.selection_mask);
                 Err(err)
             }
         }
@@ -1228,25 +1433,31 @@ impl Editor {
 
     /// One-pixel pencil only. The whole stroke is rewritten from the pre-stroke cel,
     /// so a corner dropped later is one undo step with the pixels that remain.
-    fn paint_pixel_perfect(&mut self, samples: &[(i32, i32)], color: Option<Rgba>) {
+    fn paint_pixel_perfect(&mut self, samples: &[(i32, i32)], button: MouseButton) {
         let expanded = expand_stroke(samples);
-        let cleaned = if self.brush == 1 {
+        let cleaned = if self.pixel_perfect && self.brush == 1 {
             pixel_perfect_path(&expanded)
         } else {
             expanded
         };
-        self.rewrite_stroke(&cleaned, color);
+        self.rewrite_stroke(&cleaned, button);
     }
 
-    fn rewrite_stroke(&mut self, points: &[(i32, i32)], color: Option<Rgba>) {
+    fn rewrite_stroke(&mut self, points: &[(i32, i32)], button: MouseButton) {
         let frame = self.doc.active_frame();
         let layer = self.doc.active_layer();
         let width = self.doc.width();
-        let stamped = self.stamp(points, color);
+        let stamped = self.stamp(points, self.stroke_color(button));
         let Ok(current_cel) = self.doc.cel(frame, layer) else {
             return;
         };
         let current = current_cel.to_vec();
+        let stamped = if self.shade {
+            let base = self.pencil_base.as_deref().unwrap_or(&current);
+            self.shade_stamped(stamped, base, button)
+        } else {
+            stamped
+        };
         if self.pencil_base.is_none() {
             let mut changes = Vec::new();
             for (x, y, px) in &stamped {
@@ -1288,6 +1499,27 @@ impl Editor {
         }
         self.dirty = true;
         self.generation += 1;
+    }
+
+    /// Each stamped pixel becomes the next swatch after its pre-stroke color
+    /// (left button) or the one before it (right button). Pixels with no
+    /// shade are dropped, so they keep what they had.
+    fn shade_stamped(
+        &self,
+        stamped: Vec<(i32, i32, Rgba)>,
+        base: &[Rgba],
+        button: MouseButton,
+    ) -> Vec<(i32, i32, Rgba)> {
+        let width = self.doc.width();
+        let forward = button == MouseButton::Primary;
+        stamped
+            .into_iter()
+            .filter_map(|(x, y, _)| {
+                let i = (y as u32 * width + x as u32) as usize;
+                let before = *base.get(i)?;
+                shade_step(before, self.doc.palette(), forward).map(|shade| (x, y, shade))
+            })
+            .collect()
     }
 
     fn stamp(&self, points: &[(i32, i32)], color: Option<Rgba>) -> Vec<(i32, i32, Rgba)> {
@@ -1333,7 +1565,7 @@ impl Editor {
             if px < 0 || py < 0 || px >= width || py >= height {
                 continue;
             }
-            if self.selection.is_some_and(|sel| !sel.contains(px, py)) {
+            if !self.in_selection(px, py) {
                 continue;
             }
             out.push((px, py, color));
@@ -1349,7 +1581,7 @@ impl Editor {
         if x < 0 || y < 0 || x as u32 >= self.doc.width() || y as u32 >= self.doc.height() {
             return;
         }
-        if self.selection.is_some_and(|sel| !sel.contains(x, y)) {
+        if !self.in_selection(x, y) {
             return;
         }
         let frame = self.doc.active_frame();
@@ -1364,7 +1596,6 @@ impl Editor {
             return;
         }
         let snapshot = self.snapshot();
-        let selection = self.selection;
         let Ok(cel) = self.doc.cel_mut(frame, layer) else {
             return;
         };
@@ -1376,7 +1607,8 @@ impl Editor {
             y,
             color,
             FillLimits {
-                selection,
+                selection: self.selection,
+                mask: self.selection_mask.as_deref(),
                 wrap: self.wrap,
                 tolerance: self.fill_tolerance,
                 global: self.fill_global,
@@ -1388,6 +1620,27 @@ impl Editor {
         self.history.push(snapshot);
         self.dirty = true;
         self.generation += 1;
+    }
+
+    /// Select what the fill tool would reach from `(x, y)` on the active cel,
+    /// combined with the selection by the select mode. The current selection does
+    /// not limit the search. A click off the cel changes nothing.
+    fn wand(&mut self, x: i32, y: i32) {
+        let frame = self.doc.active_frame();
+        let layer = self.doc.active_layer();
+        let Ok(cel) = self.doc.cel(frame, layer) else {
+            return;
+        };
+        let limits = FillLimits {
+            wrap: self.wrap,
+            tolerance: self.fill_tolerance,
+            global: self.fill_global,
+            ..Default::default()
+        };
+        let Some(area) = fill_region(cel, self.doc.width(), self.doc.height(), x, y, limits) else {
+            return;
+        };
+        self.combine_selection(area, self.select_mode);
     }
 }
 
@@ -2075,6 +2328,81 @@ mod tests {
     }
 
     #[test]
+    fn shading_steps_each_pixel_once_along_the_palette() {
+        let dark = Rgba::new(10, 10, 10, 255);
+        let mid = Rgba::new(80, 80, 80, 255);
+        let light = Rgba::new(200, 200, 200, 255);
+        let other = Rgba::new(1, 200, 3, 255);
+        let mut ed = Editor::new(4, 1).unwrap();
+        ed.set_palette(vec![dark, mid, light]).unwrap();
+        for (x, color) in [(0, dark), (1, dark), (2, mid), (3, other)] {
+            ed.set_primary(color);
+            ed.pointer_down(x, 0, MouseButton::Primary, false);
+            ed.pointer_up(x, 0, false);
+        }
+        ed.set_shade(true);
+        assert!(ed.shades());
+
+        // Across the row and back again: each pixel moves one swatch, once.
+        ed.pointer_down(0, 0, MouseButton::Primary, false);
+        ed.pointer_move(3, 0, false);
+        ed.pointer_move(0, 0, false);
+        ed.pointer_up(0, 0, false);
+        assert_eq!(cel_pixel(&ed, 0, 0), mid);
+        assert_eq!(cel_pixel(&ed, 1, 0), mid);
+        assert_eq!(cel_pixel(&ed, 2, 0), light);
+        assert_eq!(cel_pixel(&ed, 3, 0), other);
+
+        // A second stroke steps again; the lightest swatch stays.
+        ed.pointer_down(2, 0, MouseButton::Primary, false);
+        ed.pointer_up(2, 0, false);
+        assert_eq!(cel_pixel(&ed, 2, 0), light);
+        ed.pointer_down(0, 0, MouseButton::Primary, false);
+        ed.pointer_up(0, 0, false);
+        assert_eq!(cel_pixel(&ed, 0, 0), light);
+
+        // The right button steps back.
+        ed.pointer_down(1, 0, MouseButton::Secondary, false);
+        ed.pointer_up(1, 0, false);
+        assert_eq!(cel_pixel(&ed, 1, 0), dark);
+
+        // Each stroke was one undo step.
+        assert!(ed.undo());
+        assert_eq!(cel_pixel(&ed, 1, 0), mid);
+        assert!(ed.undo());
+        assert_eq!(cel_pixel(&ed, 0, 0), mid);
+        assert!(ed.undo());
+        assert!(ed.undo());
+        assert_eq!(cel_pixel(&ed, 0, 0), dark);
+        assert_eq!(cel_pixel(&ed, 2, 0), mid);
+    }
+
+    #[test]
+    fn shading_follows_the_mirror_and_leaves_the_eraser_alone() {
+        let dark = Rgba::new(10, 10, 10, 255);
+        let mid = Rgba::new(80, 80, 80, 255);
+        let mut ed = Editor::new(4, 1).unwrap();
+        ed.set_palette(vec![dark, mid]).unwrap();
+        for x in 0..4 {
+            ed.set_primary(dark);
+            ed.pointer_down(x, 0, MouseButton::Primary, false);
+            ed.pointer_up(x, 0, false);
+        }
+        ed.set_shade(true);
+        ed.set_mirror_x(true);
+        ed.pointer_down(0, 0, MouseButton::Primary, false);
+        ed.pointer_up(0, 0, false);
+        assert_eq!(cel_pixel(&ed, 0, 0), mid);
+        assert_eq!(cel_pixel(&ed, 3, 0), mid);
+        assert_eq!(cel_pixel(&ed, 1, 0), dark);
+
+        ed.set_tool(Tool::Eraser);
+        ed.pointer_down(1, 0, MouseButton::Primary, false);
+        ed.pointer_up(1, 0, false);
+        assert_eq!(cel_pixel(&ed, 1, 0), Rgba::CLEAR);
+    }
+
+    #[test]
     fn moving_a_swatch_is_one_undo_and_exports_in_the_new_order() {
         let mut ed = Editor::new(4, 4).unwrap();
         let colors = vec![
@@ -2216,5 +2544,164 @@ mod tests {
         ed.set_snap_to_palette(true);
         ed.pointer_down(0, 3, MouseButton::Primary, false);
         assert_eq!(ed.primary(), chosen);
+    }
+
+    /// Ink at (1,1), (2,1) and (1,2): an L whose bounding box is (1,1) to (2,2).
+    fn paint_l(ed: &mut Editor, color: Rgba) {
+        for (x, y) in [(1, 1), (2, 1), (1, 2)] {
+            paint(ed, x, y, color);
+        }
+    }
+
+    #[test]
+    fn wand_selects_the_fill_area_and_shift_adds_alt_subtracts() {
+        let mut ed = editor();
+        paint_l(&mut ed, ink(1));
+        paint(&mut ed, 5, 5, ink(1));
+        ed.set_tool(Tool::Wand);
+        ed.pointer_down(1, 1, MouseButton::Primary, false);
+        ed.pointer_up(1, 1, false);
+        assert_eq!(ed.selection(), Some(PixelRect::from_corners(1, 1, 2, 2)));
+        assert!(ed.selection_is_masked());
+        assert!(ed.is_selected(2, 1) && ed.is_selected(1, 2));
+        assert!(!ed.is_selected(2, 2) && !ed.is_selected(5, 5));
+        let length: i32 = ed
+            .selection_outline()
+            .iter()
+            .map(|e| (e.x1 - e.x0) + (e.y1 - e.y0))
+            .sum();
+        assert_eq!(length, 8);
+
+        ed.set_select_mode(SelectMode::Add);
+        ed.pointer_down(5, 5, MouseButton::Primary, false);
+        assert_eq!(ed.selection(), Some(PixelRect::from_corners(1, 1, 5, 5)));
+        assert!(ed.is_selected(5, 5) && ed.is_selected(1, 1));
+
+        ed.set_select_mode(SelectMode::Subtract);
+        ed.pointer_down(1, 1, MouseButton::Primary, false);
+        assert_eq!(ed.selection(), Some(PixelRect::from_corners(5, 5, 5, 5)));
+        assert!(!ed.selection_is_masked());
+
+        // Tolerance reaches a near color; Global reaches every clear pixel.
+        ed.set_select_mode(SelectMode::Replace);
+        paint(&mut ed, 3, 1, ink(4));
+        ed.set_fill_tolerance(3);
+        ed.pointer_down(1, 1, MouseButton::Primary, false);
+        assert!(ed.is_selected(3, 1) && !ed.is_selected(5, 5));
+        ed.set_fill_tolerance(0);
+        ed.set_fill_global(true);
+        ed.pointer_down(0, 0, MouseButton::Primary, false);
+        assert!(ed.is_selected(7, 7) && ed.is_selected(2, 2));
+        assert!(!ed.is_selected(1, 1) && !ed.is_selected(5, 5));
+        // A click off the cel keeps the selection, and selecting is not an undo step.
+        ed.pointer_down(-1, 0, MouseButton::Primary, false);
+        assert!(ed.is_selected(7, 7));
+        assert!(!ed.can_undo());
+    }
+
+    #[test]
+    fn shift_and_alt_marquees_add_and_cut_out() {
+        let mut ed = editor();
+        ed.set_tool(Tool::Select);
+        ed.pointer_down(0, 0, MouseButton::Primary, false);
+        ed.pointer_up(3, 3, false);
+        ed.set_select_mode(SelectMode::Subtract);
+        ed.pointer_down(1, 1, MouseButton::Primary, false);
+        ed.pointer_move(2, 2, false);
+        assert_eq!(
+            ed.marquee_drag(),
+            Some((PixelRect::from_corners(1, 1, 2, 2), SelectMode::Subtract))
+        );
+        ed.pointer_up(2, 2, false);
+        assert_eq!(ed.selection(), Some(PixelRect::from_corners(0, 0, 3, 3)));
+        assert!(ed.is_selected(0, 0) && !ed.is_selected(1, 2));
+        // Pressing inside an added area starts a new marquee instead of a move.
+        ed.set_select_mode(SelectMode::Add);
+        ed.pointer_down(1, 1, MouseButton::Primary, false);
+        ed.pointer_up(2, 2, false);
+        assert_eq!(ed.selection(), Some(PixelRect::from_corners(0, 0, 3, 3)));
+        assert!(!ed.selection_is_masked());
+    }
+
+    #[test]
+    fn a_masked_selection_moves_clears_and_clips_only_its_pixels() {
+        let mut ed = editor();
+        paint_l(&mut ed, ink(1));
+        paint(&mut ed, 2, 2, ink(2));
+        ed.set_tool(Tool::Wand);
+        ed.pointer_down(1, 1, MouseButton::Primary, false);
+        ed.set_tool(Tool::Select);
+        ed.pointer_down(1, 1, MouseButton::Primary, false);
+        ed.pointer_move(4, 1, false);
+        ed.pointer_up(4, 1, false);
+        for (x, y) in [(4, 1), (5, 1), (4, 2)] {
+            assert_eq!(cel_pixel(&ed, x, y), ink(1));
+        }
+        assert_eq!(cel_pixel(&ed, 5, 2), Rgba::CLEAR);
+        assert_eq!(cel_pixel(&ed, 1, 1), Rgba::CLEAR);
+        // The unselected corner of the bounding box stays.
+        assert_eq!(cel_pixel(&ed, 2, 2), ink(2));
+        assert_eq!(ed.selection(), Some(PixelRect::from_corners(4, 1, 5, 2)));
+        assert!(!ed.is_selected(5, 2));
+        // The shifted outline matches one traced at the new place.
+        let traced = selection::outline(
+            PixelRect::from_corners(4, 1, 5, 2),
+            ed.selection_mask.as_deref(),
+        );
+        assert_eq!(ed.selection_outline(), traced.as_slice());
+
+        // Undo puts the mask back with the pixels.
+        assert!(ed.undo());
+        assert_eq!(ed.selection(), Some(PixelRect::from_corners(1, 1, 2, 2)));
+        assert!(ed.selection_is_masked() && !ed.is_selected(2, 2));
+
+        ed.set_tool(Tool::Pencil);
+        ed.set_primary(ink(9));
+        ed.pointer_down(2, 2, MouseButton::Primary, false);
+        ed.pointer_up(2, 2, false);
+        assert_eq!(cel_pixel(&ed, 2, 2), ink(2));
+        ed.pointer_down(2, 1, MouseButton::Primary, false);
+        ed.pointer_up(2, 1, false);
+        assert_eq!(cel_pixel(&ed, 2, 1), ink(9));
+
+        ed.clear_selection_pixels().unwrap();
+        assert_eq!(cel_pixel(&ed, 1, 1), Rgba::CLEAR);
+        assert_eq!(cel_pixel(&ed, 2, 1), Rgba::CLEAR);
+        assert_eq!(cel_pixel(&ed, 2, 2), ink(2));
+
+        // The bucket stays inside the mask too.
+        ed.set_tool(Tool::Bucket);
+        ed.pointer_down(1, 1, MouseButton::Primary, false);
+        assert_eq!(cel_pixel(&ed, 1, 2), ink(9));
+        assert_eq!(cel_pixel(&ed, 0, 0), Rgba::CLEAR);
+    }
+
+    #[test]
+    fn a_masked_copy_pastes_and_flips_its_shape() {
+        let mut ed = editor();
+        paint_l(&mut ed, ink(1));
+        paint(&mut ed, 6, 6, ink(3));
+        ed.set_tool(Tool::Wand);
+        ed.pointer_down(1, 1, MouseButton::Primary, false);
+        assert!(ed.copy_selection());
+        ed.set_tool(Tool::Select);
+        ed.pointer_down(5, 5, MouseButton::Primary, false);
+        ed.pointer_up(5, 5, false);
+        ed.paste_clipboard().unwrap();
+        for (x, y) in [(5, 5), (6, 5), (5, 6)] {
+            assert_eq!(cel_pixel(&ed, x, y), ink(1));
+        }
+        assert_eq!(cel_pixel(&ed, 6, 6), ink(3));
+        assert!(ed.selection_is_masked() && !ed.is_selected(6, 6));
+
+        // X X        X X
+        // X .  flips . X, over the unselected pixel at (6, 6).
+        ed.transform_pixels(Transform::FlipHorizontal).unwrap();
+        assert_eq!(cel_pixel(&ed, 5, 6), Rgba::CLEAR);
+        assert_eq!(cel_pixel(&ed, 6, 6), ink(1));
+        assert!(ed.is_selected(6, 6) && !ed.is_selected(5, 6));
+        assert!(ed.undo());
+        assert_eq!(cel_pixel(&ed, 6, 6), ink(3));
+        assert!(ed.is_selected(5, 6));
     }
 }

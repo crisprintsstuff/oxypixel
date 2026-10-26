@@ -1,6 +1,6 @@
 # Roadmap and scorecard
 
-Status date: 2026-10-24. Version in tree: 0.6.1 (`Cargo.toml`). GitHub issues: none open. This file is the work list for [AGENTS.md](../AGENTS.md).
+Status date: 2026-10-26. Version in tree: 0.7.0 (`Cargo.toml`). GitHub issues: none open. This file is the work list for [AGENTS.md](../AGENTS.md).
 
 Rows are taken from the code and the docs. **Proposal** means the item is a reasonable next step, not a commitment and not an open issue. Do not start a proposal unless a human asks for it.
 
@@ -12,26 +12,26 @@ Infrastructure, then small fixes that already have a place in the code.
 
 OX-002, OX-011, and OX-012 are done, so this list is empty.
 
-Suggested order if a human picks proposals: OX-P24, OX-P25, then OX-P23. OX-P20, OX-P21, OX-P6, and OX-P22 are done. OX-P27 waits for a format decision.
+Suggested order if a human picks proposals: OX-P20, OX-P21, OX-P6, OX-P22, OX-P24, OX-P25, and OX-P23 are done. OX-P27 waits for a format decision.
 
 ## Scorecard
 
 ### Done
 
-In the 0.6.1 tree and covered by tests or by the release workflow.
+In the 0.7.0 tree and covered by tests or by the release workflow.
 
 | Area | What exists | Where |
 | --- | --- | --- |
-| Tools | Pencil, eraser, fill, eyedropper, line, rectangle, ellipse, rectangular select. Brush 1–16. Filled or outline shapes. Optional one-pixel pixel-perfect pencil. Fill tolerance 0–255 and a global fill | `editor.rs`, `draw.rs` |
-| Selection | Drag to move, arrow nudge, flip, rotate, system-clipboard and in-memory copy and paste, clear, select all. The status line shows the selection size | `editor.rs`, `clipboard.rs`, `app.rs` |
+| Tools | Pencil, eraser, fill, eyedropper, line, rectangle, ellipse, rectangular select. Brush 1–16. Filled or outline shapes. Optional one-pixel pixel-perfect pencil. Fill tolerance 0–255 and a global fill. Shading along the palette (D) | `editor.rs`, `draw.rs` |
+| Selection | Rectangle and magic wand, Shift to add and Alt to cut out, so a selection can be any shape. Drag to move, arrow nudge, flip, rotate, system-clipboard and in-memory copy and paste, clear, select all. The status line shows the selection size | `editor.rs`, `selection.rs`, `clipboard.rs`, `app.rs`, `canvas.rs` |
 | Canvas | Resize and crop. Mirror horizontal and vertical while stamping. Optional wrap, and a 3×3 tiled view that export ignores | `document.rs`, `editor.rs`, `canvas.rs` |
 | Layers | Add, delete, duplicate, reorder, rename, visibility, opacity, merge down. At most 32 | `document.rs` |
 | Frames | Add, duplicate, duration 20–10000 ms on the slider, playback clock, thumbnails, onion skin for earlier and later frames | `animation.rs`, `canvas.rs`, `framestrip.rs` |
 | Undo | Up to 50 steps and 256 MiB, including the selection rectangle. Slider drags coalesce | `history.rs` |
 | `.oxypix` | Version 1, little-endian, caps before allocation, trailing bytes rejected | `io/oxypix.rs`, `docs/FORMAT.md` |
-| Raster | PNG, BMP, and GIF import and export. GIF import is one composited layer. Spritesheet and 2×/4× nearest PNG | `io/raster.rs` |
+| Raster | PNG, BMP, and GIF import and export. GIF import is one composited layer. Spritesheet in a row or a grid with padding and a JSON description, and 2×/4× nearest PNG | `io/raster.rs` |
 | References | PNG and JPEG overlays or a floating panel. Placement is a sidecar, not a `.oxypix` field. Export, merge, and the eyedropper skip them unless Sample is on | `reference.rs`, `refsview.rs` |
-| CLI | `export-png`, `export-bmp`, `export-gif`, `export-sheet`, `export-palette`, and `import-palette`. Failures print and exit. Missing file must not hang | `cli.rs`, `tests/cli.rs` |
+| CLI | `export-png`, `export-bmp`, `export-gif`, `export-sheet` (with `--columns`, `--padding`, `--scale`, `--json`), `export-palette`, and `import-palette`. Failures print and exit. Missing file must not hang | `cli.rs`, `tests/cli.rs` |
 | Palette files | GIMP `.gpl`, hex `.hex` (one `RRGGBB` per line, `RRGGBBAA` when alpha is not 255), and JASC `.pal`. Import replaces the palette and is one undo step. Swatches drag to a new index. A ramp of N steps can fill the span between two swatches. Snap (S) makes pencil, fill, and shapes use the nearest palette color. More than 256 colors is an error | `io/palette.rs`, `editor.rs`, `color.rs`, `app.rs` |
 | Window | egui 0.31 on wgpu (Direct3D 12 with WARP on Windows, Vulkan on Linux), falling back to glow OpenGL, nearest-neighbor canvas, whole-pixel zoom, a grid when the cells are readable, pan, shortcuts, tool icons with their shortcut letter, a preview panel beside the canvas | `app.rs`, `canvas.rs`, `preview.rs` |
 | Files UI | Recent list of ten paths, a folder hint when names match, a missing-file mark, and Clear recent. Drag and drop, Windows file dialog, Linux portal with a path field fallback | `recent.rs`, `native.rs` |
@@ -233,15 +233,21 @@ With the fill tool, the tools panel shows Global fill and a Tolerance slider fro
 
 ### OX-P23
 
-**Magic wand, and selections that are not rectangles.** Select is a rectangle. A later task could store the selection as a mask in `oxypixel-core`, add a wand that picks touching pixels of one color (with the P22 tolerance), and let Shift add and Alt subtract. Move, nudge, flip, rotate, copy, clear, and the clip for stamps and fill then use the mask. The marquee follows the mask edge. Undo keeps storing the selection. This touches the most code of these proposals and should land before any lasso.
+**Magic wand, and selections that are not rectangles.** Status: done. Area: `crates/oxypixel-core/src/selection.rs`, `crates/oxypixel-core/src/editor.rs`, `crates/oxypixel-core/src/draw.rs`, `crates/oxypixel/src/canvas.rs`, `crates/oxypixel/src/app.rs`.
+
+The selection is its bounding rectangle plus an optional mask, one flag per pixel of that rectangle; a marquee and Select All store no mask. `Editor::set_selection` is the only place it changes, and it trims the mask to what it selects, drops a mask that fills its rectangle, and keeps the outline edges so the canvas does not trace them every frame. The wand (W) selects what `fill_region` reaches from the clicked pixel on the active cel, with the fill tool's Tolerance, Global, and wrap; the bucket fills the same region. Shift adds a marquee or wand area and Alt cuts it out (Alt no longer picks a color with these two tools); combining works on the canvas, so the parts of a selection hanging off it are dropped. Moving, nudging, copying, and clearing touch only selected pixels, and a move or paste leaves the unselected pixels of the rectangle as they were. Flips and turns turn the mask with the pixels. Undo snapshots carry the mask, and a selection change by itself is still not an undo step. The in-memory clipboard keeps the mask; the system clipboard gets the rectangle with clear pixels outside it. The selection stays session state, not saved in the file. The mask helpers are tested in `selection.rs`, the wand, Shift/Alt, masked move, clear, clip, paste, and flip in `editor.rs`, and the modifier mapping in `canvas.rs`. A lasso can build on the same mask.
 
 ### OX-P24
 
-**Shade along the palette.** P16 made ramps. A later task could add a shading mode to the pencil: left click replaces a pixel with the next swatch in the palette, right click with the previous one, and a pixel that is not in the palette is left alone. It is one undo step per stroke, and pixel-perfect, mirror, and wrap still apply. The rule is tested in `editor.rs`.
+**Shade along the palette.** Status: done. Area: `crates/oxypixel-core/src/color.rs`, `crates/oxypixel-core/src/editor.rs`, `crates/oxypixel/src/app.rs`.
+
+Shade (checkbox, or D) turns the pencil into a shading brush. Left button replaces each pixel with the next swatch after its color, right button with the swatch before it. A color not in the palette, or one at the end it would step past, stays as it is. The stroke is rewritten from the cel as it was before the stroke, so going back over a pixel shades it once, and a stroke is one undo step. Brush size, pixel-perfect, mirror, wrap, and the selection still apply; the eraser is unchanged. `shade_step` is tested in `color.rs` and the stroke in `editor.rs`.
 
 ### OX-P25
 
-**Spritesheet layout and a JSON description.** `export-sheet` and the window write one row of frames. A later task could add columns and padding, and write a `.json` file next to the PNG with each frame's rectangle and duration, so a game engine can load the sheet without hand-entered numbers. The CLI gets the same options and keeps failing with an exit code, not a dialog.
+**Spritesheet layout and a JSON description.** Status: done. Area: `crates/oxypixel-core/src/io/raster.rs`, `crates/oxypixel/src/cli.rs`, `crates/oxypixel/src/app.rs`.
+
+Export spritesheet takes Columns (0 is one row, as before), Padding (clear pixels between cells, up to 256), and Scale, and can also write `<name>.json`. That file is a JSON array sheet: one entry per frame with its `frame` rectangle, `sourceSize`, and `duration` in milliseconds, then `meta` with the image name, the sheet size, and the scale. `export-sheet` takes `--columns`, `--padding`, `--scale`, and `--json`, and still fails with an exit code, not a dialog. Width and height are each capped at 16384 and the area at 64 Mi pixels, so a grid can be no larger than the widest one-row sheet already was. A one-row sheet is byte-for-byte what it was. `spritesheet_grid`, the PNG, and the JSON are tested in `raster.rs`, and the options in `tests/cli.rs`.
 
 ### OX-P26
 

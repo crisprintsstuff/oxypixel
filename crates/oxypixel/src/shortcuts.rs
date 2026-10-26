@@ -37,6 +37,7 @@ pub enum Command {
     Nudge(i32, i32),
     Transform(Transform),
     TogglePixelPerfect,
+    ToggleShade,
     ToggleWrap,
     ToggleTiled,
     ToggleSnap,
@@ -153,6 +154,10 @@ pub const BINDINGS: &[Binding] = &[
         action: "Pixel-perfect pencil. One-pixel strokes drop the extra diagonal corner",
     },
     Binding {
+        keys: "D",
+        action: "Shade with the pencil. Left steps a pixel to the next swatch, right to the one before",
+    },
+    Binding {
         keys: "T",
         action: "Wrap drawing past an edge onto the opposite edge",
     },
@@ -207,8 +212,10 @@ pub fn command_from(modifiers: Modifiers, key: Key) -> Option<Command> {
         (false, false, Key::R) => Some(Command::Tool(Tool::Rectangle)),
         (false, false, Key::O) => Some(Command::Tool(Tool::Ellipse)),
         (false, false, Key::M) => Some(Command::Tool(Tool::Select)),
+        (false, false, Key::W) => Some(Command::Tool(Tool::Wand)),
         (false, false, Key::X) => Some(Command::SwapColors),
         (false, false, Key::P) => Some(Command::TogglePixelPerfect),
+        (false, false, Key::D) => Some(Command::ToggleShade),
         (false, false, Key::T) => Some(Command::ToggleWrap),
         (false, true, Key::T) => Some(Command::ToggleTiled),
         (false, false, Key::S) => Some(Command::ToggleSnap),
@@ -366,6 +373,10 @@ mod tests {
         assert_eq!(
             command_from(Modifiers::NONE, Key::P),
             Some(Command::TogglePixelPerfect)
+        );
+        assert_eq!(
+            command_from(Modifiers::NONE, Key::D),
+            Some(Command::ToggleShade)
         );
         assert_eq!(
             command_from(Modifiers::NONE, Key::T),
