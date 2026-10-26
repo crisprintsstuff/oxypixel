@@ -12,7 +12,7 @@ Infrastructure, then small fixes that already have a place in the code.
 
 OX-002, OX-011, and OX-012 are done, so this list is empty.
 
-Suggested order if a human picks proposals: OX-P20 and OX-P21 (small follow-ups to 0.6.0), OX-P6 (the window has no launch check), OX-P22, OX-P24, OX-P25, then OX-P23. OX-P27 waits for a format decision.
+Suggested order if a human picks proposals: OX-P21 (a small follow-up to 0.6.0; OX-P20 is done), OX-P6 (the window has no launch check), OX-P22, OX-P24, OX-P25, then OX-P23. OX-P27 waits for a format decision.
 
 ## Scorecard
 
@@ -35,7 +35,7 @@ In the 0.6.1 tree and covered by tests or by the release workflow.
 | Palette files | GIMP `.gpl`, hex `.hex` (one `RRGGBB` per line, `RRGGBBAA` when alpha is not 255), and JASC `.pal`. Import replaces the palette and is one undo step. Swatches drag to a new index. A ramp of N steps can fill the span between two swatches. Snap (S) makes pencil, fill, and shapes use the nearest palette color. More than 256 colors is an error | `io/palette.rs`, `editor.rs`, `color.rs`, `app.rs` |
 | Window | egui 0.31 glow, nearest-neighbor canvas, whole-pixel zoom, a grid when the cells are readable, pan, shortcuts, tool icons with their shortcut letter, a preview panel beside the canvas | `app.rs`, `canvas.rs`, `preview.rs` |
 | Files UI | Recent list of ten paths, a folder hint when names match, a missing-file mark, and Clear recent. Drag and drop, Windows file dialog, Linux portal with a path field fallback | `recent.rs`, `native.rs` |
-| Recovery | Autosave writes a `.oxypix` in the data directory about once a minute and after 30 edits. Startup can restore or discard it. A save, a discard, or a clean close removes it | `recovery.rs`, `app.rs` |
+| Recovery | Autosave writes a `.oxypix` in the data directory about once a minute and after 30 edits, with the reference list beside it. Startup can restore or discard it. A save, a discard, or a clean close removes it | `recovery.rs`, `app.rs` |
 | Updates | Help, then Check for updates. Download only after `SHA256SUMS.txt` matches. No network until that command | `update.rs` |
 | Windows package | Per-user NSIS installer and portable exe. Static CRT. Unsigned | `installer/oxypixel.nsi`, `release.yml` |
 | Portable exe resources | The tagged Windows build embeds an icon and VERSIONINFO from `oxypixel.rc` when `rc.exe` is on `PATH`. A cross-build without `rc.exe`, `llvm-rc`, or `windres` does not | `build.rs`, [README.md](../README.md), [BUILD-WINDOWS.md](BUILD-WINDOWS.md) |
@@ -213,7 +213,9 @@ File → Load reference, or a dropped JPEG, keeps the picture beside the documen
 
 ### OX-P20
 
-**Keep references in the recovery copy.** Autosave writes the document to a recovery `.oxypix`, but not the references. After a crash, a restored drawing has the references from its last Save, and an untitled drawing has none. A later task could write a `.refs` sidecar beside the recovery file, with absolute paths, and load it on restore. It stays out of the user's own folder until Save, and export still ignores it.
+**Keep references in the recovery copy.** Status: done. Area: `crates/oxypixel/src/recovery.rs`, `crates/oxypixel/src/app.rs`, `crates/oxypixel-core/src/reference.rs`.
+
+Each recovery copy gets a `{id}.oxypix.refs` beside it, written in the same background job and renamed into place before the meta file that marks the copy complete. An empty list is written too, so a restore never falls back to older references. Moving, scaling, or adding a reference counts as an edit for autosave, even when no pixel changed. Restore loads that sidecar and marks the references unsaved, so the next Save writes them into the user's folder; a copy from 0.6.1 or earlier, which has no sidecar, still uses the document's own. Discarding a copy, saving, or a clean close removes the sidecar with the copy. Reference paths are kept absolute in memory, so a document opened by a relative path (`oxypixel art.oxypix`) still finds its images from the recovery folder or after a Save As elsewhere. Tested in `recovery.rs` and `reference.rs`, and by a kill-and-restore run of the window.
 
 ### OX-P21
 

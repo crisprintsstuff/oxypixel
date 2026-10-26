@@ -57,6 +57,9 @@ pub struct RecoveryRecord {
     pub name: String,
     pub source: Option<PathBuf>,
     pub saved_unix: u64,
+    /// Reference sidecar text, written as `{id}.oxypix.refs` beside the copy.
+    /// Empty writes no sidecar and removes an older one.
+    pub refs: Vec<u8>,
 }
 
 /// One recovery copy found on disk.
@@ -202,6 +205,7 @@ pub fn remove_id(dir: &Path, id: &str) -> io::Result<()> {
         ));
     }
     let _ = std::fs::remove_file(dir.join(format!("{id}.oxypix")));
+    let _ = std::fs::remove_file(dir.join(format!("{id}.oxypix.refs")));
     let _ = std::fs::remove_file(dir.join(format!("{id}.meta")));
     Ok(())
 }
@@ -400,8 +404,10 @@ fn lock_publish(publish: &Mutex<()>) -> std::sync::MutexGuard<'_, ()> {
 
 struct StagedRecovery {
     ox_tmp: PathBuf,
+    refs_tmp: PathBuf,
     meta_tmp: PathBuf,
     ox_dest: PathBuf,
+    refs_dest: PathBuf,
     meta_dest: PathBuf,
 }
 
@@ -410,6 +416,9 @@ impl Drop for StagedRecovery {
         if !self.ox_tmp.as_os_str().is_empty() {
             let _ = std::fs::remove_file(&self.ox_tmp);
         }
+        if !self.refs_tmp.as_os_str().is_empty() {
+            let _ = std::fs::remove_file(&self.refs_tmp);
+        }
         if !self.meta_tmp.as_os_str().is_empty() {
             let _ = std::fs::remove_file(&self.meta_tmp);
         }
@@ -417,32 +426,43 @@ impl Drop for StagedRecovery {
 }
 
 fn stage_recovery(dir: &Path, record: &RecoveryRecord, bytes: &[u8]) -> io::Result<StagedRecovery> {
-    let (ox_dest, meta_dest) = dest_paths(dir, &record.id)?;
+    let (ox_dest, refs_dest, meta_dest) = dest_paths(dir, &record.id)?;
     std::fs::create_dir_all(dir)?;
-    let ox_tmp = temp_file(dir, "oxypix");
-    let meta_tmp = temp_file(dir, "meta");
-    write_synced(&ox_tmp, bytes)?;
-    if let Err(err) = write_synced(&meta_tmp, encode_meta(record).as_bytes()) {
-        let _ = std::fs::remove_file(&ox_tmp);
-        return Err(err);
-    }
-    Ok(StagedRecovery {
-        ox_tmp,
-        meta_tmp,
+    // Built first so an early return below drops whatever was already written.
+    let mut staged = StagedRecovery {
+        ox_tmp: temp_file(dir, "oxypix"),
+        refs_tmp: PathBuf::new(),
+        meta_tmp: PathBuf::new(),
         ox_dest,
+        refs_dest,
         meta_dest,
-    })
+    };
+    write_synced(&staged.ox_tmp, bytes)?;
+    if !record.refs.is_empty() {
+        staged.refs_tmp = temp_file(dir, "refs");
+        write_synced(&staged.refs_tmp, &record.refs)?;
+    }
+    staged.meta_tmp = temp_file(dir, "meta");
+    write_synced(&staged.meta_tmp, encode_meta(record).as_bytes())?;
+    Ok(staged)
 }
 
 fn commit_staged(mut staged: StagedRecovery) -> io::Result<()> {
     replace_file(&staged.ox_tmp, &staged.ox_dest)?;
     staged.ox_tmp = PathBuf::new();
+    // The sidecar lands before the meta file, which is what marks a copy complete.
+    if staged.refs_tmp.as_os_str().is_empty() {
+        let _ = std::fs::remove_file(&staged.refs_dest);
+    } else {
+        replace_file(&staged.refs_tmp, &staged.refs_dest)?;
+        staged.refs_tmp = PathBuf::new();
+    }
     replace_file(&staged.meta_tmp, &staged.meta_dest)?;
     staged.meta_tmp = PathBuf::new();
     Ok(())
 }
 
-fn dest_paths(dir: &Path, id: &str) -> io::Result<(PathBuf, PathBuf)> {
+fn dest_paths(dir: &Path, id: &str) -> io::Result<(PathBuf, PathBuf, PathBuf)> {
     if !safe_id(id) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -451,6 +471,7 @@ fn dest_paths(dir: &Path, id: &str) -> io::Result<(PathBuf, PathBuf)> {
     }
     Ok((
         dir.join(format!("{id}.oxypix")),
+        dir.join(format!("{id}.oxypix.refs")),
         dir.join(format!("{id}.meta")),
     ))
 }
@@ -659,6 +680,7 @@ mod tests {
             name: name.to_string(),
             source,
             saved_unix,
+            refs: Vec::new(),
         }
     }
 
@@ -734,6 +756,65 @@ mod tests {
         assert!(!dir.path().join(format!("{id}.oxypix")).exists());
         assert!(!dir.path().join(format!("{id}.meta")).exists());
         assert!(!user_file.exists());
+    }
+
+    #[test]
+    fn references_are_kept_beside_the_recovery_copy() {
+        let dir = TempDir::new("refs");
+        let (doc, bytes) = painted();
+        let image = dir.path().join("trace.png");
+        oxypixel_core::export_png(&doc, 0, &image).unwrap();
+        let id = untitled_id();
+        let copy = oxypix_path(dir.path(), &id).unwrap();
+        let refs_file = oxypixel_core::sidecar_path(&copy);
+
+        let mut refs = oxypixel_core::References::new();
+        refs.add_file(&image).unwrap();
+        refs.set_opacity(0, 77).unwrap();
+        let mut saved = record(&id, "Untitled", None, 1_792_778_640);
+        saved.refs = refs.sidecar_bytes(&copy).unwrap();
+        write_recovery(dir.path(), &saved, &bytes, &|| false).unwrap();
+        let listed = list(dir.path());
+        assert_eq!(listed.len(), 1);
+        let restored = oxypixel_core::References::read_sidecar(&listed[0].file).unwrap();
+        assert_eq!(restored.len(), 1);
+        assert_eq!(restored.opacity(0), 77);
+        assert!(!restored.missing(0));
+
+        // An empty list is stored too, so a restore does not fall back to older references.
+        saved.refs = oxypixel_core::References::new()
+            .sidecar_bytes(&copy)
+            .unwrap();
+        write_recovery(dir.path(), &saved, &bytes, &|| false).unwrap();
+        assert!(refs_file.is_file());
+        assert!(oxypixel_core::References::read_sidecar(&copy)
+            .unwrap()
+            .is_empty());
+
+        // A cancelled write keeps the previous sidecar.
+        saved.refs = refs.sidecar_bytes(&copy).unwrap();
+        write_recovery(dir.path(), &saved, &bytes, &|| true).unwrap();
+        assert!(oxypixel_core::References::read_sidecar(&copy)
+            .unwrap()
+            .is_empty());
+
+        // No bytes at all removes an older sidecar, and discarding removes it.
+        write_recovery(dir.path(), &saved, &bytes, &|| false).unwrap();
+        assert!(refs_file.is_file());
+        saved.refs.clear();
+        write_recovery(dir.path(), &saved, &bytes, &|| false).unwrap();
+        assert!(!refs_file.exists());
+        saved.refs = refs.sidecar_bytes(&copy).unwrap();
+        write_recovery(dir.path(), &saved, &bytes, &|| false).unwrap();
+        remove_id(dir.path(), &id).unwrap();
+        assert!(!refs_file.exists());
+        assert!(list(dir.path()).is_empty());
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty());
     }
 
     #[test]
