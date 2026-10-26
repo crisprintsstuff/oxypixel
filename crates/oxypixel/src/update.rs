@@ -237,6 +237,25 @@ pub fn report_from_release(release: ReleaseInfo) -> UpdateReport {
     }
 }
 
+/// Whether a check that ran by itself at launch should go on to download:
+/// only for a newer release with a checksummed file for this system.
+pub fn should_auto_download(report: &UpdateReport) -> bool {
+    report.relation == Relation::Behind && report.asset.is_some() && report.checksums.is_some()
+}
+
+/// The menu bar's offer of a newer release, `None` when there is none.
+pub fn ready_label(report: &UpdateReport, downloaded: bool) -> Option<String> {
+    if report.relation != Relation::Behind {
+        return None;
+    }
+    let version = report.release.version;
+    Some(if downloaded {
+        format!("Update {version} ready")
+    } else {
+        format!("Update {version} available")
+    })
+}
+
 pub fn check_latest() -> Result<UpdateReport, String> {
     let body = http_get(LATEST_URL, true)?;
     let body = String::from_utf8(body)
@@ -537,6 +556,35 @@ mod tests {
             }
           ]
         }"#
+    }
+
+    #[test]
+    fn launch_checks_download_only_a_newer_checksummed_release() {
+        let mut report = report_from_release(parse_release(sample_release()).unwrap());
+        report.package = PackageKind::LinuxArchive;
+        report.asset = asset_for(&report.release, report.package);
+        report.relation = Relation::Behind;
+        assert!(should_auto_download(&report));
+        assert_eq!(
+            ready_label(&report, false).as_deref(),
+            Some("Update 0.2.1 available")
+        );
+        assert_eq!(
+            ready_label(&report, true).as_deref(),
+            Some("Update 0.2.1 ready")
+        );
+        for relation in [Relation::Same, Relation::Ahead] {
+            let mut same = report.clone();
+            same.relation = relation;
+            assert!(!should_auto_download(&same));
+            assert_eq!(ready_label(&same, true), None);
+        }
+        let mut unchecked = report.clone();
+        unchecked.checksums = None;
+        assert!(!should_auto_download(&unchecked));
+        let mut no_file = report;
+        no_file.asset = None;
+        assert!(!should_auto_download(&no_file));
     }
 
     #[test]

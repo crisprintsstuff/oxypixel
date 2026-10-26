@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Automatic updates, off by default. Turn them on in the Help menu or the Check for updates window. OxyPixel then checks GitHub once a day at launch, downloads a newer release in the background, and checks it against `SHA256SUMS.txt`. An "Update … ready" button then appears in the menu bar. Nothing is installed until you click it, so unsaved work is never closed for you. The setting is kept in `view.txt` with the preview panel's.
+
 - OxyPack draws Aseprite blend modes: Multiply, Screen, Overlay, Darken, Lighten, Color Dodge, Color Burn, Hard Light, Soft Light, Difference, Exclusion, Hue, Saturation, Color, Luminosity, Addition, Subtract, and Divide. When a file composites groups separately, a group is drawn as one image and then blended with its own opacity and mode, as Aseprite does. Before, every layer was drawn as Normal and a group's opacity multiplied its children's.
 
 - OxyPack draws Aseprite tilemap layers from their tilesets, with x, y, and diagonal tile flips. Before, tilemap layers were skipped. A tileset kept in another file is still skipped, and a tile number the tileset does not have is drawn empty; both get a note on stderr.

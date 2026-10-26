@@ -1,6 +1,6 @@
 # Security
 
-OxyPixel is a local editor. It does not phone home, and it does not execute scripts stored in documents. The only network request is Help, then Check for updates, which the user starts. That request reads the public GitHub release list and, if the user continues, downloads one release file plus `SHA256SUMS.txt`.
+OxyPixel is a local editor. It does not phone home, and it does not execute scripts stored in documents. The only network request is the update check. It runs when the user chooses Help, then Check for updates, or once a day at launch if the user turned on Automatic updates (off by default; stored as `auto_update=1` in `view.txt`). It reads the public GitHub release list and downloads one release file plus `SHA256SUMS.txt`: after the user continues for a manual check, or by itself for the launch check when a newer release has a checksummed file for this system. Nothing is installed or replaced until the user clicks.
 
 ## Supported versions
 
