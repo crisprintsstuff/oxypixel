@@ -25,8 +25,12 @@ pub const MAX_UNDO: usize = 50;
 pub const MAX_UNDO_BYTES: usize = 256 * 1024 * 1024;
 pub const FORMAT_VERSION: u16 = 1;
 pub const MAGIC: &[u8; 8] = b"OXYPIX1\0";
-/// Widest spritesheet written by export.
+/// Widest, and tallest, spritesheet written by export.
 pub const MAX_SHEET_WIDTH: u32 = 16_384;
+/// Largest spritesheet area. A one-row sheet of 4× frames already reaches it.
+pub const MAX_SHEET_PIXELS: u64 = 64 * 1024 * 1024;
+/// Largest gap between spritesheet cells.
+pub const MAX_SHEET_PADDING: u32 = 256;
 
 pub(crate) fn check_canvas(width: u32, height: u32) -> Result<()> {
     if width == 0 || height == 0 || width > MAX_DIMENSION || height > MAX_DIMENSION {

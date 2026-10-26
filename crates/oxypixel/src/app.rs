@@ -7,8 +7,9 @@ use std::time::{Duration, Instant};
 use eframe::egui::{self, Color32, RichText, ViewportCommand};
 use oxypixel_core::{
     advance, decode_first_rgba, export_bmp, export_gif, export_palette, export_png_scaled,
-    export_spritesheet_scaled, fit_into, import_image, import_palette, load_oxypix, save_oxypix,
-    Editor, Error, Fit, PaletteFormat, References, Rgba, Tool, Transform, MAX_DIMENSION,
+    export_spritesheet_layout, fit_into, import_image, import_palette, load_oxypix, save_oxypix,
+    Editor, Error, Fit, PaletteFormat, References, Rgba, SheetLayout, Tool, Transform,
+    MAX_DIMENSION, MAX_FRAMES, MAX_SHEET_PADDING,
 };
 
 use crate::cache::FrameComposites;
@@ -96,6 +97,10 @@ pub struct OxyApp {
     canvas_x: String,
     canvas_y: String,
     export_scale: u32,
+    /// Spritesheet frames per row. 0 is one row.
+    sheet_columns: u32,
+    sheet_padding: u32,
+    sheet_json: bool,
     palette_format: PaletteFormat,
     recent: Vec<PathBuf>,
     last_dir: Option<PathBuf>,
@@ -179,6 +184,9 @@ impl OxyApp {
             canvas_x: "0".to_string(),
             canvas_y: "0".to_string(),
             export_scale: 1,
+            sheet_columns: 0,
+            sheet_padding: 0,
+            sheet_json: false,
             palette_format: PaletteFormat::Gpl,
             recent: recent_files,
             last_dir,
@@ -1017,7 +1025,12 @@ impl OxyApp {
             let frame = self.editor.document().active_frame();
             export_png_scaled(self.editor.document(), frame, path, scale)
         } else {
-            export_spritesheet_scaled(self.editor.document(), path, scale)
+            let layout = SheetLayout {
+                scale,
+                columns: self.sheet_columns,
+                padding: self.sheet_padding,
+            };
+            export_spritesheet_layout(self.editor.document(), layout, path, self.sheet_json)
         };
         match result {
             Ok(()) => {
@@ -2467,6 +2480,18 @@ impl OxyApp {
                         }
                     });
                     ui.label("Nearest neighbor. Each pixel stays a hard square.");
+                }
+                if self.path_kind == PathKind::ExportSheet {
+                    ui.horizontal(|ui| {
+                        ui.label("Columns");
+                        ui.add(egui::DragValue::new(&mut self.sheet_columns).range(0..=MAX_FRAMES as u32))
+                            .on_hover_text("Frames per row. 0 puts every frame in one row.");
+                        ui.label("Padding");
+                        ui.add(egui::DragValue::new(&mut self.sheet_padding).range(0..=MAX_SHEET_PADDING))
+                            .on_hover_text("Clear pixels between cells, after scaling.");
+                    });
+                    ui.checkbox(&mut self.sheet_json, "Also write .json")
+                        .on_hover_text("A file beside the PNG with each frame's rectangle and duration, for game engines.");
                 }
                 if self.path_kind == PathKind::ExportPalette {
                     ui.horizontal(|ui| {

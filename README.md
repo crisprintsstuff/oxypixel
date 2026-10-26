@@ -167,6 +167,7 @@ oxypixel export-png sprite.oxypix frame.png
 oxypixel export-bmp sprite.oxypix frame.bmp
 oxypixel export-gif sprite.oxypix animation.gif
 oxypixel export-sheet sprite.oxypix sheet.png
+oxypixel export-sheet sprite.oxypix sheet.png --columns 4 --padding 1 --json
 oxypixel export-palette sprite.oxypix palette.gpl
 oxypixel import-palette sprite.oxypix palette.gpl recolored.oxypix
 ```

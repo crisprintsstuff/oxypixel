@@ -12,7 +12,7 @@ Infrastructure, then small fixes that already have a place in the code.
 
 OX-002, OX-011, and OX-012 are done, so this list is empty.
 
-Suggested order if a human picks proposals: OX-P25, then OX-P23. OX-P20, OX-P21, OX-P6, OX-P22, and OX-P24 are done. OX-P27 waits for a format decision.
+Suggested order if a human picks proposals: OX-P23. OX-P20, OX-P21, OX-P6, OX-P22, OX-P24, and OX-P25 are done. OX-P27 waits for a format decision.
 
 ## Scorecard
 
@@ -29,9 +29,9 @@ In the 0.6.1 tree and covered by tests or by the release workflow.
 | Frames | Add, duplicate, duration 20–10000 ms on the slider, playback clock, thumbnails, onion skin for earlier and later frames | `animation.rs`, `canvas.rs`, `framestrip.rs` |
 | Undo | Up to 50 steps and 256 MiB, including the selection rectangle. Slider drags coalesce | `history.rs` |
 | `.oxypix` | Version 1, little-endian, caps before allocation, trailing bytes rejected | `io/oxypix.rs`, `docs/FORMAT.md` |
-| Raster | PNG, BMP, and GIF import and export. GIF import is one composited layer. Spritesheet and 2×/4× nearest PNG | `io/raster.rs` |
+| Raster | PNG, BMP, and GIF import and export. GIF import is one composited layer. Spritesheet in a row or a grid with padding and a JSON description, and 2×/4× nearest PNG | `io/raster.rs` |
 | References | PNG and JPEG overlays or a floating panel. Placement is a sidecar, not a `.oxypix` field. Export, merge, and the eyedropper skip them unless Sample is on | `reference.rs`, `refsview.rs` |
-| CLI | `export-png`, `export-bmp`, `export-gif`, `export-sheet`, `export-palette`, and `import-palette`. Failures print and exit. Missing file must not hang | `cli.rs`, `tests/cli.rs` |
+| CLI | `export-png`, `export-bmp`, `export-gif`, `export-sheet` (with `--columns`, `--padding`, `--scale`, `--json`), `export-palette`, and `import-palette`. Failures print and exit. Missing file must not hang | `cli.rs`, `tests/cli.rs` |
 | Palette files | GIMP `.gpl`, hex `.hex` (one `RRGGBB` per line, `RRGGBBAA` when alpha is not 255), and JASC `.pal`. Import replaces the palette and is one undo step. Swatches drag to a new index. A ramp of N steps can fill the span between two swatches. Snap (S) makes pencil, fill, and shapes use the nearest palette color. More than 256 colors is an error | `io/palette.rs`, `editor.rs`, `color.rs`, `app.rs` |
 | Window | egui 0.31 on wgpu (Direct3D 12 with WARP on Windows, Vulkan on Linux), falling back to glow OpenGL, nearest-neighbor canvas, whole-pixel zoom, a grid when the cells are readable, pan, shortcuts, tool icons with their shortcut letter, a preview panel beside the canvas | `app.rs`, `canvas.rs`, `preview.rs` |
 | Files UI | Recent list of ten paths, a folder hint when names match, a missing-file mark, and Clear recent. Drag and drop, Windows file dialog, Linux portal with a path field fallback | `recent.rs`, `native.rs` |
@@ -243,7 +243,9 @@ Shade (checkbox, or D) turns the pencil into a shading brush. Left button replac
 
 ### OX-P25
 
-**Spritesheet layout and a JSON description.** `export-sheet` and the window write one row of frames. A later task could add columns and padding, and write a `.json` file next to the PNG with each frame's rectangle and duration, so a game engine can load the sheet without hand-entered numbers. The CLI gets the same options and keeps failing with an exit code, not a dialog.
+**Spritesheet layout and a JSON description.** Status: done. Area: `crates/oxypixel-core/src/io/raster.rs`, `crates/oxypixel/src/cli.rs`, `crates/oxypixel/src/app.rs`.
+
+Export spritesheet takes Columns (0 is one row, as before), Padding (clear pixels between cells, up to 256), and Scale, and can also write `<name>.json`. That file is a JSON array sheet: one entry per frame with its `frame` rectangle, `sourceSize`, and `duration` in milliseconds, then `meta` with the image name, the sheet size, and the scale. `export-sheet` takes `--columns`, `--padding`, `--scale`, and `--json`, and still fails with an exit code, not a dialog. Width and height are each capped at 16384 and the area at 64 Mi pixels, so a grid can be no larger than the widest one-row sheet already was. A one-row sheet is byte-for-byte what it was. `spritesheet_grid`, the PNG, and the JSON are tested in `raster.rs`, and the options in `tests/cli.rs`.
 
 ### OX-P26
 

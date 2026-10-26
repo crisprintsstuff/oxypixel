@@ -20,7 +20,7 @@ use crate::document::{Document, Frame, LayerInfo};
 use crate::error::{Error, Result};
 use crate::limits::{
     check_canvas, check_stack, clamp_duration, DEFAULT_FRAME_MS, MAX_DIMENSION, MAX_FILE_BYTES,
-    MAX_FRAMES, MAX_SHEET_WIDTH,
+    MAX_FRAMES, MAX_SHEET_PADDING, MAX_SHEET_PIXELS, MAX_SHEET_WIDTH,
 };
 
 use super::oxypix::read_limited;
@@ -159,34 +159,179 @@ pub fn export_spritesheet_scaled(doc: &Document, path: &Path, scale: u32) -> Res
 }
 
 pub fn export_spritesheet_bytes_scaled(doc: &Document, scale: u32) -> Result<Vec<u8>> {
-    let frames = doc.frame_count() as u32;
-    let cell_w = checked_scale(doc.width(), scale)?;
-    let cell_h = checked_scale(doc.height(), scale)?;
-    let sheet_w = cell_w.checked_mul(frames).ok_or(Error::Limit {
-        what: "spritesheet width",
-        value: u64::MAX,
-        max: u64::from(MAX_SHEET_WIDTH),
-    })?;
-    if sheet_w > MAX_SHEET_WIDTH {
-        return Err(Error::Limit {
-            what: "spritesheet width",
-            value: u64::from(sheet_w),
-            max: u64::from(MAX_SHEET_WIDTH),
-        });
-    }
-    let mut out = vec![Rgba::CLEAR; (sheet_w as usize) * (cell_h as usize)];
-    for index in 0..doc.frame_count() {
-        let (_, _, frame) = composite_scaled(doc, index, scale)?;
-        let x0 = index as u32 * cell_w;
-        for y in 0..cell_h {
-            for x in 0..cell_w {
-                let src = (y * cell_w + x) as usize;
-                let dst = (y * sheet_w + x0 + x) as usize;
-                out[dst] = frame[src];
-            }
+    export_spritesheet_layout_bytes(
+        doc,
+        SheetLayout {
+            scale,
+            ..SheetLayout::default()
+        },
+    )
+}
+
+/// How a spritesheet places its frames.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SheetLayout {
+    /// 1, 2, or 4, nearest neighbor.
+    pub scale: u32,
+    /// Frames per row. 0, or more than the frame count, is one row.
+    pub columns: u32,
+    /// Clear pixels between neighboring cells, after scaling.
+    pub padding: u32,
+}
+
+impl Default for SheetLayout {
+    fn default() -> Self {
+        Self {
+            scale: 1,
+            columns: 0,
+            padding: 0,
         }
     }
-    encode_still(&pack(&out), sheet_w, cell_h, ImageFormat::Png)
+}
+
+/// Where each frame of a spritesheet sits. Frame `i` is `cells[i]`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SheetGrid {
+    pub width: u32,
+    pub height: u32,
+    pub cell_width: u32,
+    pub cell_height: u32,
+    pub cells: Vec<(u32, u32)>,
+}
+
+/// Lay out the frames row by row, left to right. Sizes past the caps are an error.
+pub fn spritesheet_grid(doc: &Document, layout: SheetLayout) -> Result<SheetGrid> {
+    if layout.padding > MAX_SHEET_PADDING {
+        return Err(Error::Limit {
+            what: "spritesheet padding",
+            value: u64::from(layout.padding),
+            max: u64::from(MAX_SHEET_PADDING),
+        });
+    }
+    let frames = doc.frame_count() as u64;
+    let cell_w = u64::from(checked_scale(doc.width(), layout.scale)?);
+    let cell_h = u64::from(checked_scale(doc.height(), layout.scale)?);
+    let columns = match u64::from(layout.columns) {
+        0 => frames,
+        n => n.min(frames),
+    }
+    .max(1);
+    let rows = frames.div_ceil(columns).max(1);
+    let pad = u64::from(layout.padding);
+    // u64 throughout: every factor is capped well below 2^32.
+    let width = columns * cell_w + (columns - 1) * pad;
+    let height = rows * cell_h + (rows - 1) * pad;
+    for (what, value) in [("spritesheet width", width), ("spritesheet height", height)] {
+        if value > u64::from(MAX_SHEET_WIDTH) {
+            return Err(Error::Limit {
+                what,
+                value,
+                max: u64::from(MAX_SHEET_WIDTH),
+            });
+        }
+    }
+    if width * height > MAX_SHEET_PIXELS {
+        return Err(Error::Limit {
+            what: "spritesheet pixels",
+            value: width * height,
+            max: MAX_SHEET_PIXELS,
+        });
+    }
+    let cells = (0..frames)
+        .map(|i| {
+            let (col, row) = (i % columns, i / columns);
+            ((col * (cell_w + pad)) as u32, (row * (cell_h + pad)) as u32)
+        })
+        .collect();
+    Ok(SheetGrid {
+        width: width as u32,
+        height: height as u32,
+        cell_width: cell_w as u32,
+        cell_height: cell_h as u32,
+        cells,
+    })
+}
+
+/// A spritesheet PNG with frames placed by `layout`.
+pub fn export_spritesheet_layout_bytes(doc: &Document, layout: SheetLayout) -> Result<Vec<u8>> {
+    let grid = spritesheet_grid(doc, layout)?;
+    let sheet_w = grid.width as usize;
+    let cell_w = grid.cell_width as usize;
+    let mut out = vec![Rgba::CLEAR; sheet_w * grid.height as usize];
+    for (index, &(x0, y0)) in grid.cells.iter().enumerate() {
+        let (_, _, frame) = composite_scaled(doc, index, layout.scale)?;
+        for (row, line) in frame.chunks_exact(cell_w).enumerate() {
+            let start = (y0 as usize + row) * sheet_w + x0 as usize;
+            out[start..start + cell_w].copy_from_slice(line);
+        }
+    }
+    encode_still(&pack(&out), grid.width, grid.height, ImageFormat::Png)
+}
+
+/// The spritesheet description that game engines read as a JSON array
+/// sheet: one entry per frame with its rectangle and duration, then `meta`.
+pub fn spritesheet_json(doc: &Document, layout: SheetLayout, image: &str) -> Result<String> {
+    let grid = spritesheet_grid(doc, layout)?;
+    let (w, h) = (grid.cell_width, grid.cell_height);
+    let mut out = String::from("{\n  \"frames\": [\n");
+    for (index, (x, y)) in grid.cells.iter().enumerate() {
+        let duration = doc.frame_duration(index).unwrap_or(DEFAULT_FRAME_MS);
+        out.push_str(&format!(
+            "    {{\"filename\": \"frame {index}\", \"frame\": {{\"x\": {x}, \"y\": {y}, \"w\": {w}, \"h\": {h}}}, \"rotated\": false, \"trimmed\": false, \"spriteSourceSize\": {{\"x\": 0, \"y\": 0, \"w\": {w}, \"h\": {h}}}, \"sourceSize\": {{\"w\": {w}, \"h\": {h}}}, \"duration\": {duration}}}"
+        ));
+        out.push_str(if index + 1 < grid.cells.len() {
+            ",\n"
+        } else {
+            "\n"
+        });
+    }
+    out.push_str(&format!(
+        "  ],\n  \"meta\": {{\"app\": \"OxyPixel\", \"version\": \"{}\", \"image\": {}, \"format\": \"RGBA8888\", \"size\": {{\"w\": {}, \"h\": {}}}, \"scale\": \"{}\"}}\n}}\n",
+        env!("CARGO_PKG_VERSION"),
+        json_string(image),
+        grid.width,
+        grid.height,
+        layout.scale,
+    ));
+    Ok(out)
+}
+
+/// Write the PNG, and `<same name>.json` beside it when `json` is set.
+pub fn export_spritesheet_layout(
+    doc: &Document,
+    layout: SheetLayout,
+    path: &Path,
+    json: bool,
+) -> Result<()> {
+    let png = export_spritesheet_layout_bytes(doc, layout)?;
+    let description = if json {
+        let image = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        Some(spritesheet_json(doc, layout, &image)?)
+    } else {
+        None
+    };
+    std::fs::write(path, png).map_err(Error::io)?;
+    if let Some(text) = description {
+        std::fs::write(path.with_extension("json"), text).map_err(Error::io)?;
+    }
+    Ok(())
+}
+
+fn json_string(text: &str) -> String {
+    let mut out = String::from("\"");
+    for ch in text.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 fn checked_scale(side: u32, scale: u32) -> Result<u32> {
@@ -440,6 +585,127 @@ mod tests {
         assert_eq!((w, h), (2, 1));
         assert_eq!(pixels[0].r, 1);
         assert_eq!(pixels[1].g, 1);
+    }
+
+    fn five_frames() -> Document {
+        let mut doc = Document::new(2, 1).unwrap();
+        for i in 0..5u8 {
+            if i > 0 {
+                doc.add_frame().unwrap();
+            }
+            let frame = &mut doc.frames_mut()[i as usize];
+            frame.duration_ms = 100 + u32::from(i) * 10;
+            frame.cels[0][0] = Rgba::new(10 + i, 0, 0, 255);
+        }
+        doc
+    }
+
+    #[test]
+    fn a_sheet_grid_wraps_rows_and_adds_padding() {
+        let doc = five_frames();
+        let row = spritesheet_grid(&doc, SheetLayout::default()).unwrap();
+        assert_eq!((row.width, row.height), (10, 1));
+        assert_eq!(row.cells[4], (8, 0));
+
+        let layout = SheetLayout {
+            scale: 2,
+            columns: 2,
+            padding: 3,
+        };
+        let grid = spritesheet_grid(&doc, layout).unwrap();
+        // Two columns of 4-pixel cells with a 3-pixel gap; three rows of 2.
+        assert_eq!((grid.cell_width, grid.cell_height), (4, 2));
+        assert_eq!((grid.width, grid.height), (11, 12));
+        assert_eq!(grid.cells, vec![(0, 0), (7, 0), (0, 5), (7, 5), (0, 10)]);
+
+        let bytes = export_spritesheet_layout_bytes(&doc, layout).unwrap();
+        let (w, h, pixels) = decode_first_rgba(&bytes).unwrap();
+        assert_eq!((w, h), (11, 12));
+        let at = |x: usize, y: usize| pixels[y * 11 + x];
+        assert_eq!(at(0, 0).r, 10);
+        assert_eq!(at(1, 1).r, 10);
+        assert_eq!(at(7, 0).r, 11);
+        assert_eq!(at(0, 10).r, 14);
+        assert_eq!(at(5, 0), Rgba::CLEAR);
+        assert_eq!(at(0, 3), Rgba::CLEAR);
+        assert_eq!(at(10, 11), Rgba::CLEAR);
+
+        // More columns than frames is one row; the one-row bytes are unchanged.
+        let wide = SheetLayout {
+            columns: 99,
+            ..SheetLayout::default()
+        };
+        assert_eq!(
+            export_spritesheet_layout_bytes(&doc, wide).unwrap(),
+            export_spritesheet_bytes(&doc).unwrap()
+        );
+    }
+
+    #[test]
+    fn a_sheet_past_the_caps_is_an_error() {
+        let doc = Document::new(1024, 1024).unwrap();
+        let mut long = doc.clone();
+        for _ in 0..15 {
+            long.add_frame().unwrap();
+        }
+        let tall = SheetLayout {
+            scale: 4,
+            columns: 1,
+            padding: 0,
+        };
+        assert!(matches!(
+            spritesheet_grid(&long, tall),
+            Err(Error::Limit {
+                what: "spritesheet height",
+                ..
+            })
+        ));
+        let square = SheetLayout {
+            scale: 4,
+            columns: 4,
+            padding: 0,
+        };
+        assert!(matches!(
+            spritesheet_grid(&long, square),
+            Err(Error::Limit {
+                what: "spritesheet pixels",
+                ..
+            })
+        ));
+        let padded = SheetLayout {
+            padding: MAX_SHEET_PADDING + 1,
+            ..SheetLayout::default()
+        };
+        assert!(spritesheet_grid(&doc, padded).is_err());
+        assert!(spritesheet_grid(
+            &doc,
+            SheetLayout {
+                scale: 3,
+                ..SheetLayout::default()
+            }
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn the_sheet_json_lists_each_frame_rectangle_and_duration() {
+        let doc = five_frames();
+        let layout = SheetLayout {
+            scale: 1,
+            columns: 2,
+            padding: 1,
+        };
+        let text = spritesheet_json(&doc, layout, "walk \"cycle\".png").unwrap();
+        assert!(text.starts_with("{\n  \"frames\": [\n"));
+        assert_eq!(text.matches("\"filename\"").count(), 5);
+        assert!(text.contains(
+            "\"filename\": \"frame 1\", \"frame\": {\"x\": 3, \"y\": 0, \"w\": 2, \"h\": 1}"
+        ));
+        assert!(text.contains("\"frame\": {\"x\": 0, \"y\": 4, \"w\": 2, \"h\": 1}"));
+        assert!(text.contains("\"duration\": 140}\n"));
+        assert!(text.contains("\"image\": \"walk \\\"cycle\\\".png\""));
+        assert!(text.contains("\"size\": {\"w\": 5, \"h\": 5}"));
+        assert_eq!(text.matches('{').count(), text.matches('}').count());
     }
 
     #[test]

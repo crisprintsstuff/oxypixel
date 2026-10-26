@@ -3,8 +3,8 @@
 use std::path::Path;
 
 use oxypixel_core::{
-    export_bmp, export_gif, export_palette, export_png, export_spritesheet, import_palette,
-    Document, Error,
+    export_bmp, export_gif, export_palette, export_png, export_spritesheet_layout, import_palette,
+    Document, Error, SheetLayout,
 };
 
 pub fn dispatch(args: &[String]) -> Option<i32> {
@@ -21,7 +21,7 @@ pub fn dispatch(args: &[String]) -> Option<i32> {
         "export-png" => export_frame(args, export_png),
         "export-bmp" => export_frame(args, export_bmp),
         "export-gif" => export_doc(args, export_gif),
-        "export-sheet" => export_doc(args, export_spritesheet),
+        "export-sheet" => export_sheet_cmd(args),
         "export-palette" => export_palette_cmd(args),
         "import-palette" => import_palette_cmd(args),
         _ => return None,
@@ -66,6 +66,48 @@ fn export_doc(args: &[String], write: fn(&Document, &Path) -> Result<(), Error>)
         },
         Err(err) => fail(&err.to_string()),
     }
+}
+
+fn export_sheet_cmd(args: &[String]) -> u8 {
+    let Some(input) = args.get(1) else {
+        return usage("export-sheet needs an input .oxypix and an output .png");
+    };
+    let Some(output) = args.get(2) else {
+        return usage("export-sheet needs an output .png");
+    };
+    let (layout, json) = match parse_sheet_options(&args[3..]) {
+        Ok(options) => options,
+        Err(message) => return usage(&message),
+    };
+    match oxypixel_core::load_oxypix(Path::new(input)) {
+        Ok(doc) => match export_spritesheet_layout(&doc, layout, Path::new(output), json) {
+            Ok(()) => 0,
+            Err(err) => fail(&err.to_string()),
+        },
+        Err(err) => fail(&err.to_string()),
+    }
+}
+
+/// `--columns N`, `--padding N`, `--scale 1|2|4`, and `--json`, in any order.
+fn parse_sheet_options(args: &[String]) -> Result<(SheetLayout, bool), String> {
+    let mut layout = SheetLayout::default();
+    let mut json = false;
+    let mut rest = args.iter();
+    while let Some(flag) = rest.next() {
+        let mut number = |name: &str| -> Result<u32, String> {
+            rest.next()
+                .and_then(|value| value.parse::<u32>().ok())
+                .ok_or_else(|| format!("{name} needs a whole number"))
+        };
+        match flag.as_str() {
+            "--columns" => layout.columns = number("--columns")?,
+            "--padding" => layout.padding = number("--padding")?,
+            "--scale" => layout.scale = number("--scale")?,
+            "--json" => json = true,
+            other => return Err(format!("unknown export-sheet option {other}")),
+        }
+    }
+    Ok((layout, json))
 }
 
 fn export_palette_cmd(args: &[String]) -> u8 {
@@ -140,7 +182,7 @@ Usage:
   oxypixel export-png INPUT.oxypix OUTPUT.png [FRAME]
   oxypixel export-bmp INPUT.oxypix OUTPUT.bmp [FRAME]
   oxypixel export-gif INPUT.oxypix OUTPUT.gif
-  oxypixel export-sheet INPUT.oxypix OUTPUT.png
+  oxypixel export-sheet INPUT.oxypix OUTPUT.png [--columns N] [--padding N] [--scale 1|2|4] [--json]
   oxypixel export-palette INPUT.oxypix OUTPUT.gpl
   oxypixel import-palette INPUT.oxypix PALETTE.gpl OUTPUT.oxypix
   oxypixel --help
@@ -150,5 +192,7 @@ With no command, OxyPixel opens the editor. A file argument opens that .oxypix d
 Export commands do not open a window. FRAME is the zero-based frame index and defaults to 0.
 export-palette writes the document palette as GIMP .gpl, hex .hex, or JASC .pal.
 import-palette replaces that palette and writes a new .oxypix. A .txt palette is read as hex.
+export-sheet puts frames in one row unless --columns is set. --padding leaves clear pixels between
+cells, and --json writes OUTPUT.json with each frame's rectangle and duration.
 "
 );

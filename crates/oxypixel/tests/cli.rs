@@ -20,6 +20,59 @@ fn help_lists_export() {
 }
 
 #[test]
+fn export_sheet_takes_columns_padding_and_writes_json() {
+    let dir = std::env::temp_dir().join(format!("oxypixel-cli-sheet-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let src = dir.join("walk.oxypix");
+    let mut editor = Editor::new(2, 2).unwrap();
+    editor.add_frame().unwrap();
+    editor.add_frame().unwrap();
+    save_oxypix(editor.document(), &src).unwrap();
+    let png = dir.join("walk.png");
+    let output = bin()
+        .args(["export-sheet", src.to_str().unwrap(), png.to_str().unwrap()])
+        .args(["--columns", "2", "--padding", "1", "--scale", "2", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let image = image::ImageReader::open(&png).unwrap().decode().unwrap();
+    // Two 4-pixel columns and a 1-pixel gap; two rows.
+    assert_eq!((image.width(), image.height()), (9, 9));
+    let json = std::fs::read_to_string(dir.join("walk.json")).unwrap();
+    assert_eq!(json.matches("\"filename\"").count(), 3);
+    assert!(json.contains("\"image\": \"walk.png\""));
+
+    let bad = bin()
+        .args(["export-sheet", src.to_str().unwrap(), png.to_str().unwrap()])
+        .args(["--columns", "two"])
+        .output()
+        .unwrap();
+    assert_eq!(bad.status.code(), Some(2));
+    let unknown = bin()
+        .args([
+            "export-sheet",
+            src.to_str().unwrap(),
+            png.to_str().unwrap(),
+            "--rows",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(unknown.status.code(), Some(2));
+    let too_wide = bin()
+        .args(["export-sheet", src.to_str().unwrap(), png.to_str().unwrap()])
+        .args(["--padding", "9999"])
+        .output()
+        .unwrap();
+    assert_eq!(too_wide.status.code(), Some(1));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn export_png_writes_the_painted_pixel() {
     let dir = std::env::temp_dir().join(format!(
         "oxypixel-cli-{}-{}",
