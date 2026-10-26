@@ -1,14 +1,16 @@
 # OxyPixel
 
-OxyPixel is a pixel-art editor for making sprites and short animations on Windows and Linux. You draw on a pixel canvas, stack layers, and step through frames, then save an `.oxypix` document or export PNG, BMP, or GIF. The editing rules live in the `oxypixel-core` library, and the window is an [egui](https://github.com/emilk/egui) app. OxyPixel is an original program. It is not affiliated with Pixelorama, Orama Interactive, Godot, or Aseprite.
+OxyPixel is a pixel-art editor for making sprites and short animations on Windows and Linux. Draw on a pixel canvas, stack layers, step through named frames and animation tags, then save an `.oxypix` document or export PNG, BMP, GIF, or a spritesheet with JSON for game engines. It comes with [OxyPack](#oxypack), a sprite atlas packer that also reads Aseprite files, as a command and as a window inside the editor.
+
+The editing rules live in the `oxypixel-core` library, and the window is an [egui](https://github.com/emilk/egui) app. OxyPixel is an original program. It is not affiliated with Pixelorama, Orama Interactive, Godot, or Aseprite.
 
 **[Releases](https://github.com/crisprintsstuff/oxypixel/releases)** · **[Changelog](CHANGELOG.md)** · **[Latest](https://github.com/crisprintsstuff/oxypixel/releases/latest)** · **[Roadmap](docs/ROADMAP.md)**
 
-![The OxyPixel window editing a 64 by 64 drawing. Tools are on the left, the Ink palette and the Night and Cottage layers are on the right, and the frame strip is along the bottom.](docs/images/editor.png)
+![The OxyPixel window editing a 64 by 64 campfire scene at dusk: a hooded traveler roasts a marshmallow beside a tent under a full moon and pink mountains. Tools are on the left; the preview panel, the Ink palette, and five layers (Fire, Camp, Glow, Land, Sky) are on the right; four frame thumbnails, the frame Name field reading "fire low", and the Tags (2) button are along the bottom.](docs/images/editor.png)
 
-![The same drawing on frame 2, with onion skin showing the previous frame faintly. The cottage window is light and the smoke has moved.](docs/images/editor-frames.png)
+![The same drawing on frame 3, named "fire flare", with onion skin on. The flames are taller, sparks have risen, and a star twinkles.](docs/images/editor-frames.png)
 
-The pictures above are screenshots of the running editor. The drawing is a sample file opened for the capture. The images are in [docs/images/](docs/images/) and are covered by the repository MIT license.
+The pictures above are screenshots of OxyPixel 0.9.0. The drawing is a sample file opened for the capture. The images are in [docs/images/](docs/images/) and are covered by the repository MIT license.
 
 ## Contents
 
@@ -18,6 +20,7 @@ The pictures above are screenshots of the running editor. The drawing is a sampl
 - [Portable Windows build](#portable-windows-build)
 - [Linux](#linux)
 - [Features](#features)
+- [Updates](#updates)
 - [How it's built](#how-its-built)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [OxyPack](#oxypack)
@@ -30,7 +33,7 @@ The pictures above are screenshots of the running editor. The drawing is a sampl
 
 ## Status
 
-OxyPixel is an early release. The Windows downloads are unsigned. Linux publishes a tar.gz and a `.deb`. A canvas side is at most 1024 pixels. What works today, and the open task list, is in [docs/ROADMAP.md](docs/ROADMAP.md).
+OxyPixel 0.9.0 is an early release. The Windows downloads are unsigned. Linux publishes a tar.gz and a `.deb`. A canvas side is at most 1024 pixels. What works today, and the open task list, is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Download
 
@@ -43,7 +46,8 @@ The files for the current release are on the [latest release](https://github.com
 | `oxypixel-<version>-linux-x86_64.tar.gz` | Linux x86_64 archive |
 | `oxypixel-<version>-linux-x86_64.deb` | Linux Debian package |
 | `oxypack-<version>-windows-x86_64.exe` | [OxyPack](#oxypack) sprite packer for Windows. The Linux archive and `.deb` include `oxypack` |
-| [`SHA256SUMS.txt`](https://github.com/crisprintsstuff/oxypixel/releases/latest/download/SHA256SUMS.txt) | Checksums |
+| [`SHA256SUMS.txt`](https://github.com/crisprintsstuff/oxypixel/releases/latest/download/SHA256SUMS.txt) | Checksums for the editor downloads, used by Check for updates |
+| `SHA256SUMS-windows.txt`, `SHA256SUMS-linux.txt` | Checksums for each platform's files, including `oxypack-<version>-windows-x86_64.exe` |
 
 The Windows files are unsigned. SmartScreen can warn that the publisher is unknown. Check `SHA256SUMS.txt` before you install. Signing steps are in [docs/BUILD-WINDOWS.md](docs/BUILD-WINDOWS.md).
 
@@ -64,8 +68,6 @@ The window draws with Direct3D 12 through wgpu, which every supported Windows ha
 `oxypixel-<version>-windows-x86_64.exe` is the same 64-bit program without an installer. Put it in any folder and run it. SmartScreen can show the same unknown-publisher warning as the installer.
 
 The tagged Windows build embeds the application icon and a version resource when `rc.exe` is on `PATH`. The release workflow adds that compiler from the Windows SDK. A cross-build made without `rc.exe`, `llvm-rc`, or `windres` on `PATH` does not embed those resources, and File Explorer then shows a generic icon for the exe. The installer shortcut and the `.oxypix` association use `oxypixel.ico` either way. See [docs/BUILD-WINDOWS.md](docs/BUILD-WINDOWS.md).
-
-Help, then Check for updates, can download a newer release and restart into it after the checksum matches. Turn on Automatic updates (in the Help menu or that window) to check once a day at launch: a newer release is downloaded and verified in the background, and an "Update … ready" button appears in the menu bar. Nothing is installed until you click it.
 
 ## Linux
 
@@ -96,39 +98,76 @@ oxypixel export-png drawing.oxypix frame.png
 
 RPM, AppImage, and Flatpak are not built. Notes are in [docs/LINUX-PACKAGING.md](docs/LINUX-PACKAGING.md).
 
-Help, then Check for updates, downloads the tar.gz for an unpacked copy and the `.deb` when the running program is `/usr/bin/oxypixel`. A packaged copy stays in place. Install the downloaded `.deb` with the package manager.
-
 ## Features
 
 These match the current editor. Planned work is listed in [docs/ROADMAP.md](docs/ROADMAP.md) and is not included here.
 
-- Pixel canvas with nearest-neighbor zoom on whole-pixel steps, pan, and an optional grid
-- Pencil, eraser, fill, eyedropper, line, rectangle, ellipse, rectangular selection, and a magic wand. Fill and the wand have a tolerance for near colors and a global mode that take every match on the layer
-- Shift adds a marquee or wand area to the selection and Alt cuts it out, so a selection can be any shape
-- Move, nudge, flip, and rotate a selection (or the active cel when nothing is selected). A 90° turn swaps the sides and stays centered; pixels that do not fit are dropped. Copy publishes a straight-alpha image to the system clipboard and keeps an in-memory patch. Paste uses the system image, or that patch when the clipboard has no image
-- Canvas resize and crop
+### Drawing
+
+- Pencil, eraser, fill, eyedropper, line, rectangle, ellipse, rectangular selection, and a magic wand
+- Fill and the wand have a tolerance for near colors and a global mode that takes every match on the layer
+- Pixel-perfect pencil (P), off until you turn it on, drops the extra corner of a one-pixel diagonal step
+- Shade (D) turns the pencil into a shading brush: left steps each pixel to the next palette swatch, right to the one before
 - Horizontal and vertical mirror while drawing
-- Pixel-perfect pencil (P), off until you turn it on, drops the extra corner of a one-pixel diagonal step. The line tool is unchanged
-- Shade (D) turns the pencil into a shading brush: left steps each pixel to the next palette swatch, right to the one before. Colors not in the palette stay
-- Wrap (T) continues a stroke or fill that leaves an edge on the opposite edge. Tiled view (Shift+T) shows the canvas 3 by 3. Export still writes one copy
-- Primary and secondary colors, hex entry, and the Ink palette
-- Import and export the palette as GIMP `.gpl`, hex `.hex` (one `RRGGBB` per line), or JASC `.pal`. Import replaces the palette and can be undone. Drag swatches to reorder them, and fill a ramp of N steps between two swatches. Snap (S) makes pencil, fill, and shapes use the nearest palette color
-- Layers with visibility, opacity, rename, reorder, duplicate, and merge down
+- Wrap (T) continues a stroke or fill that leaves one edge on the opposite edge. Tiled view (Shift+T) shows the canvas 3 by 3 for checking a repeating tile
+- Nearest-neighbor zoom in whole-pixel steps, pan, and an optional grid
 - Undo and redo, including the selection
-- Frame names, typed beside the frame duration and used as the frame's name in the spritesheet JSON and by OxyPack
-- Animation tags: name a range of frames, choose forward, reverse, or ping-pong and a repeat count, and see each tag marked on the frame strip. Tags are saved in the document and exported in the spritesheet JSON and by OxyPack
-- Animation frames with thumbnails, playback, onion skin for earlier and later frames, a duration up to 10 seconds, GIF export, and a spritesheet in a row or a grid, with padding and a JSON description for game engines
+
+### Selections
+
+- Shift adds a marquee or wand area to the selection and Alt cuts it out, so a selection can be any shape
+- Move, nudge, flip, and rotate a selection, or the active cel when nothing is selected. A 90° turn swaps the sides and stays centered
+- Copy puts a straight-alpha image on the system clipboard. Paste uses the system image, or the last copy when the clipboard has no image
+- Canvas resize and crop
+
+### Color and palette
+
+- Primary and secondary colors, hex entry, and the 16-color Ink palette
+- Drag swatches to reorder them, and fill a ramp of N steps between two swatches
+- Snap (S) makes pencil, fill, and shapes use the nearest palette color
+- Import and export the palette as GIMP `.gpl`, hex `.hex`, or JASC `.pal`. Import replaces the palette and can be undone
+
+### Layers
+
+- Visibility, opacity, rename, reorder, duplicate, and merge down
+- Reference images (PNG or JPEG) on the canvas or in a floating panel, behind the art by default. Ctrl+drag moves one, and Fit to canvas scales it to the document. They are left out of export and saved beside the document, not inside it
+
+### Animation
+
+- Frames with thumbnails, playback, and a duration up to 10 seconds each
+- Frame names, typed in the Name field beside the duration. The spritesheet JSON and OxyPack use them
+- Animation tags: name a range of frames, choose forward, reverse, or ping-pong and a repeat count, and see each tag marked on the frame strip. Tags are saved in the document and exported in the spritesheet JSON
+- Onion skin for earlier and later frames, with a tint
 - A preview panel of the whole image, with its own playback, that pans the canvas when you click it
-- PNG and spritesheet export at 1×, 2×, or 4× nearest-neighbor
+
+### Import and export
+
 - `.oxypix` documents, plus PNG, BMP, and GIF import and export
-- Reference images (PNG or JPEG) on the canvas or in a floating panel, behind the art by default, so tools draw over them. Ctrl+drag moves one, and Fit to canvas scales it to the document. They are left out of export unless you copy one onto a layer. Dropping a JPEG loads a reference; a dropped PNG still imports. Save writes the paths and placement beside the document, not inside the `.oxypix` file. An image in the document's folder is stored by a relative path, so the folder can move
-- Recent files (a folder hint when names match, a missing-file mark, and Clear recent), drag-and-drop, a Windows file dialog, and a Linux portal dialog with a path field if the portal is unavailable
-- Autosave writes a recovery copy about once a minute, and after a run of edits, into the app data folder. It does not overwrite the open file. The next launch can restore or discard that copy, including a drawing that was never saved. Turn it off from the File menu
-- Pack sprites (File menu): pack frames from image, `.oxypix`, and `.aseprite` files into an atlas PNG and JSON, with a preview
-- Headless `export-png`, `export-bmp`, `export-gif`, `export-sheet`, `export-palette`, and `import-palette` commands
-- Keyboard shortcuts
+- PNG and spritesheet export at 1×, 2×, or 4× nearest-neighbor. A spritesheet can be a row or a grid, with padding and a JSON description for game engines
+- GIF animation export
+- Pack sprites (File menu): pack frames from image, `.oxypix`, and `.aseprite` files into an atlas PNG and JSON. See [OxyPack](#oxypack)
+- Headless `export-png`, `export-bmp`, `export-gif`, `export-sheet`, `export-palette`, and `import-palette` commands that never open a window
+
+### Files and recovery
+
+- Recent files, with a folder hint when names match, a missing-file mark, and Clear recent
+- Drag-and-drop, a Windows file dialog, and a Linux portal dialog with a path field if the portal is unavailable
+- Autosave writes a recovery copy about once a minute into the app data folder, without touching the open file. The next launch can restore or discard it, including a drawing that was never saved. Turn it off from the File menu
 
 A canvas side is at most 1024 pixels. One cel holds at most 1,048,576 pixels. The whole document holds at most 16,777,216 pixels across frames and layers. Details are in [docs/FORMAT.md](docs/FORMAT.md).
+
+## Updates
+
+Help, then Check for updates, looks at the public releases on GitHub. If a newer one has a file for your system, OxyPixel downloads it and checks it against `SHA256SUMS.txt` before it is used:
+
+- **Windows installer copy:** opens the new installer.
+- **Portable Windows copy:** replaces itself and restarts.
+- **Unpacked Linux copy:** replaces `oxypixel` from the new tar.gz and restarts.
+- **`.deb` copy** (`/usr/bin/oxypixel`): downloads the new `.deb` and leaves it for you to install with your package manager.
+
+You have to save or discard the open drawing first.
+
+**Automatic updates** is off by default. Turn it on in the Help menu or in the Check for updates window. OxyPixel then checks once a day at launch without opening a window, downloads and verifies a newer release in the background, and shows an "Update … ready" button in the menu bar. Nothing is installed until you click it.
 
 ## How it's built
 
@@ -160,13 +199,44 @@ The full list is [docs/SHORTCUTS.md](docs/SHORTCUTS.md).
 
 ## OxyPack
 
-`oxypack` is a companion command-line tool in the same workspace, and the editor has the same packer under File, then Pack sprites…. It packs sprites from many files into one atlas PNG and writes a JSON hash beside it, the layout Phaser, PixiJS, Godot importers, and Aseprite's own exporter read. Every frame of a GIF or `.oxypix` file becomes a sprite named `<file> 0`, `<file> 1`, and so on, with its duration; a one-frame file is named after the file.
+OxyPack packs sprites from many files into one atlas PNG and writes a JSON hash beside it, the layout Phaser, PixiJS, Godot importers, and Aseprite's own exporter read. It is a command-line tool, `oxypack`, and the same packer is in the editor under File, then Pack sprites….
 
 ```bash
 oxypack sprites/ hero.oxypix --trim --dedupe -o atlas.png
 ```
 
-Inputs are `.png`, `.bmp`, `.gif`, `.oxypix`, and Aseprite `.aseprite` / `.ase` files, or folders of them. An Aseprite file is drawn the way Aseprite flattens it for export: visible layers with their opacity, hidden and reference layers left out. Layer blend modes (Multiply, Screen, Overlay, and the rest of Aseprite's list) and group opacity and blending are applied. Tilemap layers are drawn from their tilesets, flipped tiles included. A tileset kept in another file is skipped, and `oxypack` says so on stderr. Tags from Aseprite files and from tagged `.oxypix` documents are written to `meta.frameTags` with their direction and repeat count, numbered by the sprites' order in the JSON, so a tag still points at the right frames when several files share one atlas. `--padding N` (default 1) leaves clear pixels between sprites, `--max-width N` (default 2048) caps the width, `--trim` crops each sprite to its ink and records the offset, `--dedupe` stores repeated frames once, `--pot` rounds the size up to powers of two, `--packer maxrects` fills the gaps rows leave for a shorter atlas, and `--no-json` writes only the PNG. The command never opens a window, so it fits build scripts and CI. The Pack sprites window takes files and folders (from the system dialog or a typed path), shows the packed atlas, and saves the same PNG and JSON the command would. On Windows the installer puts `oxypack.exe` in `%LOCALAPPDATA%\OxyPixel`, and there is also a standalone `oxypack-<version>-windows-x86_64.exe` download; the Linux archive has `./oxypack` beside `./oxypixel`, and the `.deb` installs `/usr/bin/oxypack`. From source: `cargo build --release -p oxypack`.
+![The Pack sprites window over the editor. campfire.oxypix is the input, and the result reads "4 sprites from 1 files, 259×64, 2 tags", with the four packed frames shown in a row.](docs/images/pack.png)
+
+### What it reads
+
+- `.png`, `.bmp`, `.gif`, `.oxypix`, and Aseprite `.aseprite` / `.ase` files, or folders of them (not searched recursively)
+- Every frame of an animation becomes a sprite with its duration. It is named `<file> <frame name>` when the frame has a name, and `<file> 0`, `<file> 1`, and so on otherwise. A one-frame file is named after the file
+- Aseprite files are drawn the way Aseprite flattens them for export:
+  - visible layers with their opacity; hidden and reference layers are left out
+  - layer blend modes (Multiply, Screen, Overlay, and the rest of Aseprite's list), and group opacity and blending
+  - tilemap layers drawn from their tilesets, flipped tiles included. A tileset kept in another file is skipped, with a note on stderr
+- Tags from Aseprite files and from tagged `.oxypix` documents are written to `meta.frameTags` with their direction and repeat count. They are numbered by the sprites' order in the JSON, so a tag still points at the right frames when several files share one atlas
+
+### Options
+
+| Option | Effect |
+| --- | --- |
+| `-o`, `--output <path>` | Atlas PNG to write (required). The JSON goes beside it |
+| `--padding N` | Clear pixels between sprites (default 1) |
+| `--max-width N` | Widest the atlas may be (default 2048) |
+| `--trim` | Crop each sprite to its ink and record the offset |
+| `--dedupe` | Store repeated frames once |
+| `--pot` | Round the atlas size up to powers of two |
+| `--packer maxrects` | Fill the gaps rows leave, for a shorter atlas (default `shelf`) |
+| `--no-json` | Write only the PNG |
+
+The command never opens a window, so it fits build scripts and CI. The Pack sprites window takes files and folders (from the system dialog or a typed path), shows the packed atlas, and saves the same PNG and JSON the command would.
+
+### Where to find it
+
+- **Windows:** the installer puts `oxypack.exe` in `%LOCALAPPDATA%\OxyPixel`, and there is also a standalone `oxypack-<version>-windows-x86_64.exe` download.
+- **Linux:** the archive has `./oxypack` beside `./oxypixel`, and the `.deb` installs `/usr/bin/oxypack`.
+- **From source:** `cargo build --release -p oxypack`.
 
 Outside tests: a tester ran the `oxypack` command from the 0.7.5 Linux build. With 0.8.0, `.aseprite` files saved by Aseprite 1.13.18.6 packed to the same frames as Aseprite's own export. Reports on other files and versions are welcome in an issue.
 
