@@ -65,9 +65,9 @@ No signature is applied. After you have a certificate, sign the application and 
 
 ```bat
 signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f your-cert.pfx /p YOUR_PASSWORD dist\oxypixel.exe
-signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f your-cert.pfx /p YOUR_PASSWORD dist\OxyPixel-0.8.6-Setup.exe
+signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f your-cert.pfx /p YOUR_PASSWORD dist\OxyPixel-0.9.0-Setup.exe
 signtool verify /pa /v dist\oxypixel.exe
-signtool verify /pa /v dist\OxyPixel-0.8.6-Setup.exe
+signtool verify /pa /v dist\OxyPixel-0.9.0-Setup.exe
 ```
 
 Do not put the `.pfx` or the password in the repository, in CI logs, or in a script that gets committed. A GitHub Actions secret named something like `WINDOWS_CERT_PFX` (base64) and `WINDOWS_CERT_PASSWORD` can feed `signtool` later. Until that exists, tell users the build is unsigned.
