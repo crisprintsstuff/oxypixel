@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The window draws with wgpu: Direct3D 12 on Windows, with the WARP software renderer when there is no GPU, and Vulkan on Linux. If wgpu cannot start, OxyPixel falls back to OpenGL as before. This fixes "egui_glow requires opengl 2.0+" on Windows virtual machines, Remote Desktop sessions, and machines without an OpenGL 2 driver. The `.deb` recommends `libvulkan1` and `mesa-vulkan-drivers`.
 - The Windows CI job starts the release build, waits for its window, and closes it, so a build that cannot open its window fails the pull request. `OXYPIXEL_NO_DIALOG=1` keeps a startup error on stderr instead of in a message box.
 
 ## [0.6.1] - 2026-10-24

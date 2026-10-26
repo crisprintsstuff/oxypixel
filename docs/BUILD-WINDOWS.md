@@ -4,7 +4,7 @@ The packaged artifacts are a 64-bit `oxypixel-<version>-windows-x86_64.exe` plus
 
 ## What the executable links
 
-Release builds pass `-C target-feature=+crt-static` for `x86_64-pc-windows-msvc` (see `.cargo/config.toml`). The CRT is inside the exe. The process still loads system DLLs, including `opengl32.dll`.
+Release builds pass `-C target-feature=+crt-static` for `x86_64-pc-windows-msvc` (see `.cargo/config.toml`). The CRT is inside the exe. The process still loads system DLLs: `d3d12.dll` and `dxgi.dll` for the wgpu renderer, and `opengl32.dll` for the OpenGL fallback.
 
 `crates/oxypixel/assets/oxypixel.rc` is the VERSIONINFO and icon script. `build.rs` embeds it when `llvm-rc`, `rc`, or `windres` is on `PATH`. If none of those exist, the build continues and prints a cargo warning. The installer still copies `oxypixel.ico` and uses it for the shortcut and the `.oxypix` icon.
 
