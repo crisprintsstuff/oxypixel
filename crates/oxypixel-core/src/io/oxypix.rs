@@ -40,6 +40,8 @@ const VERSION_1: u16 = 1;
 const SECTION_REQUIRED: u16 = 0x8000;
 /// Animation tags. Optional: a reader that skips it loses only the tags.
 const SECTION_TAGS: u16 = 0x0001;
+/// Frame names. Optional: a reader that skips it loses only the names.
+const SECTION_FRAME_NAMES: u16 = 0x0002;
 /// Most sections in one file.
 const MAX_SECTIONS: usize = 64;
 
@@ -106,7 +108,43 @@ fn sections(doc: &Document) -> Vec<(u16, Vec<u8>)> {
     if !doc.tags().is_empty() {
         list.push((SECTION_TAGS, tags_bytes(doc.tags())));
     }
+    if (0..doc.frame_count()).any(|i| doc.frame_name(i).is_some()) {
+        list.push((SECTION_FRAME_NAMES, frame_names_bytes(doc)));
+    }
     list
+}
+
+/// count u16 (the frame count), then per frame: name_len u16, name bytes.
+/// An unnamed frame has length 0.
+fn frame_names_bytes(doc: &Document) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&(doc.frame_count() as u16).to_le_bytes());
+    for index in 0..doc.frame_count() {
+        let name = clamp_name(doc.frame_name(index).unwrap_or(""));
+        out.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        out.extend_from_slice(name.as_bytes());
+    }
+    out
+}
+
+fn read_frame_names(bytes: &[u8], frame_count: usize) -> Result<Vec<String>> {
+    let mut r = Reader::new(bytes);
+    if r.u16()? as usize != frame_count {
+        return Err(Error::BadFlag("frame name count"));
+    }
+    let mut names = Vec::with_capacity(frame_count);
+    for _ in 0..frame_count {
+        let len = r.u16()? as usize;
+        if len > MAX_NAME_BYTES {
+            return Err(Error::BadName);
+        }
+        let name = std::str::from_utf8(r.bytes(len)?).map_err(|_| Error::BadName)?;
+        names.push(name.to_string());
+    }
+    if !r.finished() {
+        return Err(Error::TrailingBytes);
+    }
+    Ok(names)
 }
 
 /// count u16, then per tag: from u16, to u16, direction u8, repeat u16,
@@ -219,7 +257,11 @@ pub fn load_oxypix_bytes(bytes: &[u8]) -> Result<Document> {
             let pixels = unpack(raw).ok_or(Error::Truncated)?;
             cels.push(pixels);
         }
-        frames.push(Frame { duration_ms, cels });
+        frames.push(Frame {
+            duration_ms,
+            name: String::new(),
+            cels,
+        });
     }
 
     let palette_count = r.u16()? as usize;
@@ -232,6 +274,7 @@ pub fn load_oxypix_bytes(bytes: &[u8]) -> Result<Document> {
         palette.push(Rgba::new(raw[0], raw[1], raw[2], raw[3]));
     }
     let mut tags = None;
+    let mut frame_names = None;
     if version != VERSION_1 {
         let count = r.u16()? as usize;
         if count > MAX_SECTIONS {
@@ -248,6 +291,10 @@ pub fn load_oxypix_bytes(bytes: &[u8]) -> Result<Document> {
             match kind {
                 SECTION_TAGS if tags.is_some() => return Err(Error::DuplicateSection("tags")),
                 SECTION_TAGS => tags = Some(read_tags(body)?),
+                SECTION_FRAME_NAMES if frame_names.is_some() => {
+                    return Err(Error::DuplicateSection("frame names"))
+                }
+                SECTION_FRAME_NAMES => frame_names = Some(read_frame_names(body, frame_count)?),
                 kind if kind & SECTION_REQUIRED != 0 => return Err(Error::RequiredSection(kind)),
                 // An optional section from a newer writer: skip it.
                 _ => {}
@@ -268,6 +315,9 @@ pub fn load_oxypix_bytes(bytes: &[u8]) -> Result<Document> {
     )?;
     if let Some(tags) = tags {
         doc.set_tags(tags)?;
+    }
+    for (index, name) in frame_names.into_iter().flatten().enumerate() {
+        doc.set_frame_name(index, &name)?;
     }
     Ok(doc)
 }
@@ -500,6 +550,57 @@ mod tests {
             load_oxypix_bytes(&trailing),
             Err(Error::TrailingBytes)
         ));
+    }
+
+    #[test]
+    fn frame_names_round_trip_and_are_checked() {
+        let mut doc = tagged(3);
+        doc.set_frame_name(0, "idle").unwrap();
+        doc.set_frame_name(2, "jump ✨").unwrap();
+        assert_eq!(doc.frame_name(0), Some("idle"));
+        assert_eq!(doc.frame_name(1), None);
+        let bytes = save_oxypix_bytes(&doc).unwrap();
+        assert_eq!(&bytes[8..10], &2u16.to_le_bytes());
+        let back = load_oxypix_bytes(&bytes).unwrap();
+        assert_eq!(back, doc);
+        // Clearing every name goes back to version 1.
+        doc.set_frame_name(0, "").unwrap();
+        doc.set_frame_name(2, " ").unwrap();
+        assert_eq!(
+            &save_oxypix_bytes(&doc).unwrap()[8..10],
+            &1u16.to_le_bytes()
+        );
+
+        let plain = tagged(2);
+        let mut wrong_count = Vec::new();
+        wrong_count.extend_from_slice(&3u16.to_le_bytes());
+        for _ in 0..3 {
+            wrong_count.extend_from_slice(&0u16.to_le_bytes());
+        }
+        let bad = with_sections(&plain, &[(SECTION_FRAME_NAMES, wrong_count)]);
+        assert!(matches!(
+            load_oxypix_bytes(&bad),
+            Err(Error::BadFlag("frame name count"))
+        ));
+        let mut named = plain.clone();
+        named.set_frame_name(1, "b").unwrap();
+        let body = frame_names_bytes(&named);
+        let twice = with_sections(
+            &plain,
+            &[
+                (SECTION_FRAME_NAMES, body.clone()),
+                (SECTION_FRAME_NAMES, body.clone()),
+            ],
+        );
+        assert!(matches!(
+            load_oxypix_bytes(&twice),
+            Err(Error::DuplicateSection("frame names"))
+        ));
+        let mut not_utf8 = body;
+        let last = not_utf8.len() - 1;
+        not_utf8[last] = 0xff;
+        let bad_text = with_sections(&plain, &[(SECTION_FRAME_NAMES, not_utf8)]);
+        assert!(matches!(load_oxypix_bytes(&bad_text), Err(Error::BadName)));
     }
 
     #[test]

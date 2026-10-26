@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Frames can have names. Type one in the Name field beside the frame duration; typing is one undo step, and copying a frame keeps its name. The spritesheet JSON uses the name instead of "frame N", OxyPack names the sprite `<file> <name>`, and the frame strip's tooltip shows it. Names are saved in `.oxypix` version 2 (a new optional section), so a file without names or tags is still version 1.
+
 ## [0.8.6] - 2026-10-26
 
 ### Added

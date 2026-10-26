@@ -2045,6 +2045,30 @@ impl OxyApp {
                     .document()
                     .frame_duration(active)
                     .unwrap_or(oxypixel_core::DEFAULT_FRAME_MS);
+                let mut name = self
+                    .editor
+                    .document()
+                    .frame_name(active)
+                    .unwrap_or("")
+                    .to_string();
+                ui.label("Name");
+                let field = ui
+                    .add(
+                        egui::TextEdit::singleline(&mut name)
+                            .hint_text(format!("frame {}", active + 1))
+                            .desired_width(90.0),
+                    )
+                    .on_hover_text("Used in the spritesheet JSON and by OxyPack");
+                if field.gained_focus() {
+                    self.editor.end_coalesce();
+                    self.editor.begin_coalesce();
+                }
+                if field.changed() {
+                    self.editor.rename_frame(&name);
+                }
+                if field.lost_focus() {
+                    self.editor.end_coalesce();
+                }
                 let slider = ui.add(
                     egui::Slider::new(&mut ms, min_ms..=max_ms)
                         .logarithmic(true)

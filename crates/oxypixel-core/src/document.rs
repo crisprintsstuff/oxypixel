@@ -22,6 +22,8 @@ pub struct LayerInfo {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Frame {
     pub duration_ms: u32,
+    /// Empty when the frame has no name. Saved in `.oxypix` version 2.
+    pub name: String,
     /// One buffer per layer, row-major, length `width * height`.
     pub cels: Vec<Vec<Rgba>>,
 }
@@ -53,6 +55,7 @@ impl Document {
             }],
             frames: vec![Frame {
                 duration_ms: DEFAULT_FRAME_MS,
+                name: String::new(),
                 cels: vec![vec![Rgba::CLEAR; (width * height) as usize]],
             }],
             active_frame: 0,
@@ -121,6 +124,26 @@ impl Document {
 
     pub fn frame_duration(&self, index: usize) -> Option<u32> {
         self.frames.get(index).map(|f| f.duration_ms)
+    }
+
+    /// The frame's name, or `None` when it has none. A name of only spaces
+    /// counts as none.
+    pub fn frame_name(&self, index: usize) -> Option<&str> {
+        self.frames
+            .get(index)
+            .map(|f| f.name.as_str())
+            .filter(|name| !name.trim().is_empty())
+    }
+
+    /// Name a frame, cut to the name limit. It is kept as typed, so a name
+    /// can be edited one key at a time; an empty name removes it.
+    pub fn set_frame_name(&mut self, index: usize, name: &str) -> Result<()> {
+        let frame = self
+            .frames
+            .get_mut(index)
+            .ok_or(Error::Index { what: "frame" })?;
+        frame.name = clamp_name(name);
+        Ok(())
     }
 
     pub fn palette(&self) -> &[Rgba] {
@@ -375,6 +398,7 @@ impl Document {
         let cels = vec![vec![Rgba::CLEAR; len]; self.layers.len()];
         self.frames.push(Frame {
             duration_ms: DEFAULT_FRAME_MS,
+            name: String::new(),
             cels,
         });
         // Appended after every tag, so no tag changes.
