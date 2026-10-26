@@ -15,6 +15,7 @@ target_dir="${CARGO_TARGET_DIR:-$root/target}"
 export CARGO_TARGET_DIR="$target_dir"
 
 cargo build --release -p oxypixel -p oxypack
+"$root/scripts/check-glibc.sh" "$target_dir/release/oxypixel" "$target_dir/release/oxypack"
 
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT

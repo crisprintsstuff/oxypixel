@@ -93,7 +93,9 @@ jobs:
             dist/SHA256SUMS-windows.txt
 
   linux:
-    runs-on: ubuntu-latest
+    # Pinned: a binary links the glibc of the system it is built on, and
+    # ubuntu-latest moved past 24.04. scripts/check-glibc.sh enforces the limit.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
