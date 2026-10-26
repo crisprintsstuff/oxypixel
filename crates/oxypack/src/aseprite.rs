@@ -10,10 +10,16 @@
 //! opacity and blend mode are valid, a group is drawn as one image and then
 //! blended with its own opacity and mode, as Aseprite does; otherwise its
 //! children draw straight through. A background layer is always opaque.
-//! Reference layers are skipped, as Aseprite's own export does. Tilemap
-//! layers and unknown blend modes are not supported; they get a note
-//! instead of an error.
+//! Reference layers are skipped, as Aseprite's own export does.
+//!
+//! A tilemap cel is drawn from its layer's tileset like an image cel. Tile 0
+//! is empty, and a tile number past the end of the tileset is drawn empty
+//! with a note. Flipped tiles follow the usual tilemap convention: the
+//! diagonal flip (swap x and y, square tiles only) first, then the x flip,
+//! then the y flip. Tilesets kept in another file and unknown blend modes
+//! are not supported; they get a note instead of an error.
 
+use std::collections::HashMap;
 use std::io::Read;
 use std::rc::Rc;
 
@@ -39,6 +45,11 @@ const CHUNK_LAYER: u16 = 0x2004;
 const CHUNK_CEL: u16 = 0x2005;
 const CHUNK_TAGS: u16 = 0x2018;
 const CHUNK_PALETTE: u16 = 0x2019;
+const CHUNK_TILESET: u16 = 0x2023;
+
+const TILESET_EXTERNAL: u32 = 1;
+const TILESET_INSIDE: u32 = 2;
+const TILESET_ZERO_EMPTY: u32 = 4;
 
 const FLAG_LAYER_OPACITY: u32 = 1;
 const FLAG_GROUP_OPACITY: u32 = 2;
@@ -155,11 +166,11 @@ impl Depth {
 enum Kind {
     Image,
     Group,
-    /// Skipped for now, with a note.
     Tilemap,
 }
 
 struct Layer {
+    name: String,
     /// The group this layer is in, from the child levels.
     parent: Option<usize>,
     kind: Kind,
@@ -172,6 +183,36 @@ struct Layer {
     background: bool,
     /// Reference layers are not drawn, as in Aseprite's export.
     reference: bool,
+    /// The tileset a tilemap layer draws from.
+    tileset: u32,
+}
+
+/// Tiles stacked top to bottom in one image, `tile_w` wide.
+struct Tileset {
+    tile_w: u32,
+    tile_h: u32,
+    count: u32,
+    /// Tile 0 is the empty tile. Without this flag the empty tile is the
+    /// tile number with every bit of the mask set.
+    zero_empty: bool,
+    /// `None` when the tiles are kept in another file.
+    pixels: Option<Vec<Rgba>>,
+}
+
+/// A tilemap cel, drawn into an image once the frame's chunks are read.
+struct Tilemap {
+    layer: usize,
+    x: i32,
+    y: i32,
+    opacity: u8,
+    z: i16,
+    cols: u32,
+    rows: u32,
+    tiles: Vec<u32>,
+    id_mask: u32,
+    x_flip: u32,
+    y_flip: u32,
+    d_flip: u32,
 }
 
 /// Cel pixels. Linked cels share one.
@@ -251,6 +292,7 @@ pub fn read_aseprite(bytes: &[u8]) -> Result<AseFile> {
     let mut groups: Vec<usize> = Vec::new();
     let mut tags = Vec::new();
     let mut notes = Vec::new();
+    let mut tilesets: HashMap<u32, Tileset> = HashMap::new();
     // Each layer's cel image, by frame, for linked cels.
     let mut store: Vec<Vec<Option<Rc<Image>>>> = Vec::new();
     let mut stored_pixels = 0u64;
@@ -275,6 +317,7 @@ pub fn read_aseprite(bytes: &[u8]) -> Result<AseFile> {
             .filter(|&e| frame_len >= FRAME_HEADER_LEN && e <= end)
             .ok_or_else(|| bad(format!("frame {frame} runs past the end of the file")))?;
         let mut cels: Vec<Cel> = Vec::new();
+        let mut tilemaps: Vec<Tilemap> = Vec::new();
         let mut at = pos + FRAME_HEADER_LEN;
         while at < frame_end {
             let mut ch = Cursor::new(&bytes[..frame_end]);
@@ -297,9 +340,7 @@ pub fn read_aseprite(bytes: &[u8]) -> Result<AseFile> {
                     let opacity = c.u8()?;
                     c.skip(3)?;
                     let name = c.string()?;
-                    if layer_type == 2 {
-                        c.skip(4)?;
-                    }
+                    let tileset = if layer_type == 2 { c.u32()? } else { 0 };
                     if layer_uuid {
                         c.skip(16)?;
                     }
@@ -323,13 +364,11 @@ pub fn read_aseprite(bytes: &[u8]) -> Result<AseFile> {
                         ));
                         BlendMode::Normal
                     });
-                    if kind == Kind::Tilemap {
-                        notes.push(format!("tilemap layer {name} is skipped"));
-                    }
                     if kind == Kind::Group {
                         groups.push(layers.len());
                     }
                     layers.push(Layer {
+                        name,
                         parent,
                         kind,
                         visible,
@@ -337,6 +376,7 @@ pub fn read_aseprite(bytes: &[u8]) -> Result<AseFile> {
                         blend,
                         background,
                         reference: flags & LAYER_REFERENCE != 0,
+                        tileset,
                     });
                     store.push(Vec::new());
                 }
@@ -388,7 +428,55 @@ pub fn read_aseprite(bytes: &[u8]) -> Result<AseFile> {
                                 ))
                             })?)
                         }
-                        // Tilemap cels belong to tilemap layers, which are skipped.
+                        3 if layers[layer].kind == Kind::Tilemap => {
+                            let cols = u32::from(c.u16()?);
+                            let rows = u32::from(c.u16()?);
+                            let bytes_per_tile = match c.u16()? {
+                                8 => 1,
+                                16 => 2,
+                                32 => 4,
+                                bits => {
+                                    return Err(bad(format!(
+                                        "a tilemap cel in frame {frame} has {bits} bits per tile"
+                                    )))
+                                }
+                            };
+                            let id_mask = c.u32()?;
+                            let x_flip = c.u32()?;
+                            let y_flip = c.u32()?;
+                            let d_flip = c.u32()?;
+                            c.skip(10)?;
+                            let count = u64::from(cols) * u64::from(rows);
+                            if count > MAX_SHEET_PIXELS {
+                                return Err(bad("the cels are larger than the packer accepts"));
+                            }
+                            let raw = inflate(c.rest(), count as usize * bytes_per_tile)?;
+                            let tiles = raw
+                                .chunks_exact(bytes_per_tile)
+                                .map(|b| match *b {
+                                    [v] => u32::from(v),
+                                    [a, b] => u32::from(u16::from_le_bytes([a, b])),
+                                    [a, b, c, d] => u32::from_le_bytes([a, b, c, d]),
+                                    _ => 0,
+                                })
+                                .collect();
+                            tilemaps.push(Tilemap {
+                                layer,
+                                x,
+                                y,
+                                opacity,
+                                z,
+                                cols,
+                                rows,
+                                tiles,
+                                id_mask,
+                                x_flip,
+                                y_flip,
+                                d_flip,
+                            });
+                            None
+                        }
+                        // Unknown cel types, and tilemap cels on other layers.
                         _ => None,
                     };
                     if let Some(image) = image {
@@ -445,6 +533,46 @@ pub fn read_aseprite(bytes: &[u8]) -> Result<AseFile> {
                         }
                     }
                 }
+                CHUNK_TILESET => {
+                    let id = c.u32()?;
+                    let set_flags = c.u32()?;
+                    let count = c.u32()?;
+                    let tile_w = u32::from(c.u16()?);
+                    let tile_h = u32::from(c.u16()?);
+                    c.skip(2 + 14)?; // base index (for display only), reserved
+                    c.string()?;
+                    if set_flags & TILESET_EXTERNAL != 0 {
+                        c.skip(4 + 4)?; // external file and its tileset id
+                    }
+                    let pixels = if set_flags & TILESET_INSIDE != 0 {
+                        let len = c.u32()? as usize;
+                        let total = u64::from(tile_w) * u64::from(tile_h) * u64::from(count);
+                        if total > MAX_SHEET_PIXELS || stored_pixels + total > MAX_CEL_STORE {
+                            return Err(bad("a tileset is larger than the packer accepts"));
+                        }
+                        let raw = inflate(c.take(len)?, total as usize * depth.bytes())?;
+                        stored_pixels += total;
+                        Some(decode_pixels(
+                            &raw,
+                            depth,
+                            &palette,
+                            transparent_index,
+                            false,
+                        ))
+                    } else {
+                        None
+                    };
+                    tilesets.insert(
+                        id,
+                        Tileset {
+                            tile_w,
+                            tile_h,
+                            count,
+                            zero_empty: set_flags & TILESET_ZERO_EMPTY != 0,
+                            pixels,
+                        },
+                    );
+                }
                 CHUNK_TAGS => {
                     let count = c.u16()?;
                     c.skip(8)?;
@@ -472,6 +600,31 @@ pub fn read_aseprite(bytes: &[u8]) -> Result<AseFile> {
             }
             at = chunk_end;
         }
+        for map in tilemaps {
+            let layer = &layers[map.layer];
+            let tileset = tilesets.get(&layer.tileset).ok_or_else(|| {
+                bad(format!(
+                    "tilemap layer {} uses tileset {}, which the file does not have",
+                    layer.name, layer.tileset
+                ))
+            })?;
+            let Some(image) =
+                draw_tilemap(&map, tileset, &layer.name, &mut notes, &mut stored_pixels)?
+            else {
+                continue;
+            };
+            let slot = &mut store[map.layer];
+            slot.resize(frame + 1, None);
+            slot[frame] = Some(image.clone());
+            cels.push(Cel {
+                layer: map.layer,
+                x: map.x,
+                y: map.y,
+                opacity: map.opacity,
+                z: map.z,
+                image,
+            });
+        }
         frames.push((
             composite(width, height, &layers, &cels, group_opacity_valid),
             duration,
@@ -486,6 +639,70 @@ pub fn read_aseprite(bytes: &[u8]) -> Result<AseFile> {
         tags,
         notes,
     })
+}
+
+/// Draw a tilemap cel from its tileset. `None` when there is nothing to draw.
+fn draw_tilemap(
+    map: &Tilemap,
+    tileset: &Tileset,
+    layer_name: &str,
+    notes: &mut Vec<String>,
+    stored_pixels: &mut u64,
+) -> Result<Option<Rc<Image>>> {
+    let Some(tiles) = &tileset.pixels else {
+        notes.push(format!(
+            "tilemap layer {layer_name} uses a tileset kept in another file; it is skipped"
+        ));
+        return Ok(None);
+    };
+    let (tw, th) = (tileset.tile_w, tileset.tile_h);
+    let width = u64::from(map.cols) * u64::from(tw);
+    let height = u64::from(map.rows) * u64::from(th);
+    if width == 0 || height == 0 {
+        return Ok(None);
+    }
+    let count = width * height;
+    if count > MAX_SHEET_PIXELS || *stored_pixels + count > MAX_CEL_STORE {
+        return Err(bad("the cels are larger than the packer accepts"));
+    }
+    *stored_pixels += count;
+    let empty = if tileset.zero_empty { 0 } else { map.id_mask };
+    let mut pixels = vec![Rgba::CLEAR; count as usize];
+    let mut missing = false;
+    for (i, &value) in map.tiles.iter().enumerate() {
+        let id = value & map.id_mask;
+        if id == empty {
+            continue;
+        }
+        if id >= tileset.count {
+            missing = true;
+            continue;
+        }
+        let (col, row) = (i as u32 % map.cols, i as u32 / map.cols);
+        let (fx, fy) = (value & map.x_flip != 0, value & map.y_flip != 0);
+        let fd = value & map.d_flip != 0 && tw == th;
+        for dy in 0..th {
+            for dx in 0..tw {
+                // Undo the flips in the reverse order they were made.
+                let sy = if fy { th - 1 - dy } else { dy };
+                let sx = if fx { tw - 1 - dx } else { dx };
+                let (sx, sy) = if fd { (sy, sx) } else { (sx, sy) };
+                let src = ((id * th + sy) as usize) * tw as usize + sx as usize;
+                let dst = (row * th + dy) as usize * width as usize + (col * tw + dx) as usize;
+                pixels[dst] = tiles[src];
+            }
+        }
+    }
+    if missing {
+        notes.push(format!(
+            "tilemap layer {layer_name} uses tiles its tileset does not have; they are drawn empty"
+        ));
+    }
+    Ok(Some(Rc::new(Image {
+        width: width as u32,
+        height: height as u32,
+        pixels,
+    })))
 }
 
 /// zlib data that must inflate to exactly `len` bytes.
@@ -567,7 +784,7 @@ fn draw_children(
     let mut items: Vec<((i64, i16), Item)> = Vec::new();
     for cel in cels {
         let layer = &layers[cel.layer];
-        if layer.parent == parent && layer.kind == Kind::Image && layer.visible && !layer.reference
+        if layer.parent == parent && layer.kind != Kind::Group && layer.visible && !layer.reference
         {
             items.push(((cel.layer as i64 + i64::from(cel.z), cel.z), Item::Cel(cel)));
         }
@@ -666,6 +883,70 @@ pub(crate) mod tests {
         d.extend([0; 3]);
         string(&mut d, name);
         Chunk(CHUNK_LAYER, d)
+    }
+
+    fn tilemap_layer(name: &str, tileset: u32) -> Chunk {
+        let Chunk(kind, mut d) = layer(LAYER_VISIBLE, 2, 0, 0, 255, name);
+        d.extend(tileset.to_le_bytes());
+        Chunk(kind, d)
+    }
+
+    fn zlib(raw: &[u8]) -> Vec<u8> {
+        let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        z.write_all(raw).unwrap();
+        z.finish().unwrap()
+    }
+
+    /// A tileset kept in the file: `raw` is the tiles stacked top to bottom.
+    fn tileset(id: u32, tile: u16, count: u32, raw: &[u8]) -> Chunk {
+        let mut d = Vec::new();
+        d.extend(id.to_le_bytes());
+        d.extend((TILESET_INSIDE | TILESET_ZERO_EMPTY).to_le_bytes());
+        d.extend(count.to_le_bytes());
+        d.extend(tile.to_le_bytes());
+        d.extend(tile.to_le_bytes());
+        d.extend(1i16.to_le_bytes());
+        d.extend([0; 14]);
+        string(&mut d, "tiles");
+        let packed = zlib(raw);
+        d.extend((packed.len() as u32).to_le_bytes());
+        d.extend(packed);
+        Chunk(CHUNK_TILESET, d)
+    }
+
+    fn external_tileset(id: u32) -> Chunk {
+        let mut d = Vec::new();
+        d.extend(id.to_le_bytes());
+        d.extend((TILESET_EXTERNAL | TILESET_ZERO_EMPTY).to_le_bytes());
+        d.extend(4u32.to_le_bytes());
+        d.extend(1u16.to_le_bytes());
+        d.extend(1u16.to_le_bytes());
+        d.extend(1i16.to_le_bytes());
+        d.extend([0; 14]);
+        string(&mut d, "elsewhere");
+        d.extend([0; 8]);
+        Chunk(CHUNK_TILESET, d)
+    }
+
+    const X_FLIP: u32 = 0x8000_0000;
+    const Y_FLIP: u32 = 0x4000_0000;
+    const D_FLIP: u32 = 0x2000_0000;
+
+    fn cel_tilemap(layer: u16, x: i16, cols: u16, rows: u16, bits: u16, tiles: &[u32]) -> Chunk {
+        let mut d = cel_head(layer, x, 0, 255, 3, 0);
+        for v in [cols, rows, bits] {
+            d.extend(v.to_le_bytes());
+        }
+        for mask in [0x1fff_ffff, X_FLIP, Y_FLIP, D_FLIP] {
+            d.extend(u32::to_le_bytes(mask));
+        }
+        d.extend([0; 10]);
+        let mut raw = Vec::new();
+        for &t in tiles {
+            raw.extend(&t.to_le_bytes()[..usize::from(bits / 8)]);
+        }
+        d.extend(zlib(&raw));
+        Chunk(CHUNK_CEL, d)
     }
 
     fn cel_head(layer: u16, x: i16, y: i16, opacity: u8, kind: u16, z: i16) -> Vec<u8> {
@@ -1065,6 +1346,149 @@ pub(crate) mod tests {
             read_aseprite(&gray).unwrap().frames[0].0[0],
             Rgba::new(200, 200, 200, 255)
         );
+    }
+
+    /// Tile 1 of a 2×2 tileset: red in the top-right pixel, the rest clear.
+    fn corner_tiles() -> Vec<u8> {
+        let mut raw = [0u8; 4].repeat(4); // tile 0, empty
+        raw.extend([[0; 4], RED, [0; 4], [0; 4]].concat());
+        raw
+    }
+
+    #[test]
+    fn tilemaps_draw_their_tiles_with_flips() {
+        let tiles = [
+            1,
+            1 | X_FLIP,
+            1 | Y_FLIP,
+            1 | D_FLIP,
+            1 | D_FLIP | X_FLIP,
+            0,
+            9,
+        ];
+        let bytes = file(
+            14,
+            2,
+            32,
+            0,
+            vec![(
+                100,
+                vec![
+                    tileset(3, 2, 2, &corner_tiles()),
+                    tilemap_layer("map", 3),
+                    cel_tilemap(0, 0, 7, 1, 32, &tiles),
+                ],
+            )],
+        );
+        let ase = read_aseprite(&bytes).unwrap();
+        let pixels = &ase.frames[0].0;
+        let red: Vec<(usize, usize)> = (0..pixels.len())
+            .filter(|&i| pixels[i] == px(RED))
+            .map(|i| (i % 14, i / 14))
+            .collect();
+        // Each tile is 2 pixels wide. Plain: top right. X flip: top left.
+        // Y flip: bottom right. Diagonal: bottom left. Diagonal then x:
+        // bottom right. Tile 0 and the missing tile 9 are empty.
+        assert_eq!(red, vec![(1, 0), (2, 0), (5, 1), (6, 1), (9, 1)]);
+        // Cutting or scribbling on the file fails cleanly.
+        for len in 0..bytes.len() {
+            let _ = read_aseprite(&bytes[..len]);
+        }
+        for at in 128..bytes.len() {
+            let mut changed = bytes.clone();
+            changed[at] ^= 0xff;
+            let _ = read_aseprite(&changed);
+        }
+        assert_eq!(ase.notes.len(), 1);
+        assert!(ase.notes[0].contains("map"), "{:?}", ase.notes);
+    }
+
+    #[test]
+    fn small_tiles_linked_tilemaps_and_external_tilesets() {
+        // 8-bit tiles, an offset cel, and a linked cel in the next frame.
+        let bytes = file(
+            3,
+            2,
+            32,
+            0,
+            vec![
+                (
+                    100,
+                    vec![
+                        tileset(0, 2, 2, &corner_tiles()),
+                        tilemap_layer("map", 0),
+                        cel_tilemap(0, 1, 1, 1, 8, &[1]),
+                    ],
+                ),
+                (100, vec![cel_link(0, 0)]),
+            ],
+        );
+        let ase = read_aseprite(&bytes).unwrap();
+        // The linked cel has its own position, x 0, so its red is one left.
+        for ((pixels, _), at) in ase.frames.iter().zip([2, 1]) {
+            assert_eq!(pixels[at], px(RED));
+            assert_eq!(pixels.iter().filter(|p| **p == px(RED)).count(), 1);
+        }
+        assert!(ase.notes.is_empty(), "{:?}", ase.notes);
+
+        let external = file(
+            1,
+            1,
+            32,
+            0,
+            vec![(
+                100,
+                vec![
+                    external_tileset(0),
+                    tilemap_layer("outside", 0),
+                    cel_tilemap(0, 0, 1, 1, 16, &[1]),
+                ],
+            )],
+        );
+        let ase = read_aseprite(&external).unwrap();
+        assert_eq!(ase.frames[0].0, vec![Rgba::CLEAR]);
+        assert!(ase.notes[0].contains("another file"), "{:?}", ase.notes);
+    }
+
+    #[test]
+    fn broken_tilemaps_are_errors() {
+        let missing = file(
+            1,
+            1,
+            32,
+            0,
+            vec![(
+                100,
+                vec![tilemap_layer("map", 7), cel_tilemap(0, 0, 1, 1, 32, &[1])],
+            )],
+        );
+        assert!(read_aseprite(&missing).unwrap_err().0.contains("tileset 7"));
+        let odd_bits = file(
+            1,
+            1,
+            32,
+            0,
+            vec![(
+                100,
+                vec![
+                    tileset(0, 2, 2, &corner_tiles()),
+                    tilemap_layer("map", 0),
+                    cel_tilemap(0, 0, 1, 1, 24, &[1]),
+                ],
+            )],
+        );
+        assert!(read_aseprite(&odd_bits).unwrap_err().0.contains("24 bits"));
+        let short = file(
+            1,
+            1,
+            32,
+            0,
+            vec![(100, vec![tileset(0, 2, 3, &corner_tiles())])],
+        );
+        assert!(read_aseprite(&short)
+            .unwrap_err()
+            .0
+            .contains("wrong number"));
     }
 
     #[test]
