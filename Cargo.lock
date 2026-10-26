@@ -2165,6 +2165,7 @@ dependencies = [
  "eframe",
  "flate2",
  "image",
+ "oxypack",
  "oxypixel-core",
  "rfd",
  "serde_json",

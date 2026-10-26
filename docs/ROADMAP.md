@@ -31,7 +31,7 @@ In the 0.7.5 tree and covered by tests or by the release workflow.
 | `.oxypix` | Version 1, little-endian, caps before allocation, trailing bytes rejected | `io/oxypix.rs`, `docs/FORMAT.md` |
 | Raster | PNG, BMP, and GIF import and export. GIF import is one composited layer. Spritesheet in a row or a grid with padding and a JSON description, and 2×/4× nearest PNG | `io/raster.rs` |
 | References | PNG and JPEG overlays or a floating panel. Placement is a sidecar, not a `.oxypix` field. Export, merge, and the eyedropper skip them unless Sample is on | `reference.rs`, `refsview.rs` |
-| OxyPack | Separate `oxypack` binary: PNG, BMP, GIF, `.oxypix`, and `.aseprite` inputs or folders, a shelf- or MaxRects-packed atlas PNG and a JSON hash, padding, width limit, trim, dedupe, power-of-two sizes | `crates/oxypack/` |
+| OxyPack | `oxypack` library and command, and File, then Pack sprites… in the editor: PNG, BMP, GIF, `.oxypix`, and `.aseprite` inputs or folders, a shelf- or MaxRects-packed atlas PNG and a JSON hash, padding, width limit, trim, dedupe, power-of-two sizes | `crates/oxypack/` |
 | CLI | `export-png`, `export-bmp`, `export-gif`, `export-sheet` (with `--columns`, `--padding`, `--scale`, `--json`), `export-palette`, and `import-palette`. Failures print and exit. Missing file must not hang | `cli.rs`, `tests/cli.rs` |
 | Palette files | GIMP `.gpl`, hex `.hex` (one `RRGGBB` per line, `RRGGBBAA` when alpha is not 255), and JASC `.pal`. Import replaces the palette and is one undo step. Swatches drag to a new index. A ramp of N steps can fill the span between two swatches. Snap (S) makes pencil, fill, and shapes use the nearest palette color. More than 256 colors is an error | `io/palette.rs`, `editor.rs`, `color.rs`, `app.rs` |
 | Window | egui 0.31 on wgpu (Direct3D 12 with WARP on Windows, Vulkan on Linux), falling back to glow OpenGL, nearest-neighbor canvas, whole-pixel zoom, a grid when the cells are readable, pan, shortcuts, tool icons with their shortcut letter, a preview panel beside the canvas | `app.rs`, `canvas.rs`, `preview.rs` |
@@ -260,11 +260,11 @@ Export spritesheet takes Columns (0 is one row, as before), Padding (clear pixel
 
 ### OX-P28
 
-**OxyPack, a companion sprite packer.** Status: in progress. Area: `crates/oxypack/`.
+**OxyPack, a companion sprite packer.** Status: done. Area: `crates/oxypack/`, `crates/oxypixel/src/packview.rs`.
 
-Done: the `oxypack` command-line tool described in the scorecard, tested in `crates/oxypack/src/pack.rs`, `src/main.rs`, and `tests/cli.rs`. It stays in this repository and uses only the core's public API. Releases ship `oxypack-<version>-windows-x86_64.exe` (listed in `SHA256SUMS-windows.txt`, not in the updater's `SHA256SUMS.txt`), `oxypack` in the Linux tar.gz, and `/usr/bin/oxypack` in the `.deb`. The Windows installer does not include it. Each of these needs a human decision before work starts:
+Done: the `oxypack` library and command described in the scorecard, and the editor's File, then Pack sprites… window, which calls the same `pack_files` and `write_atlas`. Tested in `crates/oxypack/src/pack.rs`, `aseprite.rs`, `files.rs`, `main.rs`, `tests/cli.rs`, and `crates/oxypixel/src/packview.rs`. It stays in this repository and uses only the core's public API. Releases ship `oxypack-<version>-windows-x86_64.exe` (listed in `SHA256SUMS-windows.txt`, not in the updater's `SHA256SUMS.txt`), `oxypack` in the Linux tar.gz, and `/usr/bin/oxypack` in the `.deb`. The Windows installer does not include the command; installer users have the window.
 
-- **A window.** A small egui front end to pick inputs, preview the atlas, and save. It could share widgets with the editor.
+Still open, each needing a decision: true group blending and blend modes other than Normal for `.aseprite` files, tilemap layers, and tags for `.oxypix` files, which have no place to store them until `.oxypix` version 2 (OX-P27).
 
 ## Human only
 

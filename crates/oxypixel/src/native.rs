@@ -40,6 +40,34 @@ pub fn pick_path(
     None
 }
 
+/// Several files at once. Empty when cancelled or when there is no dialog.
+#[cfg(any(windows, all(unix, not(target_os = "macos"))))]
+pub fn pick_files(title: &str, filter: &str, extensions: &[&str]) -> Vec<PathBuf> {
+    rfd::FileDialog::new()
+        .set_title(title)
+        .add_filter(filter, extensions)
+        .pick_files()
+        .unwrap_or_default()
+}
+
+#[cfg(not(any(windows, all(unix, not(target_os = "macos")))))]
+pub fn pick_files(title: &str, filter: &str, extensions: &[&str]) -> Vec<PathBuf> {
+    let _ = (title, filter, extensions);
+    Vec::new()
+}
+
+/// One folder. `None` when cancelled or when there is no dialog.
+#[cfg(any(windows, all(unix, not(target_os = "macos"))))]
+pub fn pick_folder(title: &str) -> Option<PathBuf> {
+    rfd::FileDialog::new().set_title(title).pick_folder()
+}
+
+#[cfg(not(any(windows, all(unix, not(target_os = "macos")))))]
+pub fn pick_folder(title: &str) -> Option<PathBuf> {
+    let _ = title;
+    None
+}
+
 /// Set to anything but empty or `0`, a startup failure stays on stderr.
 /// The CI launch check sets it, because nothing there can click a box.
 pub const NO_DIALOG_ENV: &str = "OXYPIXEL_NO_DIALOG";

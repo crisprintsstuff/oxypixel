@@ -14,6 +14,7 @@ mod clipboard;
 mod framestrip;
 mod icon;
 mod native;
+mod packview;
 mod preview;
 mod recent;
 mod recovery;
