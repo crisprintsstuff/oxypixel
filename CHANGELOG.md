@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The Windows installer also installs the `oxypack.exe` command-line packer beside `oxypixel.exe` in `%LOCALAPPDATA%\OxyPixel`, and the uninstaller removes it. Setup does not change `PATH`. The standalone `oxypack-<version>-windows-x86_64.exe` download stays.
+
 ## [0.8.0] - 2026-10-26
 
 ### Added

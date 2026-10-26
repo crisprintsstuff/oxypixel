@@ -5,10 +5,12 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 
-if [[ ! -f dist/oxypixel.exe ]]; then
-  echo "dist/oxypixel.exe is missing. Run scripts/build-windows.sh first." >&2
-  exit 1
-fi
+for exe in oxypixel.exe oxypack.exe; do
+  if [[ ! -f "dist/${exe}" ]]; then
+    echo "dist/${exe} is missing. Run scripts/build-windows.sh first." >&2
+    exit 1
+  fi
+done
 if ! command -v docker >/dev/null 2>&1; then
   echo "docker is required to run makensis on Linux." >&2
   exit 1

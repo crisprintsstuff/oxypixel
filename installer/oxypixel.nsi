@@ -14,6 +14,10 @@ ManifestDPIAware true
 !ifndef SOURCE_EXE
   !define SOURCE_EXE "../dist/oxypixel.exe"
 !endif
+; The oxypack command-line packer, installed beside the editor.
+!ifndef SOURCE_PACK
+  !define SOURCE_PACK "../dist/oxypack.exe"
+!endif
 !ifndef OUTFILE
   !define OUTFILE "../dist/${APPNAME}-${VERSION}-Setup.exe"
 !endif
@@ -43,7 +47,7 @@ BrandingText "${APPNAME} ${VERSION}"
 !define MUI_UNWELCOMEFINISHPAGE_BITMAP_NOSTRETCH
 
 !define MUI_WELCOMEPAGE_TITLE "Welcome to OxyPixel"
-!define MUI_WELCOMEPAGE_TEXT "Setup installs OxyPixel ${VERSION} for the current user.$\r$\n$\r$\nIt adds a Start menu shortcut and opens .oxypix files with OxyPixel. A desktop shortcut is optional."
+!define MUI_WELCOMEPAGE_TEXT "Setup installs OxyPixel ${VERSION} for the current user.$\r$\n$\r$\nIt adds a Start menu shortcut and opens .oxypix files with OxyPixel. The oxypack command-line sprite packer is installed beside it. A desktop shortcut is optional."
 
 !define MUI_LICENSEPAGE_TEXT_TOP "OxyPixel is released under the MIT License."
 !define MUI_LICENSEPAGE_TEXT_BOTTOM "If you accept the terms, choose I Agree to continue."
@@ -91,6 +95,7 @@ Section "OxyPixel" SecMain
   SectionIn RO
   SetOutPath "$INSTDIR"
   File "${SOURCE_EXE}"
+  File /oname=oxypack.exe "${SOURCE_PACK}"
   File "oxypixel.ico"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
@@ -120,7 +125,7 @@ Section /o "Desktop shortcut" SecDesktop
   CreateShortcut "$DESKTOP\OxyPixel.lnk" "$INSTDIR\oxypixel.exe" "" "$INSTDIR\oxypixel.ico" 0
 SectionEnd
 
-LangString DESC_MAIN ${LANG_ENGLISH} "The editor, a Start menu shortcut, and the .oxypix file association."
+LangString DESC_MAIN ${LANG_ENGLISH} "The editor, the oxypack command-line packer, a Start menu shortcut, and the .oxypix file association."
 LangString DESC_DESKTOP ${LANG_ENGLISH} "Also place a shortcut on the desktop."
 
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
@@ -130,6 +135,7 @@ LangString DESC_DESKTOP ${LANG_ENGLISH} "Also place a shortcut on the desktop."
 
 Section "Uninstall"
   Delete "$INSTDIR\oxypixel.exe"
+  Delete "$INSTDIR\oxypack.exe"
   Delete "$INSTDIR\oxypixel.ico"
   Delete "$INSTDIR\Uninstall.exe"
   Delete "$SMPROGRAMS\OxyPixel\OxyPixel.lnk"
