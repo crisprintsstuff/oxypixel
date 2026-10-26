@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-26
+
 ### Added
 
 - Automatic updates, off by default. Turn them on in the Help menu or the Check for updates window. OxyPixel then checks GitHub once a day at launch, downloads a newer release in the background, and checks it against `SHA256SUMS.txt`. An "Update … ready" button then appears in the menu bar. Nothing is installed until you click it, so unsaved work is never closed for you. The setting is kept in `view.txt` with the preview panel's.
