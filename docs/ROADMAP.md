@@ -265,7 +265,7 @@ Export spritesheet takes Columns (0 is one row, as before), Padding (clear pixel
 
 Done: the `oxypack` library and command described in the scorecard, and the editor's File, then Pack sprites… window, which calls the same `pack_files` and `write_atlas`. Tested in `crates/oxypack/src/pack.rs`, `aseprite.rs`, `files.rs`, `main.rs`, `tests/cli.rs`, and `crates/oxypixel/src/packview.rs`. It stays in this repository and uses only the core's public API. Releases ship `oxypack-<version>-windows-x86_64.exe` (listed in `SHA256SUMS-windows.txt`, not in the updater's `SHA256SUMS.txt`), `oxypack` in the Linux tar.gz, and `/usr/bin/oxypack` in the `.deb`. The Windows installer puts `oxypack.exe` beside `oxypixel.exe` without changing `PATH`. A tester ran the 0.7.5 `oxypack` command on Linux. With 0.8.0, `.aseprite` files from Aseprite 1.13.18.6 packed to the same frames as Aseprite's own export.
 
-Still open, each needing a decision: true group blending and blend modes other than Normal for `.aseprite` files, and tilemap layers. Tags for `.oxypix` files are done: they are stored in version 2 and OxyPack writes them.
+Still open, each needing a decision: tilemap layers in `.aseprite` files. Blend modes and group blending are done (`blend.rs`). Tags for `.oxypix` files are done: they are stored in version 2 and OxyPack writes them.
 
 ## Human only
 

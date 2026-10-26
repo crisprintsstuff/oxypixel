@@ -6,16 +6,20 @@
 //! layers from the bottom up, with layer and cel opacity. Every size is
 //! checked before memory is allocated for it.
 //!
-//! Not supported, with a note instead of an error: blend modes other than
-//! Normal (drawn as Normal), tilemap layers (skipped), and reference layers
-//! (skipped, as Aseprite's own export does). When the file says group opacity
-//! counts, a group's opacity multiplies its children's instead of blending
-//! the group as one image. A background layer is always opaque.
+//! Layers blend with their mode (see `blend.rs`). When the file says group
+//! opacity and blend mode are valid, a group is drawn as one image and then
+//! blended with its own opacity and mode, as Aseprite does; otherwise its
+//! children draw straight through. A background layer is always opaque.
+//! Reference layers are skipped, as Aseprite's own export does. Tilemap
+//! layers and unknown blend modes are not supported; they get a note
+//! instead of an error.
 
 use std::io::Read;
 use std::rc::Rc;
 
-use oxypixel_core::{source_over, Rgba, DEFAULT_FRAME_MS, MAX_FILE_BYTES, MAX_SHEET_PIXELS};
+use oxypixel_core::{Rgba, DEFAULT_FRAME_MS, MAX_FILE_BYTES, MAX_SHEET_PIXELS};
+
+use crate::blend::{blend, BlendMode};
 
 /// Largest canvas side accepted. The atlas cannot be wider than this anyway.
 const MAX_SIDE: u32 = oxypixel_core::MAX_SHEET_WIDTH;
@@ -147,14 +151,27 @@ impl Depth {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Image,
+    Group,
+    /// Skipped for now, with a note.
+    Tilemap,
+}
+
 struct Layer {
-    /// Visible, with every parent group visible too.
-    shown: bool,
-    /// 0 to 255, already multiplied by every parent group's opacity.
+    /// The group this layer is in, from the child levels.
+    parent: Option<usize>,
+    kind: Kind,
+    /// This layer's own visibility. A hidden group hides its children.
+    visible: bool,
+    /// This layer's own opacity: 255 when the header says opacity is not
+    /// valid, and always 255 on a background layer.
     opacity: u8,
+    blend: BlendMode,
     background: bool,
-    /// Image layers draw. Groups, tilemaps, and reference layers do not.
-    draws: bool,
+    /// Reference layers are not drawn, as in Aseprite's export.
+    reference: bool,
 }
 
 /// Cel pixels. Linked cels share one.
@@ -230,7 +247,8 @@ pub fn read_aseprite(bytes: &[u8]) -> Result<AseFile> {
     let mut palette = vec![Rgba::CLEAR; 256.max(usize::from(color_count))];
     let mut layers: Vec<Layer> = Vec::new();
     // Each group's visibility and opacity, by child level.
-    let mut groups: Vec<(bool, u8)> = Vec::new();
+    // The open groups, by child level.
+    let mut groups: Vec<usize> = Vec::new();
     let mut tags = Vec::new();
     let mut notes = Vec::new();
     // Each layer's cel image, by frame, for linked cels.
@@ -286,43 +304,39 @@ pub fn read_aseprite(bytes: &[u8]) -> Result<AseFile> {
                         c.skip(16)?;
                     }
                     groups.truncate(level);
-                    let parents_shown = groups.iter().all(|g| g.0);
-                    let parent_opacity = groups.iter().fold(255u8, |o, g| mul255(o, g.1));
+                    let parent = groups.last().copied();
                     let background = flags & LAYER_BACKGROUND != 0;
-                    let own_opacity = if layer_opacity_valid && !background {
+                    let kind = match layer_type {
+                        1 => Kind::Group,
+                        2 => Kind::Tilemap,
+                        _ => Kind::Image,
+                    };
+                    let opacity = if layer_opacity_valid && !background {
                         opacity
                     } else {
                         255
                     };
-                    let shown = parents_shown && flags & LAYER_VISIBLE != 0;
-                    let opacity = mul255(parent_opacity, own_opacity);
-                    let reference = flags & LAYER_REFERENCE != 0;
-                    match layer_type {
-                        1 => {
-                            while groups.len() < level {
-                                groups.push((true, 255));
-                            }
-                            let group_opacity = if group_opacity_valid {
-                                own_opacity
-                            } else {
-                                255
-                            };
-                            groups.push((flags & LAYER_VISIBLE != 0, group_opacity));
-                        }
-                        2 if shown => notes.push(format!("tilemap layer {name} is skipped")),
-                        _ => {}
-                    }
-                    let draws = layer_type == 0 && !reference;
-                    if draws && shown && blend != 0 {
+                    let visible = flags & LAYER_VISIBLE != 0;
+                    let blend = BlendMode::from_code(blend).unwrap_or_else(|| {
                         notes.push(format!(
-                            "layer {name} uses a blend mode other than Normal; it is drawn as Normal"
+                            "layer {name} uses blend mode {blend}, which this reader does not know; it is drawn as Normal"
                         ));
+                        BlendMode::Normal
+                    });
+                    if kind == Kind::Tilemap {
+                        notes.push(format!("tilemap layer {name} is skipped"));
+                    }
+                    if kind == Kind::Group {
+                        groups.push(layers.len());
                     }
                     layers.push(Layer {
-                        shown,
+                        parent,
+                        kind,
+                        visible,
                         opacity,
+                        blend,
                         background,
-                        draws,
+                        reference: flags & LAYER_REFERENCE != 0,
                     });
                     store.push(Vec::new());
                 }
@@ -458,7 +472,10 @@ pub fn read_aseprite(bytes: &[u8]) -> Result<AseFile> {
             }
             at = chunk_end;
         }
-        frames.push((composite(width, height, &layers, &mut cels), duration));
+        frames.push((
+            composite(width, height, &layers, &cels, group_opacity_valid),
+            duration,
+        ));
         pos = frame_end;
     }
     notes.dedup();
@@ -513,35 +530,107 @@ fn decode_pixels(
     }
 }
 
-/// Draw the frame's cels bottom to top. A cel's place in the stack is its
-/// layer index plus its z-index; on a tie the lower z-index goes first.
-fn composite(width: u32, height: u32, layers: &[Layer], cels: &mut [Cel]) -> Vec<Rgba> {
+/// Draw a frame: the top level of the layer tree onto a clear canvas.
+fn composite(
+    width: u32,
+    height: u32,
+    layers: &[Layer],
+    cels: &[Cel],
+    group_blend: bool,
+) -> Vec<Rgba> {
     let mut out = vec![Rgba::CLEAR; width as usize * height as usize];
-    cels.sort_by_key(|cel| (cel.layer as i64 + i64::from(cel.z), cel.z));
-    for cel in cels.iter() {
+    draw_children(None, width, height, layers, cels, group_blend, &mut out);
+    out
+}
+
+/// Draw the children of `parent` (the top level for `None`) onto `out`,
+/// bottom to top. A cel's place among them is its layer index plus its
+/// z-index, the lower z-index first on a tie; a group sits at its own index.
+///
+/// When the file says group opacity and blend mode are valid, a group is
+/// drawn into its own buffer, which is then blended onto `out` with the
+/// group's opacity and mode, as Aseprite composites groups. Otherwise a
+/// group's children draw straight onto `out`.
+fn draw_children(
+    parent: Option<usize>,
+    width: u32,
+    height: u32,
+    layers: &[Layer],
+    cels: &[Cel],
+    group_blend: bool,
+    out: &mut [Rgba],
+) {
+    enum Item<'a> {
+        Cel(&'a Cel),
+        Group(usize),
+    }
+    let mut items: Vec<((i64, i16), Item)> = Vec::new();
+    for cel in cels {
         let layer = &layers[cel.layer];
-        if !layer.draws || !layer.shown {
-            continue;
+        if layer.parent == parent && layer.kind == Kind::Image && layer.visible && !layer.reference
+        {
+            items.push(((cel.layer as i64 + i64::from(cel.z), cel.z), Item::Cel(cel)));
         }
-        let opacity = mul255(layer.opacity, cel.opacity);
-        let image = &cel.image;
-        for row in 0..image.height as i32 {
-            let ty = cel.y + row;
-            if ty < 0 || ty >= height as i32 {
-                continue;
+    }
+    for (index, layer) in layers.iter().enumerate() {
+        if layer.parent == parent && layer.kind == Kind::Group && layer.visible {
+            items.push(((index as i64, 0), Item::Group(index)));
+        }
+    }
+    items.sort_by_key(|(key, _)| *key);
+    for (_, item) in items {
+        match item {
+            Item::Cel(cel) => {
+                let layer = &layers[cel.layer];
+                draw_cel(
+                    cel,
+                    mul255(layer.opacity, cel.opacity),
+                    layer.blend,
+                    width,
+                    height,
+                    out,
+                );
             }
-            for col in 0..image.width as i32 {
-                let tx = cel.x + col;
-                if tx < 0 || tx >= width as i32 {
-                    continue;
+            Item::Group(index) if group_blend => {
+                let mut group = vec![Rgba::CLEAR; out.len()];
+                draw_children(
+                    Some(index),
+                    width,
+                    height,
+                    layers,
+                    cels,
+                    group_blend,
+                    &mut group,
+                );
+                let layer = &layers[index];
+                for (dst, src) in out.iter_mut().zip(group) {
+                    *dst = blend(*dst, src, layer.opacity, layer.blend);
                 }
-                let src = image.pixels[row as usize * image.width as usize + col as usize];
-                let dst = &mut out[ty as usize * width as usize + tx as usize];
-                *dst = source_over(*dst, src, opacity);
+            }
+            Item::Group(index) => {
+                draw_children(Some(index), width, height, layers, cels, group_blend, out)
             }
         }
     }
-    out
+}
+
+fn draw_cel(cel: &Cel, opacity: u8, mode: BlendMode, width: u32, height: u32, out: &mut [Rgba]) {
+    let image = &cel.image;
+    for row in 0..image.height as i32 {
+        let ty = cel.y + row;
+        if ty < 0 || ty >= height as i32 {
+            continue;
+        }
+        for col in 0..image.width as i32 {
+            let tx = cel.x + col;
+            if tx < 0 || tx >= width as i32 {
+                continue;
+            }
+            let src = image.pixels[row as usize * image.width as usize + col as usize];
+            let dst = &mut out[ty as usize * width as usize + tx as usize];
+            *dst = blend(*dst, src, opacity, mode);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -549,6 +638,8 @@ pub(crate) mod tests {
     //! A small writer for test files, following the same specification.
 
     use std::io::Write;
+
+    use oxypixel_core::source_over;
 
     use super::*;
 
@@ -773,10 +864,64 @@ pub(crate) mod tests {
                 ],
             )],
         );
+        // Multiply over a clear canvas is the color itself; the hidden group
+        // and the reference layer are not drawn.
         let ase = read_aseprite(&bytes).unwrap();
         assert_eq!(ase.frames[0].0, vec![px(RED)]);
+        assert!(ase.notes.is_empty(), "{:?}", ase.notes);
+    }
+
+    #[test]
+    fn blend_modes_apply_and_unknown_ones_are_noted() {
+        let gray = [128, 128, 128, 255];
+        let bytes = file(
+            2,
+            1,
+            32,
+            0,
+            vec![(
+                100,
+                vec![
+                    layer(LAYER_VISIBLE, 0, 0, 0, 255, "base"),
+                    layer(LAYER_VISIBLE, 0, 0, 1, 255, "multiply"),
+                    layer(LAYER_VISIBLE, 0, 0, 99, 255, "future"),
+                    cel(0, 0, 0, 255, 2, 1, &gray.repeat(2)),
+                    cel(1, 0, 0, 255, 1, 1, &RED),
+                    cel(2, 1, 0, 255, 1, 1, &BLUE),
+                ],
+            )],
+        );
+        let ase = read_aseprite(&bytes).unwrap();
+        assert_eq!(ase.frames[0].0[0], Rgba::new(128, 0, 0, 255));
+        // The unknown mode 99 is drawn as Normal, with a note.
+        assert_eq!(ase.frames[0].0[1], px(BLUE));
         assert_eq!(ase.notes.len(), 1);
-        assert!(ase.notes[0].contains("multiply"));
+        assert!(ase.notes[0].contains("future") && ase.notes[0].contains("99"));
+    }
+
+    #[test]
+    fn a_group_with_its_own_blend_mode_is_drawn_as_one_image() {
+        // A gray base, then a Multiply group holding white and red Normal
+        // layers. With group blending the group is drawn alone (red) and
+        // multiplied onto gray: dark red. Without it, the group's mode is
+        // ignored and its Normal children cover the base: plain red.
+        let gray = [128, 128, 128, 255];
+        let white = [255, 255, 255, 255];
+        let chunks = || {
+            vec![
+                layer(LAYER_VISIBLE, 0, 0, 0, 255, "base"),
+                layer(LAYER_VISIBLE, 1, 0, 1, 255, "group"),
+                layer(LAYER_VISIBLE, 0, 1, 0, 255, "white"),
+                layer(LAYER_VISIBLE, 0, 1, 0, 255, "red"),
+                cel(0, 0, 0, 255, 1, 1, &gray),
+                cel(2, 0, 0, 255, 1, 1, &white),
+                cel(3, 0, 0, 255, 1, 1, &RED),
+            ]
+        };
+        let grouped = read_aseprite(&file(1, 1, 32, 0, vec![(100, chunks())])).unwrap();
+        assert_eq!(grouped.frames[0].0[0], Rgba::new(128, 0, 0, 255));
+        let passed = file_flags(FLAG_LAYER_OPACITY, 1, 1, 32, 0, vec![(100, chunks())]);
+        assert_eq!(read_aseprite(&passed).unwrap().frames[0].0[0], px(RED));
     }
 
     #[test]
