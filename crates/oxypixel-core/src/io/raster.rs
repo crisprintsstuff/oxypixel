@@ -276,8 +276,12 @@ pub fn spritesheet_json(doc: &Document, layout: SheetLayout, image: &str) -> Res
     let mut out = String::from("{\n  \"frames\": [\n");
     for (index, (x, y)) in grid.cells.iter().enumerate() {
         let duration = doc.frame_duration(index).unwrap_or(DEFAULT_FRAME_MS);
+        let filename = match doc.frame_name(index) {
+            Some(name) => json_string(name),
+            None => format!("\"frame {index}\""),
+        };
         out.push_str(&format!(
-            "    {{\"filename\": \"frame {index}\", \"frame\": {{\"x\": {x}, \"y\": {y}, \"w\": {w}, \"h\": {h}}}, \"rotated\": false, \"trimmed\": false, \"spriteSourceSize\": {{\"x\": 0, \"y\": 0, \"w\": {w}, \"h\": {h}}}, \"sourceSize\": {{\"w\": {w}, \"h\": {h}}}, \"duration\": {duration}}}"
+            "    {{\"filename\": {filename}, \"frame\": {{\"x\": {x}, \"y\": {y}, \"w\": {w}, \"h\": {h}}}, \"rotated\": false, \"trimmed\": false, \"spriteSourceSize\": {{\"x\": 0, \"y\": 0, \"w\": {w}, \"h\": {h}}}, \"sourceSize\": {{\"w\": {w}, \"h\": {h}}}, \"duration\": {duration}}}"
         ));
         out.push_str(if index + 1 < grid.cells.len() {
             ",\n"
@@ -420,6 +424,7 @@ fn still_document(width: u32, height: u32, pixels: Vec<Rgba>) -> Result<Document
         }],
         vec![Frame {
             duration_ms: DEFAULT_FRAME_MS,
+            name: String::new(),
             cels: vec![pixels],
         }],
         0,
@@ -462,6 +467,7 @@ fn import_gif(bytes: &[u8]) -> Result<Document> {
         };
         frames.push(Frame {
             duration_ms,
+            name: String::new(),
             cels: vec![pixels],
         });
     }
@@ -730,6 +736,12 @@ mod tests {
         assert!(text.contains("\"size\": {\"w\": 5, \"h\": 5}"));
         assert!(text.contains("\"frameTags\": []"));
         assert_eq!(text.matches('{').count(), text.matches('}').count());
+
+        let mut named = doc.clone();
+        named.set_frame_name(1, "step \"b\"").unwrap();
+        let text = spritesheet_json(&named, layout, "walk.png").unwrap();
+        assert!(text.contains("\"filename\": \"step \\\"b\\\"\", \"frame\": {\"x\": 3"));
+        assert!(text.contains("\"filename\": \"frame 2\""));
 
         let mut tagged = doc.clone();
         tagged

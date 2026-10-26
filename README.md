@@ -115,6 +115,7 @@ These match the current editor. Planned work is listed in [docs/ROADMAP.md](docs
 - Import and export the palette as GIMP `.gpl`, hex `.hex` (one `RRGGBB` per line), or JASC `.pal`. Import replaces the palette and can be undone. Drag swatches to reorder them, and fill a ramp of N steps between two swatches. Snap (S) makes pencil, fill, and shapes use the nearest palette color
 - Layers with visibility, opacity, rename, reorder, duplicate, and merge down
 - Undo and redo, including the selection
+- Frame names, typed beside the frame duration and used as the frame's name in the spritesheet JSON and by OxyPack
 - Animation tags: name a range of frames, choose forward, reverse, or ping-pong and a repeat count, and see each tag marked on the frame strip. Tags are saved in the document and exported in the spritesheet JSON and by OxyPack
 - Animation frames with thumbnails, playback, onion skin for earlier and later frames, a duration up to 10 seconds, GIF export, and a spritesheet in a row or a grid, with padding and a JSON description for game engines
 - A preview panel of the whole image, with its own playback, that pans the canvas when you click it
@@ -201,7 +202,7 @@ oxypixel import-palette sprite.oxypix palette.gpl recolored.oxypix
 
 ## File formats
 
-`.oxypix` is the editor's own little-endian document. Version 1 stores the canvas, shared layer stack, frame durations, pixels, and palette. Version 2 adds animation tags and is written only when a document has tags; OxyPixel 0.8.5 and earlier open version 1 only. The byte layout is [docs/FORMAT.md](docs/FORMAT.md).
+`.oxypix` is the editor's own little-endian document. Version 1 stores the canvas, shared layer stack, frame durations, pixels, and palette. Version 2 adds animation tags and frame names and is written only when a document has one of them; OxyPixel 0.8.5 and earlier open version 1 only. The byte layout is [docs/FORMAT.md](docs/FORMAT.md).
 
 PNG, BMP, and GIF can be imported as a new document or as a layer. A GIF import becomes one composited layer named Imported. Export writes the composited frame, a GIF animation, a BMP, or a PNG spritesheet in a row or a grid, optionally with a JSON description.
 

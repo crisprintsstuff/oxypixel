@@ -12,7 +12,7 @@ Infrastructure, then small fixes that already have a place in the code.
 
 OX-002, OX-011, and OX-012 are done, so this list is empty.
 
-Suggested order if a human picks proposals: OX-P20, OX-P21, OX-P6, OX-P22, OX-P24, OX-P25, and OX-P23 are done. OX-P27 has its section layout; frame names and blend modes can each add a section.
+Suggested order if a human picks proposals: OX-P20, OX-P21, OX-P6, OX-P22, OX-P24, OX-P25, and OX-P23 are done. OX-P27 has its section layout, with tags and frame names; blend modes would add a section.
 
 ## Scorecard
 
@@ -167,7 +167,7 @@ Each tool button draws its letter (B, E, G, I, L, R, O, M) in the corner of the 
 
 **Thumbnails on the frame strip, onion skin for the next frame, and the full duration range.** Status: done. Area: `crates/oxypixel/src/framestrip.rs`, `crates/oxypixel/src/canvas.rs`.
 
-Each frame button shows a small composite of that frame and its number. The hover tip includes the duration. Frame names are not edited: a version 1 `.oxypix` file has no frame-name field, and this change does not add one. Onion skin can ghost up to eight frames before the current one and eight after it. Earlier ghosts lean rose and later ghosts lean teal when Tint is on, and Opacity scales them, with farther frames dimmer. Frame 1 does not show the last frame, and the last frame does not show frame 1. The duration slider runs from 20 ms to 10000 ms, on a logarithmic scale so both a short frame and the file-format maximum are reachable.
+Each frame button shows a small composite of that frame and its number. The hover tip includes the duration. A frame can have a name (the Name field beside the duration), stored in `.oxypix` version 2 section `0x0002`. Onion skin can ghost up to eight frames before the current one and eight after it. Earlier ghosts lean rose and later ghosts lean teal when Tint is on, and Opacity scales them, with farther frames dimmer. Frame 1 does not show the last frame, and the last frame does not show frame 1. The duration slider runs from 20 ms to 10000 ms, on a logarithmic scale so both a short frame and the file-format maximum are reachable.
 
 ### OX-P19
 
@@ -257,7 +257,7 @@ Export spritesheet takes Columns (0 is one row, as before), Padding (clear pixel
 
 ### OX-P27
 
-**`.oxypix` version 2.** Status: in progress. Version 2 is version 1 plus a list of sections after the palette; a section marked required must be understood, an optional one may be skipped. Saving writes version 2 only when a section is used, so documents without one stay version 1 byte for byte. Tags (section `0x0001`) are the first section. Still open: frame names (P11) and blend modes (P18), which would be a new optional and a new required section, and whether references stay a sidecar. The layout is in [FORMAT.md](FORMAT.md) and tested in `io/oxypix.rs`.
+**`.oxypix` version 2.** Status: in progress. Version 2 is version 1 plus a list of sections after the palette; a section marked required must be understood, an optional one may be skipped. Saving writes version 2 only when a section is used, so documents without one stay version 1 byte for byte. Tags (section `0x0001`) and frame names (section `0x0002`) are optional sections. Still open: blend modes (P18), which would be a required section, and whether references stay a sidecar. The layout is in [FORMAT.md](FORMAT.md) and tested in `io/oxypix.rs`.
 
 ### OX-P28
 

@@ -69,6 +69,17 @@ repeated count times:
 
 A body longer than its tags is an error.
 
+### Section `0x0002`: frame names (optional)
+
+```text
+count        u16   must equal frame_count
+repeated count times:
+  name_len   u16   0 through 128; 0 is a frame without a name
+  name       name_len bytes of UTF-8
+```
+
+Written only when at least one frame has a name. A body longer than its names is an error.
+
 Reference images are not a field in this file. Version 1 has no room for them: trailing bytes are rejected, and a new field would be a new version. A saved document may have a sidecar, `<name>.oxypix.refs`, in the same directory. Save writes it. That file lists PNG or JPEG paths and where each image sits. A path to an image inside the document's directory is relative to that directory; any other path is absolute. The pixels stay in those image files. A reader that only understands this document never sees them, and export does not read the sidecar.
 
 ## Limits

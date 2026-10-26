@@ -163,13 +163,17 @@ pub struct Atlas {
 /// Every frame of `doc`, composited, as sprites named after `stem`.
 ///
 /// A one-frame document gives one sprite called `stem`. Frames of a longer
-/// one are `stem 0`, `stem 1`, and so on, as Aseprite names them.
+/// one are `stem 0`, `stem 1`, and so on, as Aseprite names them. A frame
+/// with a name is `stem name` instead.
 pub fn sprites_from_document(doc: &Document, stem: &str) -> Result<Vec<Sprite>> {
     let count = doc.frame_count();
     (0..count)
         .map(|frame| {
             Ok(Sprite {
-                name: frame_name(stem, frame, count),
+                name: match doc.frame_name(frame) {
+                    Some(name) => format!("{stem} {name}"),
+                    None => frame_name(stem, frame, count),
+                },
                 width: doc.width(),
                 height: doc.height(),
                 pixels: doc.composite(frame)?,
@@ -839,6 +843,11 @@ mod tests {
         doc.set_frame_duration(1, 250).unwrap();
         let frames = sprites_from_document(&doc, "walk").unwrap();
         assert_eq!(frames[0].name, "walk 0");
+        doc.set_frame_name(0, "contact").unwrap();
+        assert_eq!(
+            sprites_from_document(&doc, "walk").unwrap()[0].name,
+            "walk contact"
+        );
         assert_eq!(
             (frames[1].name.as_str(), frames[1].duration),
             ("walk 1", 250)

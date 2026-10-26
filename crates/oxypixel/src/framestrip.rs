@@ -148,9 +148,14 @@ pub fn show(
         let tagged = crate::tagsview::names_at(tags, index)
             .map(|names| format!(" · {names}"))
             .unwrap_or_default();
+        let named = editor
+            .document()
+            .frame_name(index)
+            .map(|name| format!(" “{name}”"))
+            .unwrap_or_default();
         response
             .clone()
-            .on_hover_text(format!("Frame {} · {ms} ms{tagged}", index + 1));
+            .on_hover_text(format!("Frame {}{named} · {ms} ms{tagged}", index + 1));
         if response.clicked() {
             clicked = Some(index);
         }

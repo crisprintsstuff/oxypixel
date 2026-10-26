@@ -1114,6 +1114,19 @@ impl Editor {
         self.structural(|doc| doc.remove_tag(index))
     }
 
+    /// Name the active frame, as typed. Nothing is recorded when the name does
+    /// not change; inside [`Self::begin_coalesce`] typing is one undo step.
+    pub fn rename_frame(&mut self, name: &str) {
+        let index = self.doc.active_frame();
+        let name = clamp_name(name);
+        if self.doc.frames().get(index).map(|f| f.name.as_str()) == Some(name.as_str()) {
+            return;
+        }
+        self.mutate(false, |doc| {
+            let _ = doc.set_frame_name(index, &name);
+        });
+    }
+
     pub fn rename_layer(&mut self, name: &str) {
         let index = self.doc.active_layer();
         let name = clamp_name(name);
@@ -2779,5 +2792,20 @@ mod tests {
         assert!(ed.document().tags().is_empty());
         assert!(ed.undo());
         assert_eq!(ed.document().tags().len(), 1);
+    }
+
+    #[test]
+    fn renaming_a_frame_is_one_undo_and_copies_keep_the_name() {
+        let mut ed = editor();
+        ed.rename_frame("idle");
+        assert_eq!(ed.document().frame_name(0), Some("idle"));
+        let before = ed.can_undo();
+        ed.rename_frame("idle");
+        assert_eq!(ed.can_undo(), before);
+        ed.duplicate_frame().unwrap();
+        assert_eq!(ed.document().frame_name(1), Some("idle"));
+        assert!(ed.undo());
+        assert!(ed.undo());
+        assert_eq!(ed.document().frame_name(0), None);
     }
 }
