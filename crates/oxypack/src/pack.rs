@@ -72,9 +72,21 @@ pub struct Sprite {
     pub duration: u32,
 }
 
+/// How sprites are placed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Packer {
+    /// Rows, tallest sprite first. Simple and stable; the default since 0.7.5.
+    #[default]
+    Shelf,
+    /// MaxRects with the bottom-left rule: each sprite goes where its bottom
+    /// edge is highest, then furthest left. Fills the gaps a shelf leaves.
+    MaxRects,
+}
+
 /// How the atlas is laid out.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PackOptions {
+    pub packer: Packer,
     /// Clear pixels between neighboring sprites. Not added at the atlas edge.
     pub padding: u32,
     /// Crop each sprite to its non-clear pixels. The JSON records the offset.
@@ -90,6 +102,7 @@ pub struct PackOptions {
 impl Default for PackOptions {
     fn default() -> Self {
         Self {
+            packer: Packer::Shelf,
             padding: 1,
             trim: false,
             dedupe: false,
@@ -123,6 +136,33 @@ impl Placement {
     }
 }
 
+/// An animation tag over a range of sprites, for `meta.frameTags`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FrameTag {
+    pub name: String,
+    /// First and last sprite, both included, as indexes into the packed
+    /// sprites (the order of `frames` in the JSON).
+    pub from: usize,
+    pub to: usize,
+    pub direction: crate::aseprite::Direction,
+    /// How many times the range plays. 0 is forever and is not written.
+    pub repeat: u16,
+}
+
+/// The tags of one file's sprites, moved to where those sprites start in the
+/// whole list.
+pub fn frame_tags(tags: &[crate::aseprite::Tag], first_sprite: usize) -> Vec<FrameTag> {
+    tags.iter()
+        .map(|tag| FrameTag {
+            name: tag.name.clone(),
+            from: first_sprite + tag.from as usize,
+            to: first_sprite + tag.to as usize,
+            direction: tag.direction,
+            repeat: tag.repeat,
+        })
+        .collect()
+}
+
 /// A packed atlas: the pixels and where each input sprite is, in input order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Atlas {
@@ -140,18 +180,38 @@ pub fn sprites_from_document(doc: &Document, stem: &str) -> Result<Vec<Sprite>> 
     let count = doc.frame_count();
     (0..count)
         .map(|frame| {
-            let name = if count == 1 {
-                stem.to_string()
-            } else {
-                format!("{stem} {frame}")
-            };
             Ok(Sprite {
-                name,
+                name: frame_name(stem, frame, count),
                 width: doc.width(),
                 height: doc.height(),
                 pixels: doc.composite(frame)?,
                 duration: doc.frame_duration(frame).unwrap_or(DEFAULT_FRAME_MS),
             })
+        })
+        .collect()
+}
+
+/// `stem` for a one-frame file, `stem N` for frame N of a longer one.
+pub fn frame_name(stem: &str, frame: usize, count: usize) -> String {
+    if count == 1 {
+        stem.to_string()
+    } else {
+        format!("{stem} {frame}")
+    }
+}
+
+/// Every frame of a decoded `.aseprite` file as sprites named after `stem`.
+pub fn sprites_from_aseprite(file: &crate::aseprite::AseFile, stem: &str) -> Vec<Sprite> {
+    let count = file.frames.len();
+    file.frames
+        .iter()
+        .enumerate()
+        .map(|(frame, (pixels, duration))| Sprite {
+            name: frame_name(stem, frame, count),
+            width: file.width,
+            height: file.height,
+            pixels: pixels.clone(),
+            duration: *duration,
         })
         .collect()
 }
@@ -227,6 +287,159 @@ fn round_up_pow2(value: u32) -> u32 {
     value.checked_next_power_of_two().unwrap_or(value)
 }
 
+/// Where each rectangle goes, and the width and height they use.
+type Layout = (Vec<(u32, u32)>, u32, u32);
+
+fn too_tall(height: u64) -> Error {
+    Error::Limit {
+        what: "atlas height",
+        value: height,
+        max: u64::from(MAX_SHEET_WIDTH),
+    }
+}
+
+/// Rows no wider than `max_width`, tallest first, then widest, then input
+/// order, so the same sizes always give the same layout.
+fn place_shelves(sizes: &[(u32, u32)], padding: u32, max_width: u32) -> Result<Layout> {
+    let mut order: Vec<usize> = (0..sizes.len()).collect();
+    order.sort_by(|&a, &b| (sizes[b].1, sizes[b].0, a).cmp(&(sizes[a].1, sizes[a].0, b)));
+    let pad = u64::from(padding);
+    let limit = u64::from(max_width);
+    let mut spots = vec![(0, 0); sizes.len()];
+    let (mut x, mut y, mut shelf_h, mut used_w) = (0u64, 0u64, 0u64, 0u64);
+    for &index in &order {
+        let (w, h) = (u64::from(sizes[index].0), u64::from(sizes[index].1));
+        if x > 0 && x + w > limit {
+            y += shelf_h + pad;
+            x = 0;
+            shelf_h = 0;
+        }
+        spots[index] = (x as u32, y as u32);
+        used_w = used_w.max(x + w);
+        shelf_h = shelf_h.max(h);
+        x += w + pad;
+        if y + shelf_h > u64::from(MAX_SHEET_WIDTH) {
+            return Err(too_tall(y + shelf_h));
+        }
+    }
+    Ok((spots, used_w as u32, (y + shelf_h) as u32))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Free {
+    x: u64,
+    y: u64,
+    w: u64,
+    h: u64,
+}
+
+impl Free {
+    fn contains(&self, other: &Free) -> bool {
+        other.x >= self.x
+            && other.y >= self.y
+            && other.x + other.w <= self.x + self.w
+            && other.y + other.h <= self.y + self.h
+    }
+}
+
+/// MaxRects, bottom-left rule, in a bin `max_width` wide and as tall as the
+/// sheet cap. Each rectangle is grown by the padding on its right and bottom,
+/// and the bin by the same amount, so padding only falls between sprites.
+/// Tallest first, then widest, input order breaking ties, as the shelf
+/// sorts; among equal spots the lowest, then leftmost, wins, so the result
+/// is deterministic.
+fn place_maxrects(sizes: &[(u32, u32)], padding: u32, max_width: u32) -> Result<Layout> {
+    let pad = u64::from(padding);
+    let mut order: Vec<usize> = (0..sizes.len()).collect();
+    order.sort_by(|&a, &b| (sizes[b].1, sizes[b].0, a).cmp(&(sizes[a].1, sizes[a].0, b)));
+    let mut free = vec![Free {
+        x: 0,
+        y: 0,
+        w: u64::from(max_width) + pad,
+        h: u64::from(MAX_SHEET_WIDTH) + pad,
+    }];
+    let mut spots = vec![(0, 0); sizes.len()];
+    let (mut used_w, mut used_h) = (0u64, 0u64);
+    for &index in &order {
+        let (w, h) = (
+            u64::from(sizes[index].0) + pad,
+            u64::from(sizes[index].1) + pad,
+        );
+        let best = free
+            .iter()
+            .filter(|f| w <= f.w && h <= f.h)
+            .min_by_key(|f| (f.y + h, f.x))
+            .copied();
+        let Some(spot) = best else {
+            return Err(too_tall(used_h + h));
+        };
+        let placed = Free {
+            x: spot.x,
+            y: spot.y,
+            w,
+            h,
+        };
+        spots[index] = (placed.x as u32, placed.y as u32);
+        used_w = used_w.max(placed.x + w - pad);
+        used_h = used_h.max(placed.y + h - pad);
+        free = split_free(free, &placed);
+    }
+    Ok((spots, used_w as u32, used_h as u32))
+}
+
+/// Cut `placed` out of every free rectangle, then drop rectangles that sit
+/// inside another one.
+fn split_free(free: Vec<Free>, placed: &Free) -> Vec<Free> {
+    let mut next = Vec::with_capacity(free.len() + 4);
+    for f in free {
+        let overlaps = placed.x < f.x + f.w
+            && placed.x + placed.w > f.x
+            && placed.y < f.y + f.h
+            && placed.y + placed.h > f.y;
+        if !overlaps {
+            next.push(f);
+            continue;
+        }
+        if placed.x > f.x {
+            next.push(Free {
+                w: placed.x - f.x,
+                ..f
+            });
+        }
+        if placed.x + placed.w < f.x + f.w {
+            next.push(Free {
+                x: placed.x + placed.w,
+                w: f.x + f.w - (placed.x + placed.w),
+                ..f
+            });
+        }
+        if placed.y > f.y {
+            next.push(Free {
+                h: placed.y - f.y,
+                ..f
+            });
+        }
+        if placed.y + placed.h < f.y + f.h {
+            next.push(Free {
+                y: placed.y + placed.h,
+                h: f.y + f.h - (placed.y + placed.h),
+                ..f
+            });
+        }
+    }
+    let mut kept: Vec<Free> = Vec::with_capacity(next.len());
+    for (i, f) in next.iter().enumerate() {
+        let inside = next
+            .iter()
+            .enumerate()
+            .any(|(j, g)| i != j && g.contains(f) && (g != f || j < i));
+        if !inside {
+            kept.push(*f);
+        }
+    }
+    kept
+}
+
 /// Pack `sprites` into one atlas. Placements come back in input order.
 pub fn pack_sprites(sprites: &[Sprite], options: PackOptions) -> Result<Atlas> {
     if sprites.is_empty() {
@@ -282,38 +495,16 @@ pub fn pack_sprites(sprites: &[Sprite], options: PackOptions) -> Result<Atlas> {
         owners.push((cell, tx, ty));
     }
 
-    // Tallest first, then widest, then input order, so the layout is stable.
-    let mut order: Vec<usize> = (0..cells.len()).collect();
-    order.sort_by(|&a, &b| {
-        (cells[b].height, cells[b].width, a).cmp(&(cells[a].height, cells[a].width, b))
-    });
-    let pad = u64::from(options.padding);
-    let limit = u64::from(max_width);
-    let (mut x, mut y, mut shelf_h, mut used_w) = (0u64, 0u64, 0u64, 0u64);
-    for &index in &order {
-        let (w, h) = (
-            u64::from(cells[index].width),
-            u64::from(cells[index].height),
-        );
-        if x > 0 && x + w > limit {
-            y += shelf_h + pad;
-            x = 0;
-            shelf_h = 0;
-        }
-        cells[index].x = x as u32;
-        cells[index].y = y as u32;
-        used_w = used_w.max(x + w);
-        shelf_h = shelf_h.max(h);
-        x += w + pad;
-        if y + shelf_h > u64::from(MAX_SHEET_WIDTH) {
-            return Err(Error::Limit {
-                what: "atlas height",
-                value: y + shelf_h,
-                max: u64::from(MAX_SHEET_WIDTH),
-            });
-        }
+    let sizes: Vec<(u32, u32)> = cells.iter().map(|c| (c.width, c.height)).collect();
+    let (spots, used_w, used_h) = match options.packer {
+        Packer::Shelf => place_shelves(&sizes, options.padding, max_width)?,
+        Packer::MaxRects => place_maxrects(&sizes, options.padding, max_width)?,
+    };
+    for (cell, (x, y)) in cells.iter_mut().zip(spots) {
+        cell.x = x;
+        cell.y = y;
     }
-    let (mut width, mut height) = (used_w as u32, (y + shelf_h) as u32);
+    let (mut width, mut height) = (used_w, used_h);
     if options.power_of_two {
         width = round_up_pow2(width);
         height = round_up_pow2(height);
@@ -379,8 +570,10 @@ pub fn atlas_png_bytes(atlas: &Atlas) -> Result<Vec<u8>> {
 /// The atlas description as a JSON hash: `frames` maps each sprite name to its
 /// rectangle, trim offset, source size, and duration, then `meta` names the
 /// image. Phaser, PixiJS, Godot importers, and Aseprite's own exporter use
-/// this layout. Names must be unique; see [`unique_names`].
-pub fn atlas_json(atlas: &Atlas, image: &str) -> String {
+/// this layout. Names must be unique; see [`unique_names`]. `tags` become
+/// `meta.frameTags`, as Aseprite writes them; the list is empty when no
+/// input had tags.
+pub fn atlas_json(atlas: &Atlas, image: &str, tags: &[FrameTag]) -> String {
     let mut out = String::from("{\n  \"frames\": {\n");
     for (index, p) in atlas.placements.iter().enumerate() {
         out.push_str(&format!(
@@ -405,12 +598,30 @@ pub fn atlas_json(atlas: &Atlas, image: &str) -> String {
             "\n"
         });
     }
+    let tag_list: Vec<String> = tags
+        .iter()
+        .map(|tag| {
+            let repeat = if tag.repeat == 0 {
+                String::new()
+            } else {
+                format!(", \"repeat\": \"{}\"", tag.repeat)
+            };
+            format!(
+                "{{\"name\": {}, \"from\": {}, \"to\": {}, \"direction\": \"{}\"{repeat}}}",
+                json_string(&tag.name),
+                tag.from,
+                tag.to,
+                tag.direction.json_name(),
+            )
+        })
+        .collect();
     out.push_str(&format!(
-        "  }},\n  \"meta\": {{\"app\": \"OxyPack\", \"version\": \"{}\", \"image\": {}, \"format\": \"RGBA8888\", \"size\": {{\"w\": {}, \"h\": {}}}, \"scale\": \"1\"}}\n}}\n",
+        "  }},\n  \"meta\": {{\"app\": \"OxyPack\", \"version\": \"{}\", \"image\": {}, \"format\": \"RGBA8888\", \"size\": {{\"w\": {}, \"h\": {}}}, \"scale\": \"1\", \"frameTags\": [{}]}}\n}}\n",
         env!("CARGO_PKG_VERSION"),
         json_string(image),
         atlas.width,
         atlas.height,
+        tag_list.join(", "),
     ));
     out
 }
@@ -457,6 +668,102 @@ mod tests {
         // Placements stay in input order.
         let names: Vec<_> = atlas.placements.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, ["a", "b", "c"]);
+    }
+
+    /// No two placed rectangles overlap or come closer than `pad`, and all
+    /// fit inside the atlas.
+    fn assert_apart(atlas: &Atlas, pad: u32) {
+        let rects: Vec<_> = atlas
+            .placements
+            .iter()
+            .map(|p| (p.x, p.y, p.width, p.height))
+            .collect();
+        for (i, a) in rects.iter().enumerate() {
+            assert!(
+                a.0 + a.2 <= atlas.width && a.1 + a.3 <= atlas.height,
+                "{a:?} outside"
+            );
+            for b in &rects[i + 1..] {
+                let apart = a.0 + a.2 + pad <= b.0
+                    || b.0 + b.2 + pad <= a.0
+                    || a.1 + a.3 + pad <= b.1
+                    || b.1 + b.3 + pad <= a.1;
+                assert!(apart, "{a:?} and {b:?} closer than {pad}");
+            }
+        }
+    }
+
+    #[test]
+    fn maxrects_fills_the_gap_a_shelf_leaves() {
+        // A 12-wide atlas: the shelf puts tall + two squares on row one and the
+        // last two squares on a second row; MaxRects stacks them beside tall.
+        let sprites = [
+            solid("tall", 4, 8, 1),
+            solid("a", 4, 4, 2),
+            solid("b", 4, 4, 3),
+            solid("c", 4, 4, 4),
+            solid("d", 4, 4, 5),
+        ];
+        let base = PackOptions {
+            padding: 0,
+            max_width: 12,
+            ..PackOptions::default()
+        };
+        let shelf = pack_sprites(&sprites, base).unwrap();
+        let rects = PackOptions {
+            packer: Packer::MaxRects,
+            ..base
+        };
+        let packed = pack_sprites(&sprites, rects).unwrap();
+        assert_eq!((shelf.width, shelf.height), (12, 12));
+        assert_eq!((packed.width, packed.height), (12, 8));
+        assert_apart(&packed, 0);
+        // The pixels land where the placements say.
+        for p in &packed.placements {
+            let n = sprites.iter().find(|s| s.name == p.name).unwrap().pixels[0];
+            assert_eq!(at(&packed, p.x, p.y), n);
+        }
+        // Same inputs, same atlas.
+        assert_eq!(pack_sprites(&sprites, rects).unwrap(), packed);
+    }
+
+    #[test]
+    fn maxrects_keeps_padding_and_the_width_limit_for_mixed_sizes() {
+        let mut sprites = Vec::new();
+        let mut seed = 7u32;
+        for i in 0..60 {
+            seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            let w = 1 + (seed >> 16) % 13;
+            let h = 1 + (seed >> 8) % 11;
+            sprites.push(solid(&format!("s{i}"), w, h, (i % 250) as u8 + 1));
+        }
+        for padding in [0, 1, 3] {
+            let options = PackOptions {
+                packer: Packer::MaxRects,
+                padding,
+                max_width: 40,
+                ..PackOptions::default()
+            };
+            let atlas = pack_sprites(&sprites, options).unwrap();
+            assert!(atlas.width <= 40);
+            assert_apart(&atlas, padding);
+            let shelf = pack_sprites(
+                &sprites,
+                PackOptions {
+                    packer: Packer::Shelf,
+                    ..options
+                },
+            )
+            .unwrap();
+            assert!(atlas.height <= shelf.height, "padding {padding}");
+        }
+        // A sprite wider than the limit is still an error.
+        let wide = PackOptions {
+            packer: Packer::MaxRects,
+            max_width: 4,
+            ..PackOptions::default()
+        };
+        assert!(pack_sprites(&[solid("big", 5, 1, 1)], wide).is_err());
     }
 
     #[test]
@@ -576,7 +883,32 @@ mod tests {
         let mut dot = solid("dot \"x\"", 3, 3, 5);
         dot.pixels[0] = Rgba::CLEAR;
         let atlas = pack_sprites(&[solid("a", 2, 2, 1), dot], options).unwrap();
-        let text = atlas_json(&atlas, "atlas.png");
+        let text = atlas_json(&atlas, "atlas.png", &[]);
+        assert!(text.contains("\"frameTags\": []"));
+        let tags = frame_tags(
+            &[
+                crate::aseprite::Tag {
+                    name: "run \"fast\"".into(),
+                    from: 0,
+                    to: 1,
+                    direction: crate::aseprite::Direction::PingPong,
+                    repeat: 2,
+                },
+                crate::aseprite::Tag {
+                    name: "idle".into(),
+                    from: 1,
+                    to: 1,
+                    direction: crate::aseprite::Direction::Reverse,
+                    repeat: 0,
+                },
+            ],
+            5,
+        );
+        assert_eq!((tags[0].from, tags[0].to, tags[1].from), (5, 6, 6));
+        let text = atlas_json(&atlas, "atlas.png", &tags);
+        assert!(text.contains(
+            "\"frameTags\": [{\"name\": \"run \\\"fast\\\"\", \"from\": 5, \"to\": 6, \"direction\": \"pingpong\", \"repeat\": \"2\"}, {\"name\": \"idle\", \"from\": 6, \"to\": 6, \"direction\": \"reverse\"}]"
+        ), "{text}");
         assert!(text.contains("\"a\": {\"frame\": {\"x\": 4, \"y\": 0, \"w\": 2, \"h\": 2}"));
         assert!(text.contains("\"dot \\\"x\\\"\": {\"frame\": {\"x\": 0, \"y\": 0, \"w\": 3, \"h\": 3}, \"rotated\": false, \"trimmed\": false"));
         assert!(text.contains("\"image\": \"atlas.png\""));

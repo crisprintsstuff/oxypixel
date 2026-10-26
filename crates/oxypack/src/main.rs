@@ -1,20 +1,11 @@
-//! OxyPack: pack sprites from many files into one atlas PNG and a JSON hash.
-//!
-//! The packing and the JSON are in `pack.rs`; this file reads the command
-//! line, gathers the inputs, and writes the two files. It never opens
-//! a window or a dialog, so it is safe in build scripts and CI.
+//! The `oxypack` command. Packing is in the library; this file reads the
+//! command line, prints notes, and writes the two files. It never opens a
+//! window or a dialog, so it is safe in build scripts and CI.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 
-use oxypixel_core::{import_image, load_oxypix};
-
-mod pack;
-
-use pack::{
-    atlas_json, atlas_png_bytes, pack_sprites, sprites_from_document, unique_names, PackOptions,
-    Sprite,
-};
+use oxypack::{pack_files, write_atlas, PackOptions, Packer};
 
 const HELP: &str = concat!(
     "OxyPack ",
@@ -23,8 +14,8 @@ const HELP: &str = concat!(
 
 Usage: oxypack [options] <input>... -o <atlas.png>
 
-Inputs are .png, .bmp, .gif, and .oxypix files, or folders of them (not
-searched recursively). Each frame of a GIF or .oxypix document is its own
+Inputs are .png, .bmp, .gif, .oxypix, and .aseprite (.ase) files, or
+folders of them (not searched recursively). Each frame of an animation is its own
 sprite, named `<file> 0`, `<file> 1`, and so on; a one-frame file is named
 after the file. The atlas PNG is written to -o and the JSON hash beside it.
 
@@ -35,6 +26,8 @@ Options:
   --trim                Crop each sprite to its non-clear pixels
   --dedupe              Store sprites with the same pixels once
   --pot                 Round the atlas size up to powers of two
+  --packer <name>       shelf (default) or maxrects, which fills the gaps
+                        rows leave and usually gives a shorter atlas
   --no-json             Write only the PNG
   -h, --help            Show this help
   -V, --version         Show the version
@@ -80,6 +73,13 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
             "--trim" => options.trim = true,
             "--dedupe" => options.dedupe = true,
             "--pot" => options.power_of_two = true,
+            "--packer" => {
+                options.packer = match rest.next().map(String::as_str) {
+                    Some("shelf") => Packer::Shelf,
+                    Some("maxrects") => Packer::MaxRects,
+                    _ => return Err("--packer takes shelf or maxrects".into()),
+                }
+            }
             "--no-json" => json = false,
             flag if flag.starts_with('-') && flag.len() > 1 => {
                 return Err(format!("unknown option {flag}"))
@@ -102,84 +102,18 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
     }))
 }
 
-fn packable(path: &Path) -> bool {
-    let ext = path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    matches!(ext.as_str(), "png" | "bmp" | "gif" | "oxypix")
-}
-
-/// The files to pack, in command-line order. A folder adds its packable
-/// files sorted by name.
-fn collect(inputs: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
-    let mut files = Vec::new();
-    for input in inputs {
-        if input.is_dir() {
-            let entries =
-                std::fs::read_dir(input).map_err(|err| format!("{}: {err}", input.display()))?;
-            let mut found: Vec<PathBuf> = entries
-                .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-                .filter(|path| path.is_file() && packable(path))
-                .collect();
-            found.sort();
-            files.extend(found);
-        } else if packable(input) {
-            files.push(input.clone());
-        } else {
-            return Err(format!(
-                "{}: not a .png, .bmp, .gif, or .oxypix file",
-                input.display()
-            ));
-        }
-    }
-    Ok(files)
-}
-
-fn load(path: &Path) -> Result<Vec<Sprite>, String> {
-    let stem = path
-        .file_stem()
-        .map(|stem| stem.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let is_doc = path
-        .extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("oxypix"));
-    let doc = if is_doc {
-        load_oxypix(path)
-    } else {
-        import_image(path)
-    }
-    .map_err(|err| format!("{}: {err}", path.display()))?;
-    sprites_from_document(&doc, &stem).map_err(|err| format!("{}: {err}", path.display()))
-}
-
 fn run(args: &Args) -> Result<String, String> {
-    let files = collect(&args.inputs)?;
-    let mut sprites = Vec::new();
-    for file in &files {
-        sprites.extend(load(file)?);
+    let packed = pack_files(&args.inputs, args.options)?;
+    for note in &packed.notes {
+        eprintln!("oxypack: {note}");
     }
-    unique_names(&mut sprites);
-    let atlas = pack_sprites(&sprites, args.options).map_err(|err| err.to_string())?;
-    let png = atlas_png_bytes(&atlas).map_err(|err| err.to_string())?;
-    let image = args
-        .output
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    std::fs::write(&args.output, png).map_err(|err| format!("{}: {err}", args.output.display()))?;
-    if args.json {
-        let path = args.output.with_extension("json");
-        std::fs::write(&path, atlas_json(&atlas, &image))
-            .map_err(|err| format!("{}: {err}", path.display()))?;
-    }
+    write_atlas(&packed, &args.output, args.json)?;
     Ok(format!(
         "packed {} sprites from {} files into {}×{} {}",
-        atlas.placements.len(),
-        files.len(),
-        atlas.width,
-        atlas.height,
+        packed.atlas.placements.len(),
+        packed.file_count,
+        packed.atlas.width,
+        packed.atlas.height,
         args.output.display()
     ))
 }
@@ -236,6 +170,8 @@ mod tests {
             "--max-width",
             "512",
             "--no-json",
+            "--packer",
+            "maxrects",
         ])) else {
             panic!("expected a run");
         };
@@ -247,6 +183,7 @@ mod tests {
         assert_eq!(
             args.options,
             PackOptions {
+                packer: Packer::MaxRects,
                 padding: 0,
                 trim: true,
                 dedupe: true,
@@ -265,17 +202,16 @@ mod tests {
         assert!(parse(&strings(&["a.png", "-o", "x.png", "--padding", "lots"])).is_err());
         assert!(parse(&strings(&["a.png", "-o", "x.png", "--max-width", "0"])).is_err());
         assert!(parse(&strings(&["a.png", "-o", "x.png", "--rotate"])).is_err());
+        assert!(parse(&strings(&[
+            "a.png",
+            "-o",
+            "x.png",
+            "--packer",
+            "guillotine"
+        ]))
+        .is_err());
+        assert!(parse(&strings(&["a.png", "-o", "x.png", "--packer"])).is_err());
         assert!(matches!(parse(&strings(&["--help"])), Ok(Parsed::Help)));
         assert!(matches!(parse(&strings(&["-V"])), Ok(Parsed::Version)));
-    }
-
-    #[test]
-    fn only_image_and_document_files_are_packable() {
-        assert!(packable(Path::new("a.PNG")));
-        assert!(packable(Path::new("walk.oxypix")));
-        assert!(packable(Path::new("x.gif")));
-        assert!(!packable(Path::new("photo.jpg")));
-        assert!(!packable(Path::new("notes")));
-        assert!(collect(&[PathBuf::from("photo.jpg")]).is_err());
     }
 }

@@ -2149,8 +2149,9 @@ dependencies = [
 
 [[package]]
 name = "oxypack"
-version = "0.7.5"
+version = "0.8.0"
 dependencies = [
+ "flate2",
  "image",
  "oxypixel-core",
  "thiserror 2.0.21",
@@ -2158,12 +2159,13 @@ dependencies = [
 
 [[package]]
 name = "oxypixel"
-version = "0.7.5"
+version = "0.8.0"
 dependencies = [
  "arboard",
  "eframe",
  "flate2",
  "image",
+ "oxypack",
  "oxypixel-core",
  "rfd",
  "serde_json",
@@ -2175,7 +2177,7 @@ dependencies = [
 
 [[package]]
 name = "oxypixel-core"
-version = "0.7.5"
+version = "0.8.0"
 dependencies = [
  "image",
  "thiserror 2.0.21",

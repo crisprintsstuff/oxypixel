@@ -11,11 +11,16 @@ publish = false
 keywords = ["pixel-art", "sprites", "atlas", "spritesheet"]
 categories = ["graphics", "command-line-utilities"]
 
+[lib]
+name = "oxypack"
+path = "src/lib.rs"
+
 [[bin]]
 name = "oxypack"
 path = "src/main.rs"
 
 [dependencies]
+flate2 = "1"
 image = { workspace = true }
 oxypixel-core = { path = "../oxypixel-core" }
 thiserror = { workspace = true }

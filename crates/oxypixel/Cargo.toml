@@ -20,6 +20,7 @@ path = "src/main.rs"
 eframe = { version = "0.31.1", default-features = false, features = ["default_fonts", "glow", "wgpu"] }
 flate2 = "1"
 image = { workspace = true }
+oxypack = { path = "../oxypack" }
 oxypixel-core = { path = "../oxypixel-core" }
 serde_json = "1"
 sha2 = "0.10"

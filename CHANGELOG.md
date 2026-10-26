@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-26
+
+### Added
+
+- OxyPack reads Aseprite `.aseprite` and `.ase` files: RGBA, grayscale, and indexed, with layer and cel opacity, hidden and reference layers, groups, linked cels, and z-index. Each frame becomes a sprite with its duration. The reader was written from Aseprite's published file format description and uses no Aseprite code. Blend modes other than Normal are drawn as Normal and tilemap layers are skipped, with a note on stderr.
+- File, then Pack sprites… opens OxyPack in a window: add files or folders, choose the packer, padding, width limit, trim, dedupe, power-of-two sizes, and JSON, press Pack to see the atlas, then save it. It makes the same PNG and JSON as the `oxypack` command.
+- OxyPack writes Aseprite tags to `meta.frameTags` in the JSON, with their direction and repeat count, numbered across the whole atlas when several files are packed together. The list is empty when no input has tags.
+- OxyPack can pack with MaxRects (`--packer maxrects`), which fills the gaps between rows and usually gives a shorter atlas. The row packer stays the default, so existing atlases do not move.
+
 ## [0.7.5] - 2026-10-26
 
 ### Added

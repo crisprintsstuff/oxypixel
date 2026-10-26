@@ -82,6 +82,7 @@ pub struct OxyApp {
     view: ViewState,
     composites: FrameComposites,
     preview_panel: PreviewPanel,
+    pack_window: crate::packview::PackWindow,
     thumbs: ThumbCache,
     save_path: Option<PathBuf>,
     note: Option<Note>,
@@ -169,6 +170,7 @@ impl OxyApp {
             view: ViewState::default(),
             composites: FrameComposites::default(),
             preview_panel: PreviewPanel::new(session::load_preview_open()),
+            pack_window: crate::packview::PackWindow::default(),
             thumbs: ThumbCache::default(),
             save_path: None,
             note: None,
@@ -403,6 +405,7 @@ impl eframe::App for OxyApp {
                 self.hex = color.to_hex();
             }
         }
+        self.pack_window.show(ctx);
         self.show_dialog(ctx);
         self.consider_autosave(ctx);
     }
@@ -1248,6 +1251,10 @@ impl OxyApp {
                     }
                     if menu_item(ui, "Export spritesheet…", "") {
                         self.open_path_dialog(PathKind::ExportSheet);
+                        ui.close_menu();
+                    }
+                    if menu_item(ui, "Pack sprites…", "") {
+                        self.pack_window.open = true;
                         ui.close_menu();
                     }
                     if menu_item(ui, "Import palette…", "") {
