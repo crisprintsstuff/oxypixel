@@ -2151,6 +2151,7 @@ dependencies = [
 name = "oxypack"
 version = "0.7.5"
 dependencies = [
+ "flate2",
  "image",
  "oxypixel-core",
  "thiserror 2.0.21",

@@ -153,18 +153,38 @@ pub fn sprites_from_document(doc: &Document, stem: &str) -> Result<Vec<Sprite>> 
     let count = doc.frame_count();
     (0..count)
         .map(|frame| {
-            let name = if count == 1 {
-                stem.to_string()
-            } else {
-                format!("{stem} {frame}")
-            };
             Ok(Sprite {
-                name,
+                name: frame_name(stem, frame, count),
                 width: doc.width(),
                 height: doc.height(),
                 pixels: doc.composite(frame)?,
                 duration: doc.frame_duration(frame).unwrap_or(DEFAULT_FRAME_MS),
             })
+        })
+        .collect()
+}
+
+/// `stem` for a one-frame file, `stem N` for frame N of a longer one.
+pub fn frame_name(stem: &str, frame: usize, count: usize) -> String {
+    if count == 1 {
+        stem.to_string()
+    } else {
+        format!("{stem} {frame}")
+    }
+}
+
+/// Every frame of a decoded `.aseprite` file as sprites named after `stem`.
+pub fn sprites_from_aseprite(file: &crate::aseprite::AseFile, stem: &str) -> Vec<Sprite> {
+    let count = file.frames.len();
+    file.frames
+        .iter()
+        .enumerate()
+        .map(|(frame, (pixels, duration))| Sprite {
+            name: frame_name(stem, frame, count),
+            width: file.width,
+            height: file.height,
+            pixels: pixels.clone(),
+            duration: *duration,
         })
         .collect()
 }

@@ -4,16 +4,18 @@
 //! line, gathers the inputs, and writes the two files. It never opens
 //! a window or a dialog, so it is safe in build scripts and CI.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use oxypixel_core::{import_image, load_oxypix};
 
+mod aseprite;
 mod pack;
 
 use pack::{
-    atlas_json, atlas_png_bytes, pack_sprites, sprites_from_document, unique_names, PackOptions,
-    Packer, Sprite,
+    atlas_json, atlas_png_bytes, pack_sprites, sprites_from_aseprite, sprites_from_document,
+    unique_names, PackOptions, Packer, Sprite,
 };
 
 const HELP: &str = concat!(
@@ -23,8 +25,8 @@ const HELP: &str = concat!(
 
 Usage: oxypack [options] <input>... -o <atlas.png>
 
-Inputs are .png, .bmp, .gif, and .oxypix files, or folders of them (not
-searched recursively). Each frame of a GIF or .oxypix document is its own
+Inputs are .png, .bmp, .gif, .oxypix, and .aseprite (.ase) files, or
+folders of them (not searched recursively). Each frame of an animation is its own
 sprite, named `<file> 0`, `<file> 1`, and so on; a one-frame file is named
 after the file. The atlas PNG is written to -o and the JSON hash beside it.
 
@@ -117,7 +119,10 @@ fn packable(path: &Path) -> bool {
         .and_then(|ext| ext.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
-    matches!(ext.as_str(), "png" | "bmp" | "gif" | "oxypix")
+    matches!(
+        ext.as_str(),
+        "png" | "bmp" | "gif" | "oxypix" | "aseprite" | "ase"
+    )
 }
 
 /// The files to pack, in command-line order. A folder adds its packable
@@ -138,7 +143,7 @@ fn collect(inputs: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
             files.push(input.clone());
         } else {
             return Err(format!(
-                "{}: not a .png, .bmp, .gif, or .oxypix file",
+                "{}: not a .png, .bmp, .gif, .oxypix, or .aseprite file",
                 input.display()
             ));
         }
@@ -146,14 +151,27 @@ fn collect(inputs: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
     Ok(files)
 }
 
+/// The sprites in one file. Notes about what could not be drawn exactly go
+/// to stderr.
 fn load(path: &Path) -> Result<Vec<Sprite>, String> {
     let stem = path
         .file_stem()
         .map(|stem| stem.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let is_doc = path
+    let ext = path
         .extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("oxypix"));
+        .map(|ext| ext.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    if ext == "aseprite" || ext == "ase" {
+        let bytes = read_limited(path)?;
+        let file =
+            aseprite::read_aseprite(&bytes).map_err(|err| format!("{}: {err}", path.display()))?;
+        for note in &file.notes {
+            eprintln!("oxypack: {}: {note}", path.display());
+        }
+        return Ok(sprites_from_aseprite(&file, &stem));
+    }
+    let is_doc = ext == "oxypix";
     let doc = if is_doc {
         load_oxypix(path)
     } else {
@@ -161,6 +179,16 @@ fn load(path: &Path) -> Result<Vec<Sprite>, String> {
     }
     .map_err(|err| format!("{}: {err}", path.display()))?;
     sprites_from_document(&doc, &stem).map_err(|err| format!("{}: {err}", path.display()))
+}
+
+/// Read a file no larger than the core's file cap.
+fn read_limited(path: &Path) -> Result<Vec<u8>, String> {
+    let file = std::fs::File::open(path).map_err(|err| format!("{}: {err}", path.display()))?;
+    let mut bytes = Vec::new();
+    std::io::Read::take(file, oxypixel_core::MAX_FILE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|err| format!("{}: {err}", path.display()))?;
+    Ok(bytes)
 }
 
 fn run(args: &Args) -> Result<String, String> {
@@ -295,6 +323,8 @@ mod tests {
         assert!(packable(Path::new("a.PNG")));
         assert!(packable(Path::new("walk.oxypix")));
         assert!(packable(Path::new("x.gif")));
+        assert!(packable(Path::new("hero.aseprite")));
+        assert!(packable(Path::new("hero.ASE")));
         assert!(!packable(Path::new("photo.jpg")));
         assert!(!packable(Path::new("notes")));
         assert!(collect(&[PathBuf::from("photo.jpg")]).is_err());

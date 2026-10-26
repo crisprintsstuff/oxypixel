@@ -16,6 +16,7 @@ name = "oxypack"
 path = "src/main.rs"
 
 [dependencies]
+flate2 = "1"
 image = { workspace = true }
 oxypixel-core = { path = "../oxypixel-core" }
 thiserror = { workspace = true }
