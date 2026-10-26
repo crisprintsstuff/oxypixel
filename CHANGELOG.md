@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- OxyPack (`oxypack`), a companion command-line tool that packs sprites from PNG, BMP, GIF, and `.oxypix` files, or folders of them, into one atlas PNG with a JSON hash for game engines. Each animation frame becomes a sprite with its duration. Options cover padding, a width limit, trimming to the ink, storing repeated frames once, and power-of-two sizes. Releases ship `oxypack-<version>-windows-x86_64.exe`, `oxypack` in the Linux archive, and `/usr/bin/oxypack` in the `.deb`.
+
 ## [0.7.0] - 2026-10-26
 
 ### Added

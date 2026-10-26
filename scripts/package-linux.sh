@@ -14,12 +14,13 @@ fi
 target_dir="${CARGO_TARGET_DIR:-$root/target}"
 export CARGO_TARGET_DIR="$target_dir"
 
-cargo build --release -p oxypixel
+cargo build --release -p oxypixel -p oxypack
 
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
 mkdir -p "$stage/$name"
 cp -f "$target_dir/release/oxypixel" "$stage/$name/oxypixel"
+cp -f "$target_dir/release/oxypack" "$stage/$name/oxypack"
 cp -f LICENSE "$stage/$name/LICENSE"
 cat > "$stage/$name/README.txt" << EOF
 OxyPixel ${version} for Linux x86_64
@@ -36,10 +37,15 @@ Headless export does not need a display:
 
   ./oxypixel export-png drawing.oxypix frame.png
 
+./oxypack packs sprites into one atlas PNG and a JSON description. It
+needs no display either. Run ./oxypack --help for its options:
+
+  ./oxypack sprites/ walk.oxypix --trim -o atlas.png
+
 This archive is the program only. Tagged releases also publish
 oxypixel-${version}-linux-x86_64.deb. This file is not an RPM, AppImage, or Flatpak.
 EOF
-chmod 755 "$stage/$name/oxypixel"
+chmod 755 "$stage/$name/oxypixel" "$stage/$name/oxypack"
 mkdir -p dist
 tar -C "$stage" -czf "dist/${name}.tar.gz" "$name"
 echo "Wrote dist/${name}.tar.gz"

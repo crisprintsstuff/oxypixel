@@ -31,6 +31,7 @@ In the 0.7.0 tree and covered by tests or by the release workflow.
 | `.oxypix` | Version 1, little-endian, caps before allocation, trailing bytes rejected | `io/oxypix.rs`, `docs/FORMAT.md` |
 | Raster | PNG, BMP, and GIF import and export. GIF import is one composited layer. Spritesheet in a row or a grid with padding and a JSON description, and 2×/4× nearest PNG | `io/raster.rs` |
 | References | PNG and JPEG overlays or a floating panel. Placement is a sidecar, not a `.oxypix` field. Export, merge, and the eyedropper skip them unless Sample is on | `reference.rs`, `refsview.rs` |
+| OxyPack | Separate `oxypack` binary: PNG, BMP, GIF, and `.oxypix` inputs or folders, a shelf-packed atlas PNG and a JSON hash, padding, width limit, trim, dedupe, power-of-two sizes | `crates/oxypack/` |
 | CLI | `export-png`, `export-bmp`, `export-gif`, `export-sheet` (with `--columns`, `--padding`, `--scale`, `--json`), `export-palette`, and `import-palette`. Failures print and exit. Missing file must not hang | `cli.rs`, `tests/cli.rs` |
 | Palette files | GIMP `.gpl`, hex `.hex` (one `RRGGBB` per line, `RRGGBBAA` when alpha is not 255), and JASC `.pal`. Import replaces the palette and is one undo step. Swatches drag to a new index. A ramp of N steps can fill the span between two swatches. Snap (S) makes pencil, fill, and shapes use the nearest palette color. More than 256 colors is an error | `io/palette.rs`, `editor.rs`, `color.rs`, `app.rs` |
 | Window | egui 0.31 on wgpu (Direct3D 12 with WARP on Windows, Vulkan on Linux), falling back to glow OpenGL, nearest-neighbor canvas, whole-pixel zoom, a grid when the cells are readable, pan, shortcuts, tool icons with their shortcut letter, a preview panel beside the canvas | `app.rs`, `canvas.rs`, `preview.rs` |
@@ -256,6 +257,17 @@ Export spritesheet takes Columns (0 is one row, as before), Padding (clear pixel
 ### OX-P27
 
 **`.oxypix` version 2.** Frame names (P11) and blend modes (P18) both need a new version, because version 1 rejects trailing bytes. A later task could design version 2 once and fold those fields in, with room for later fields. It would also decide whether references stay a sidecar. Version 1 files must still open, and saving writes version 2 only when the document uses a version 2 field. This needs a human to accept the format change before work starts. Update [FORMAT.md](FORMAT.md) and the parse limits in the same change.
+
+### OX-P28
+
+**OxyPack, a companion sprite packer.** Status: in progress. Area: `crates/oxypack/`.
+
+Done: the `oxypack` command-line tool described in the scorecard, tested in `crates/oxypack/src/pack.rs`, `src/main.rs`, and `tests/cli.rs`. It stays in this repository and uses only the core's public API. Releases ship `oxypack-<version>-windows-x86_64.exe` (listed in `SHA256SUMS-windows.txt`, not in the updater's `SHA256SUMS.txt`), `oxypack` in the Linux tar.gz, and `/usr/bin/oxypack` in the `.deb`. The Windows installer does not include it. Each of these needs a human decision before work starts:
+
+- **`.aseprite` import.** Read Aseprite files from the format's public specification (clean-room, no Aseprite code), so frames, tags, and layers pack directly. This is a new input format with its own parse limits, and it needs the same review as a `.oxypix` change.
+- **Animation tags.** Write `frameTags` in `meta` from tags in `.aseprite` files, or from a sidecar for `.oxypix`.
+- **A window.** A small egui front end to pick inputs, preview the atlas, and save. It could share widgets with the editor.
+- **MaxRects packing.** A tighter packer than the shelf, behind an option, so existing atlases do not move.
 
 ## Human only
 

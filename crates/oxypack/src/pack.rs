@@ -1,0 +1,589 @@
+//! Pack sprites from many files into one atlas PNG with a JSON description.
+//!
+//! The packer is a shelf packer: sprites are sorted tallest first and placed
+//! left to right in rows no wider than the width limit. That keeps the layout
+//! deterministic for the same inputs, which matters when the atlas is checked
+//! into a game's repository.
+
+use std::collections::HashMap;
+use std::io::Cursor;
+
+use image::codecs::png::PngEncoder;
+use image::{ExtendedColorType, ImageEncoder};
+use oxypixel_core::{
+    Document, Rgba, DEFAULT_FRAME_MS, MAX_SHEET_PADDING, MAX_SHEET_PIXELS, MAX_SHEET_WIDTH,
+};
+
+/// Why a pack failed.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("there are no sprites to pack")]
+    NothingToPack,
+    #[error("sprite {name} is {width} pixels wide, wider than the atlas limit of {max}")]
+    SpriteTooWide { name: String, width: u32, max: u32 },
+    #[error("sprite {0} has the wrong number of pixels for its size")]
+    BadSprite(String),
+    #[error("{what} is {value}, and the limit is {max}")]
+    Limit {
+        what: &'static str,
+        value: u64,
+        max: u64,
+    },
+    #[error("{0}")]
+    Core(#[from] oxypixel_core::Error),
+    #[error("could not write the PNG: {0}")]
+    Png(String),
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
+
+/// Straight RGBA8 bytes, row by row.
+fn rgba_bytes(pixels: &[Rgba]) -> Vec<u8> {
+    pixels
+        .iter()
+        .flat_map(|px| [px.r, px.g, px.b, px.a])
+        .collect()
+}
+
+/// A JSON string literal, with quotes, backslashes, and control characters escaped.
+fn json_string(text: &str) -> String {
+    let mut out = String::from("\"");
+    for ch in text.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// One image to place in the atlas.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Sprite {
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+    /// Straight-alpha pixels, row by row.
+    pub pixels: Vec<Rgba>,
+    /// Frame duration in milliseconds, written to the JSON.
+    pub duration: u32,
+}
+
+/// How the atlas is laid out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PackOptions {
+    /// Clear pixels between neighboring sprites. Not added at the atlas edge.
+    pub padding: u32,
+    /// Crop each sprite to its non-clear pixels. The JSON records the offset.
+    pub trim: bool,
+    /// Sprites with the same pixels (after trimming) share one rectangle.
+    pub dedupe: bool,
+    /// No row is wider than this.
+    pub max_width: u32,
+    /// Round the atlas width and height up to powers of two.
+    pub power_of_two: bool,
+}
+
+impl Default for PackOptions {
+    fn default() -> Self {
+        Self {
+            padding: 1,
+            trim: false,
+            dedupe: false,
+            max_width: 2048,
+            power_of_two: false,
+        }
+    }
+}
+
+/// Where one sprite went.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Placement {
+    pub name: String,
+    /// The rectangle in the atlas.
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+    /// Where that rectangle sits in the untrimmed sprite.
+    pub offset_x: u32,
+    pub offset_y: u32,
+    /// The sprite's size before trimming.
+    pub source_width: u32,
+    pub source_height: u32,
+    pub duration: u32,
+}
+
+impl Placement {
+    pub fn trimmed(&self) -> bool {
+        (self.width, self.height) != (self.source_width, self.source_height)
+    }
+}
+
+/// A packed atlas: the pixels and where each input sprite is, in input order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Atlas {
+    pub width: u32,
+    pub height: u32,
+    pub pixels: Vec<Rgba>,
+    pub placements: Vec<Placement>,
+}
+
+/// Every frame of `doc`, composited, as sprites named after `stem`.
+///
+/// A one-frame document gives one sprite called `stem`. Frames of a longer
+/// one are `stem 0`, `stem 1`, and so on, as Aseprite names them.
+pub fn sprites_from_document(doc: &Document, stem: &str) -> Result<Vec<Sprite>> {
+    let count = doc.frame_count();
+    (0..count)
+        .map(|frame| {
+            let name = if count == 1 {
+                stem.to_string()
+            } else {
+                format!("{stem} {frame}")
+            };
+            Ok(Sprite {
+                name,
+                width: doc.width(),
+                height: doc.height(),
+                pixels: doc.composite(frame)?,
+                duration: doc.frame_duration(frame).unwrap_or(DEFAULT_FRAME_MS),
+            })
+        })
+        .collect()
+}
+
+/// Give each sprite a name no earlier sprite has, by adding ` (2)`, ` (3)`, and so on.
+pub fn unique_names(sprites: &mut [Sprite]) {
+    let mut taken: HashMap<String, u32> = HashMap::new();
+    for sprite in sprites.iter() {
+        taken.entry(sprite.name.clone()).or_insert(0);
+    }
+    let mut seen: HashMap<String, ()> = HashMap::new();
+    for sprite in sprites.iter_mut() {
+        if seen.insert(sprite.name.clone(), ()).is_none() {
+            continue;
+        }
+        let base = sprite.name.clone();
+        let mut n = 2;
+        let name = loop {
+            let candidate = format!("{base} ({n})");
+            if !taken.contains_key(&candidate) && !seen.contains_key(&candidate) {
+                break candidate;
+            }
+            n += 1;
+        };
+        seen.insert(name.clone(), ());
+        sprite.name = name;
+    }
+}
+
+/// The smallest rectangle holding every non-clear pixel. A clear sprite keeps
+/// one pixel at its top left, so it still has a rectangle in the atlas.
+fn trim_bounds(sprite: &Sprite) -> (u32, u32, u32, u32) {
+    let w = sprite.width as usize;
+    let (mut left, mut top, mut right, mut bottom) = (usize::MAX, usize::MAX, 0, 0);
+    for (i, _) in sprite.pixels.iter().enumerate().filter(|(_, px)| px.a > 0) {
+        let (x, y) = (i % w, i / w);
+        left = left.min(x);
+        right = right.max(x);
+        top = top.min(y);
+        bottom = bottom.max(y);
+    }
+    if left == usize::MAX {
+        return (0, 0, 1, 1);
+    }
+    (
+        left as u32,
+        top as u32,
+        (right - left + 1) as u32,
+        (bottom - top + 1) as u32,
+    )
+}
+
+fn crop(sprite: &Sprite, x: u32, y: u32, w: u32, h: u32) -> Vec<Rgba> {
+    let src_w = sprite.width as usize;
+    let mut out = Vec::with_capacity(w as usize * h as usize);
+    for row in y..y + h {
+        let start = row as usize * src_w + x as usize;
+        out.extend_from_slice(&sprite.pixels[start..start + w as usize]);
+    }
+    out
+}
+
+/// One rectangle to place: the cropped pixels shared by one or more sprites.
+struct Cell {
+    width: u32,
+    height: u32,
+    pixels: Vec<Rgba>,
+    x: u32,
+    y: u32,
+}
+
+fn round_up_pow2(value: u32) -> u32 {
+    value.checked_next_power_of_two().unwrap_or(value)
+}
+
+/// Pack `sprites` into one atlas. Placements come back in input order.
+pub fn pack_sprites(sprites: &[Sprite], options: PackOptions) -> Result<Atlas> {
+    if sprites.is_empty() {
+        return Err(Error::NothingToPack);
+    }
+    if options.padding > MAX_SHEET_PADDING {
+        return Err(Error::Limit {
+            what: "atlas padding",
+            value: u64::from(options.padding),
+            max: u64::from(MAX_SHEET_PADDING),
+        });
+    }
+    let max_width = options.max_width.clamp(1, MAX_SHEET_WIDTH);
+    let mut cells: Vec<Cell> = Vec::new();
+    let mut seen: HashMap<(u32, u32, Vec<u8>), usize> = HashMap::new();
+    // For each sprite: its cell and its trim rectangle.
+    let mut owners = Vec::with_capacity(sprites.len());
+    for sprite in sprites {
+        let expected = sprite.width as usize * sprite.height as usize;
+        if sprite.width == 0 || sprite.height == 0 || sprite.pixels.len() != expected {
+            return Err(Error::BadSprite(sprite.name.clone()));
+        }
+        let (tx, ty, tw, th) = if options.trim {
+            trim_bounds(sprite)
+        } else {
+            (0, 0, sprite.width, sprite.height)
+        };
+        if tw > max_width {
+            return Err(Error::SpriteTooWide {
+                name: sprite.name.clone(),
+                width: tw,
+                max: max_width,
+            });
+        }
+        let pixels = crop(sprite, tx, ty, tw, th);
+        let key = (tw, th, rgba_bytes(&pixels));
+        let cell = match options.dedupe.then(|| seen.get(&key).copied()).flatten() {
+            Some(index) => index,
+            None => {
+                cells.push(Cell {
+                    width: tw,
+                    height: th,
+                    pixels,
+                    x: 0,
+                    y: 0,
+                });
+                if options.dedupe {
+                    seen.insert(key, cells.len() - 1);
+                }
+                cells.len() - 1
+            }
+        };
+        owners.push((cell, tx, ty));
+    }
+
+    // Tallest first, then widest, then input order, so the layout is stable.
+    let mut order: Vec<usize> = (0..cells.len()).collect();
+    order.sort_by(|&a, &b| {
+        (cells[b].height, cells[b].width, a).cmp(&(cells[a].height, cells[a].width, b))
+    });
+    let pad = u64::from(options.padding);
+    let limit = u64::from(max_width);
+    let (mut x, mut y, mut shelf_h, mut used_w) = (0u64, 0u64, 0u64, 0u64);
+    for &index in &order {
+        let (w, h) = (
+            u64::from(cells[index].width),
+            u64::from(cells[index].height),
+        );
+        if x > 0 && x + w > limit {
+            y += shelf_h + pad;
+            x = 0;
+            shelf_h = 0;
+        }
+        cells[index].x = x as u32;
+        cells[index].y = y as u32;
+        used_w = used_w.max(x + w);
+        shelf_h = shelf_h.max(h);
+        x += w + pad;
+        if y + shelf_h > u64::from(MAX_SHEET_WIDTH) {
+            return Err(Error::Limit {
+                what: "atlas height",
+                value: y + shelf_h,
+                max: u64::from(MAX_SHEET_WIDTH),
+            });
+        }
+    }
+    let (mut width, mut height) = (used_w as u32, (y + shelf_h) as u32);
+    if options.power_of_two {
+        width = round_up_pow2(width);
+        height = round_up_pow2(height);
+    }
+    let area = u64::from(width) * u64::from(height);
+    if area > MAX_SHEET_PIXELS {
+        return Err(Error::Limit {
+            what: "atlas pixels",
+            value: area,
+            max: MAX_SHEET_PIXELS,
+        });
+    }
+
+    let atlas_w = width as usize;
+    let mut out = vec![Rgba::CLEAR; atlas_w * height as usize];
+    for cell in &cells {
+        for (row, line) in cell.pixels.chunks_exact(cell.width as usize).enumerate() {
+            let start = (cell.y as usize + row) * atlas_w + cell.x as usize;
+            out[start..start + line.len()].copy_from_slice(line);
+        }
+    }
+    let placements = sprites
+        .iter()
+        .zip(owners)
+        .map(|(sprite, (index, tx, ty))| {
+            let cell = &cells[index];
+            Placement {
+                name: sprite.name.clone(),
+                x: cell.x,
+                y: cell.y,
+                width: cell.width,
+                height: cell.height,
+                offset_x: tx,
+                offset_y: ty,
+                source_width: sprite.width,
+                source_height: sprite.height,
+                duration: sprite.duration,
+            }
+        })
+        .collect();
+    Ok(Atlas {
+        width,
+        height,
+        pixels: out,
+        placements,
+    })
+}
+
+/// The atlas as a PNG.
+pub fn atlas_png_bytes(atlas: &Atlas) -> Result<Vec<u8>> {
+    let mut cursor = Cursor::new(Vec::new());
+    PngEncoder::new(&mut cursor)
+        .write_image(
+            &rgba_bytes(&atlas.pixels),
+            atlas.width,
+            atlas.height,
+            ExtendedColorType::Rgba8,
+        )
+        .map_err(|err| Error::Png(err.to_string()))?;
+    Ok(cursor.into_inner())
+}
+
+/// The atlas description as a JSON hash: `frames` maps each sprite name to its
+/// rectangle, trim offset, source size, and duration, then `meta` names the
+/// image. Phaser, PixiJS, Godot importers, and Aseprite's own exporter use
+/// this layout. Names must be unique; see [`unique_names`].
+pub fn atlas_json(atlas: &Atlas, image: &str) -> String {
+    let mut out = String::from("{\n  \"frames\": {\n");
+    for (index, p) in atlas.placements.iter().enumerate() {
+        out.push_str(&format!(
+            "    {}: {{\"frame\": {{\"x\": {}, \"y\": {}, \"w\": {}, \"h\": {}}}, \"rotated\": false, \"trimmed\": {}, \"spriteSourceSize\": {{\"x\": {}, \"y\": {}, \"w\": {}, \"h\": {}}}, \"sourceSize\": {{\"w\": {}, \"h\": {}}}, \"duration\": {}}}",
+            json_string(&p.name),
+            p.x,
+            p.y,
+            p.width,
+            p.height,
+            p.trimmed(),
+            p.offset_x,
+            p.offset_y,
+            p.width,
+            p.height,
+            p.source_width,
+            p.source_height,
+            p.duration,
+        ));
+        out.push_str(if index + 1 < atlas.placements.len() {
+            ",\n"
+        } else {
+            "\n"
+        });
+    }
+    out.push_str(&format!(
+        "  }},\n  \"meta\": {{\"app\": \"OxyPack\", \"version\": \"{}\", \"image\": {}, \"format\": \"RGBA8888\", \"size\": {{\"w\": {}, \"h\": {}}}, \"scale\": \"1\"}}\n}}\n",
+        env!("CARGO_PKG_VERSION"),
+        json_string(image),
+        atlas.width,
+        atlas.height,
+    ));
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn solid(name: &str, w: u32, h: u32, n: u8) -> Sprite {
+        Sprite {
+            name: name.to_string(),
+            width: w,
+            height: h,
+            pixels: vec![Rgba::new(n, 0, 0, 255); (w * h) as usize],
+            duration: 100,
+        }
+    }
+
+    fn at(atlas: &Atlas, x: u32, y: u32) -> Rgba {
+        atlas.pixels[(y * atlas.width + x) as usize]
+    }
+
+    #[test]
+    fn shelves_fill_tallest_first_and_wrap_at_the_width_limit() {
+        let sprites = [
+            solid("a", 2, 2, 1),
+            solid("b", 3, 4, 2),
+            solid("c", 2, 3, 3),
+        ];
+        let options = PackOptions {
+            padding: 1,
+            max_width: 6,
+            ..PackOptions::default()
+        };
+        let atlas = pack_sprites(&sprites, options).unwrap();
+        // Row 0: b (3x4) then c (2x3) at x 4. Row 1: a at y 5.
+        let place = |name: &str| atlas.placements.iter().find(|p| p.name == name).unwrap();
+        assert_eq!((place("b").x, place("b").y), (0, 0));
+        assert_eq!((place("c").x, place("c").y), (4, 0));
+        assert_eq!((place("a").x, place("a").y), (0, 5));
+        assert_eq!((atlas.width, atlas.height), (6, 7));
+        assert_eq!(at(&atlas, 4, 0), Rgba::new(3, 0, 0, 255));
+        assert_eq!(at(&atlas, 3, 0), Rgba::CLEAR);
+        // Placements stay in input order.
+        let names: Vec<_> = atlas.placements.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn trim_crops_to_the_ink_and_records_the_offset() {
+        let mut sprite = Sprite {
+            name: "dot".into(),
+            width: 4,
+            height: 3,
+            pixels: vec![Rgba::CLEAR; 12],
+            duration: 80,
+        };
+        sprite.pixels[4 + 1] = Rgba::new(9, 9, 9, 255);
+        sprite.pixels[4 + 2] = Rgba::new(8, 8, 8, 255);
+        let options = PackOptions {
+            trim: true,
+            ..PackOptions::default()
+        };
+        let atlas = pack_sprites(&[sprite.clone()], options).unwrap();
+        let p = &atlas.placements[0];
+        assert_eq!((p.width, p.height, p.offset_x, p.offset_y), (2, 1, 1, 1));
+        assert_eq!((p.source_width, p.source_height), (4, 3));
+        assert!(p.trimmed());
+        assert_eq!((atlas.width, atlas.height), (2, 1));
+        assert_eq!(at(&atlas, 0, 0), Rgba::new(9, 9, 9, 255));
+
+        // A clear sprite keeps one pixel.
+        sprite.pixels = vec![Rgba::CLEAR; 12];
+        let atlas = pack_sprites(&[sprite], options).unwrap();
+        assert_eq!(
+            (atlas.placements[0].width, atlas.placements[0].height),
+            (1, 1)
+        );
+    }
+
+    #[test]
+    fn dedupe_shares_a_rectangle_and_pot_rounds_up() {
+        let sprites = [
+            solid("a", 3, 3, 1),
+            solid("b", 3, 3, 1),
+            solid("c", 3, 3, 2),
+        ];
+        let options = PackOptions {
+            dedupe: true,
+            power_of_two: true,
+            ..PackOptions::default()
+        };
+        let atlas = pack_sprites(&sprites, options).unwrap();
+        let [a, b, c] = &atlas.placements[..] else {
+            panic!("three placements")
+        };
+        assert_eq!((a.x, a.y), (b.x, b.y));
+        assert_ne!((a.x, a.y), (c.x, c.y));
+        // Two 3-wide cells and one padding pixel: 7, rounded to 8. Height 3 to 4.
+        assert_eq!((atlas.width, atlas.height), (8, 4));
+        let plain = pack_sprites(&sprites, PackOptions::default()).unwrap();
+        assert_eq!((plain.width, plain.height), (11, 3));
+    }
+
+    #[test]
+    fn bad_input_is_an_error() {
+        assert!(matches!(
+            pack_sprites(&[], PackOptions::default()),
+            Err(Error::NothingToPack)
+        ));
+        let wide = PackOptions {
+            max_width: 4,
+            ..PackOptions::default()
+        };
+        assert!(matches!(
+            pack_sprites(&[solid("big", 5, 1, 1)], wide),
+            Err(Error::SpriteTooWide {
+                width: 5,
+                max: 4,
+                ..
+            })
+        ));
+        let mut short = solid("short", 2, 2, 1);
+        short.pixels.pop();
+        assert!(pack_sprites(&[short], PackOptions::default()).is_err());
+        let padded = PackOptions {
+            padding: MAX_SHEET_PADDING + 1,
+            ..PackOptions::default()
+        };
+        assert!(pack_sprites(&[solid("a", 1, 1, 1)], padded).is_err());
+    }
+
+    #[test]
+    fn names_are_made_unique_and_frames_are_numbered() {
+        let mut sprites = vec![
+            solid("hero", 1, 1, 1),
+            solid("hero", 1, 1, 2),
+            solid("hero (2)", 1, 1, 3),
+            solid("hero", 1, 1, 4),
+        ];
+        unique_names(&mut sprites);
+        let names: Vec<_> = sprites.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["hero", "hero (3)", "hero (2)", "hero (4)"]);
+
+        let mut doc = Document::new(2, 2).unwrap();
+        assert_eq!(sprites_from_document(&doc, "idle").unwrap()[0].name, "idle");
+        doc.add_frame().unwrap();
+        doc.set_frame_duration(1, 250).unwrap();
+        let frames = sprites_from_document(&doc, "walk").unwrap();
+        assert_eq!(frames[0].name, "walk 0");
+        assert_eq!(
+            (frames[1].name.as_str(), frames[1].duration),
+            ("walk 1", 250)
+        );
+    }
+
+    #[test]
+    fn json_hash_lists_each_sprite_and_the_png_decodes() {
+        let options = PackOptions {
+            trim: true,
+            ..PackOptions::default()
+        };
+        let mut dot = solid("dot \"x\"", 3, 3, 5);
+        dot.pixels[0] = Rgba::CLEAR;
+        let atlas = pack_sprites(&[solid("a", 2, 2, 1), dot], options).unwrap();
+        let text = atlas_json(&atlas, "atlas.png");
+        assert!(text.contains("\"a\": {\"frame\": {\"x\": 4, \"y\": 0, \"w\": 2, \"h\": 2}"));
+        assert!(text.contains("\"dot \\\"x\\\"\": {\"frame\": {\"x\": 0, \"y\": 0, \"w\": 3, \"h\": 3}, \"rotated\": false, \"trimmed\": false"));
+        assert!(text.contains("\"image\": \"atlas.png\""));
+        assert!(text.contains("\"size\": {\"w\": 6, \"h\": 3}"));
+        let png = atlas_png_bytes(&atlas).unwrap();
+        let decoded = image::load_from_memory(&png).unwrap().to_rgba8();
+        assert_eq!(decoded.dimensions(), (6, 3));
+        assert_eq!(decoded.as_raw(), &rgba_bytes(&atlas.pixels));
+    }
+}

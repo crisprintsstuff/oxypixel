@@ -20,6 +20,7 @@ The pictures above are screenshots of the running editor. The drawing is a sampl
 - [Features](#features)
 - [How it's built](#how-its-built)
 - [Keyboard shortcuts](#keyboard-shortcuts)
+- [OxyPack](#oxypack)
 - [Build from source](#build-from-source)
 - [File formats](#file-formats)
 - [Documentation](#documentation)
@@ -41,6 +42,7 @@ The files for the current release are on the [latest release](https://github.com
 | `oxypixel-<version>-windows-x86_64.exe` | Portable Windows executable |
 | `oxypixel-<version>-linux-x86_64.tar.gz` | Linux x86_64 archive |
 | `oxypixel-<version>-linux-x86_64.deb` | Linux Debian package |
+| `oxypack-<version>-windows-x86_64.exe` | [OxyPack](#oxypack) sprite packer for Windows. The Linux archive and `.deb` include `oxypack` |
 | [`SHA256SUMS.txt`](https://github.com/crisprintsstuff/oxypixel/releases/latest/download/SHA256SUMS.txt) | Checksums |
 
 The Windows files are unsigned. SmartScreen can warn that the publisher is unknown. Check `SHA256SUMS.txt` before you install. Signing steps are in [docs/BUILD-WINDOWS.md](docs/BUILD-WINDOWS.md).
@@ -152,6 +154,16 @@ The maintainer develops OxyPixel with AI coding agents. The written rules for th
 | Ctrl+Plus / Ctrl+Minus / Ctrl+0 | Zoom in, zoom out (whole-pixel steps), fit |
 
 The full list is [docs/SHORTCUTS.md](docs/SHORTCUTS.md).
+
+## OxyPack
+
+`oxypack` is a companion command-line tool in the same workspace. It packs sprites from many files into one atlas PNG and writes a JSON hash beside it, the layout Phaser, PixiJS, Godot importers, and Aseprite's own exporter read. Every frame of a GIF or `.oxypix` file becomes a sprite named `<file> 0`, `<file> 1`, and so on, with its duration; a one-frame file is named after the file.
+
+```bash
+oxypack sprites/ hero.oxypix --trim --dedupe -o atlas.png
+```
+
+Inputs are `.png`, `.bmp`, `.gif`, and `.oxypix` files or folders of them. `--padding N` (default 1) leaves clear pixels between sprites, `--max-width N` (default 2048) caps the width, `--trim` crops each sprite to its ink and records the offset, `--dedupe` stores repeated frames once, `--pot` rounds the size up to powers of two, and `--no-json` writes only the PNG. It never opens a window, so it fits build scripts and CI. Windows has a standalone `oxypack-<version>-windows-x86_64.exe` download; the Linux archive has `./oxypack` beside `./oxypixel`, and the `.deb` installs `/usr/bin/oxypack`. From source: `cargo build --release -p oxypack`.
 
 ## Build from source
 

@@ -60,6 +60,7 @@ recommends = "libvulkan1, mesa-vulkan-drivers"
 extended-description = "Draw on a pixel canvas, stack layers, animate frames, and import or export PNG, BMP, GIF, and palette files."
 assets = [
     ["target/release/oxypixel", "usr/bin/", "755"],
+    ["target/release/oxypack", "usr/bin/", "755"],
     ["../../docs/linux/oxypixel.desktop", "usr/share/applications/oxypixel.desktop", "644"],
     ["../../docs/linux/oxypixel.png", "usr/share/icons/hicolor/32x32/apps/oxypixel.png", "644"],
     ["../../docs/linux/oxypixel-mime.xml", "usr/share/mime/packages/oxypixel.xml", "644"],

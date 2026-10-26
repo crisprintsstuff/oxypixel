@@ -650,6 +650,16 @@ mod tests {
     fn linux_archive_extracts_only_the_program() {
         let raw = b"#!/bin/oxypixel\n";
         let mut builder = tar::Builder::new(Vec::new());
+        // Release archives also carry oxypack. It must be skipped.
+        let pack = b"#!/bin/oxypack\n";
+        let mut header = tar::Header::new_gnu();
+        header
+            .set_path("oxypixel-0.2.1-linux-x86_64/oxypack")
+            .unwrap();
+        header.set_size(pack.len() as u64);
+        header.set_mode(0o755);
+        header.set_cksum();
+        builder.append(&header, &pack[..]).unwrap();
         let mut header = tar::Header::new_gnu();
         header
             .set_path("oxypixel-0.2.1-linux-x86_64/oxypixel")
