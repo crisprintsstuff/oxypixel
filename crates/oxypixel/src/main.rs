@@ -21,6 +21,7 @@ mod recovery;
 mod refsview;
 mod session;
 mod shortcuts;
+mod tagsview;
 mod theme;
 mod toolicons;
 mod update;

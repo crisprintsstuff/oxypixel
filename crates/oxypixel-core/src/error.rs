@@ -31,6 +31,12 @@ pub enum Error {
     BadFlag(&'static str),
     #[error("the file has unexpected trailing data")]
     TrailingBytes,
+    #[error("this file needs a newer OxyPixel (it has section {0:#06x})")]
+    RequiredSection(u16),
+    #[error("{0}")]
+    BadTag(String),
+    #[error("the file has two {0} sections")]
+    DuplicateSection(&'static str),
     #[error("the palette needs at least one color")]
     EmptyPalette,
     #[error("the palette already has {0} colors")]

@@ -1,4 +1,4 @@
-# `.oxypix` version 1
+# `.oxypix` versions 1 and 2
 
 Little-endian. No compression. A file that does not match this layout is rejected.
 
@@ -36,7 +36,38 @@ palette_count  u16   1 through 256
 colors         palette_count times 4 bytes RGBA
 ```
 
-Trailing bytes are an error.
+In version 1, trailing bytes are an error.
+
+## Version 2
+
+Version 2 is version 1 with `version` set to 2 and a list of sections after the palette:
+
+```text
+section_count  u16   at most 64
+repeated section_count times:
+  kind         u16
+  len          u32   bytes in this section
+  body         len bytes
+```
+
+Bytes after the last section are an error. A kind with the high bit set (`0x8000`) must be understood: a reader that does not know it rejects the file with "this file needs a newer OxyPixel". A kind without that bit may be skipped. Each kind appears at most once.
+
+OxyPixel writes version 2 only when the document uses a section; a document without one is written as version 1, byte for byte as before. OxyPixel 0.8.5 and earlier read version 1 only.
+
+### Section `0x0001`: animation tags (optional)
+
+```text
+count        u16   at most 256
+repeated count times:
+  from       u16   first frame, from 0
+  to         u16   last frame, included; from <= to < frame_count
+  direction  u8    0 forward, 1 reverse, 2 ping-pong, 3 ping-pong reverse
+  repeat     u16   times the range plays; 0 is forever
+  name_len   u16   1 through 128
+  name       name_len bytes of UTF-8
+```
+
+A body longer than its tags is an error.
 
 Reference images are not a field in this file. Version 1 has no room for them: trailing bytes are rejected, and a new field would be a new version. A saved document may have a sidecar, `<name>.oxypix.refs`, in the same directory. Save writes it. That file lists PNG or JPEG paths and where each image sits. A path to an image inside the document's directory is relative to that directory; any other path is absolute. The pixels stay in those image files. A reader that only understands this document never sees them, and export does not read the sidecar.
 
@@ -50,6 +81,8 @@ Reference images are not a field in this file. Version 1 has no room for them: t
 | Frames | 256 |
 | Layers | 32 |
 | Palette colors | 256 |
+| Tags | 256 |
+| Sections (version 2) | 64 |
 | File size | 80 MiB |
 
 `layer_count` and `frame_count` are checked against these caps before any pixel buffer is allocated.

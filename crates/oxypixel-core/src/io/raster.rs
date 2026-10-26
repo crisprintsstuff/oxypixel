@@ -286,12 +286,13 @@ pub fn spritesheet_json(doc: &Document, layout: SheetLayout, image: &str) -> Res
         });
     }
     out.push_str(&format!(
-        "  ],\n  \"meta\": {{\"app\": \"OxyPixel\", \"version\": \"{}\", \"image\": {}, \"format\": \"RGBA8888\", \"size\": {{\"w\": {}, \"h\": {}}}, \"scale\": \"{}\"}}\n}}\n",
+        "  ],\n  \"meta\": {{\"app\": \"OxyPixel\", \"version\": \"{}\", \"image\": {}, \"format\": \"RGBA8888\", \"size\": {{\"w\": {}, \"h\": {}}}, \"scale\": \"{}\", \"frameTags\": [{}]}}\n}}\n",
         env!("CARGO_PKG_VERSION"),
         json_string(image),
         grid.width,
         grid.height,
         layout.scale,
+        frame_tags_json(doc.tags()),
     ));
     Ok(out)
 }
@@ -318,6 +319,28 @@ pub fn export_spritesheet_layout(
         std::fs::write(path.with_extension("json"), text).map_err(Error::io)?;
     }
     Ok(())
+}
+
+/// The entries of a JSON sheet's `meta.frameTags`, as Aseprite writes them.
+/// `repeat` is written only when it is not 0.
+pub fn frame_tags_json(tags: &[crate::tags::FrameTag]) -> String {
+    tags.iter()
+        .map(|tag| {
+            let repeat = if tag.repeat == 0 {
+                String::new()
+            } else {
+                format!(", \"repeat\": \"{}\"", tag.repeat)
+            };
+            format!(
+                "{{\"name\": {}, \"from\": {}, \"to\": {}, \"direction\": \"{}\"{repeat}}}",
+                json_string(&tag.name),
+                tag.from,
+                tag.to,
+                tag.direction.json_name(),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn json_string(text: &str) -> String {
@@ -705,7 +728,23 @@ mod tests {
         assert!(text.contains("\"duration\": 140}\n"));
         assert!(text.contains("\"image\": \"walk \\\"cycle\\\".png\""));
         assert!(text.contains("\"size\": {\"w\": 5, \"h\": 5}"));
+        assert!(text.contains("\"frameTags\": []"));
         assert_eq!(text.matches('{').count(), text.matches('}').count());
+
+        let mut tagged = doc.clone();
+        tagged
+            .add_tag(crate::tags::FrameTag {
+                name: "run".into(),
+                from: 1,
+                to: 3,
+                direction: crate::tags::LoopDirection::PingPong,
+                repeat: 2,
+            })
+            .unwrap();
+        let text = spritesheet_json(&tagged, layout, "walk.png").unwrap();
+        assert!(text.contains(
+            "\"frameTags\": [{\"name\": \"run\", \"from\": 1, \"to\": 3, \"direction\": \"pingpong\", \"repeat\": \"2\"}]"
+        ), "{text}");
     }
 
     #[test]

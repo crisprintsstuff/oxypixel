@@ -11,6 +11,7 @@ use crate::error::{Error, Result};
 use crate::history::{History, Snapshot};
 use crate::limits::{clamp_name, MAX_BRUSH};
 use crate::selection::{self, OutlineEdge, SelectMode};
+use crate::tags::FrameTag;
 
 /// Drawing tool. Shape tools commit on pointer release. Pencil and eraser paint immediately.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1092,6 +1093,25 @@ impl Editor {
     pub fn merge_down(&mut self) -> Result<()> {
         let index = self.doc.active_layer();
         self.structural(|doc| doc.merge_down(index))
+    }
+
+    /// Add an animation tag. One undo step. Returns its index.
+    pub fn add_tag(&mut self, tag: FrameTag) -> Result<usize> {
+        let index = self.doc.tags().len();
+        self.structural(|doc| doc.add_tag(tag).map(|_| ()))?;
+        Ok(index)
+    }
+
+    /// Replace a tag. One undo step; nothing is recorded when it is unchanged.
+    pub fn set_tag(&mut self, index: usize, tag: FrameTag) -> Result<()> {
+        if self.doc.tags().get(index) == Some(&tag) {
+            return Ok(());
+        }
+        self.structural(|doc| doc.set_tag(index, tag))
+    }
+
+    pub fn remove_tag(&mut self, index: usize) -> Result<()> {
+        self.structural(|doc| doc.remove_tag(index))
     }
 
     pub fn rename_layer(&mut self, name: &str) {
@@ -2703,5 +2723,61 @@ mod tests {
         assert!(ed.undo());
         assert_eq!(cel_pixel(&ed, 6, 6), ink(3));
         assert!(ed.is_selected(5, 6));
+    }
+
+    #[test]
+    fn tags_are_undoable_and_follow_frame_edits() {
+        use crate::tags::{FrameTag, LoopDirection};
+        let mut ed = editor();
+        ed.add_frame().unwrap();
+        ed.add_frame().unwrap();
+        let walk = FrameTag {
+            name: "walk".into(),
+            from: 1,
+            to: 2,
+            direction: LoopDirection::Forward,
+            repeat: 0,
+        };
+        assert_eq!(ed.add_tag(walk.clone()).unwrap(), 0);
+        // Setting the same tag records nothing.
+        let before = ed.can_redo();
+        ed.set_tag(0, walk.clone()).unwrap();
+        assert_eq!(ed.can_redo(), before);
+        let faster = FrameTag {
+            direction: LoopDirection::PingPong,
+            ..walk.clone()
+        };
+        ed.set_tag(0, faster.clone()).unwrap();
+        assert!(ed
+            .set_tag(
+                0,
+                FrameTag {
+                    to: 9,
+                    ..walk.clone()
+                }
+            )
+            .is_err());
+        // Copying frame 1 puts the copy at 2, inside the tag, which grows.
+        ed.set_active_frame(1).unwrap();
+        ed.duplicate_frame().unwrap();
+        assert_eq!(
+            (ed.document().tags()[0].from, ed.document().tags()[0].to),
+            (1, 3)
+        );
+        assert!(ed.undo());
+        assert_eq!(ed.document().tags()[0], faster);
+        assert!(ed.undo());
+        assert_eq!(ed.document().tags()[0], walk);
+        // Deleting frame 0 moves the tag back by one.
+        ed.set_active_frame(0).unwrap();
+        ed.delete_frame().unwrap();
+        assert_eq!(
+            (ed.document().tags()[0].from, ed.document().tags()[0].to),
+            (0, 1)
+        );
+        ed.remove_tag(0).unwrap();
+        assert!(ed.document().tags().is_empty());
+        assert!(ed.undo());
+        assert_eq!(ed.document().tags().len(), 1);
     }
 }

@@ -83,6 +83,7 @@ pub struct OxyApp {
     composites: FrameComposites,
     preview_panel: PreviewPanel,
     pack_window: crate::packview::PackWindow,
+    tags_window: crate::tagsview::TagsWindow,
     thumbs: ThumbCache,
     save_path: Option<PathBuf>,
     note: Option<Note>,
@@ -171,6 +172,7 @@ impl OxyApp {
             composites: FrameComposites::default(),
             preview_panel: PreviewPanel::new(session::load_preview_open()),
             pack_window: crate::packview::PackWindow::default(),
+            tags_window: crate::tagsview::TagsWindow::default(),
             thumbs: ThumbCache::default(),
             save_path: None,
             note: None,
@@ -406,6 +408,7 @@ impl eframe::App for OxyApp {
             }
         }
         self.pack_window.show(ctx);
+        self.tags_window.show(ctx, &mut self.editor);
         self.show_dialog(ctx);
         self.consider_autosave(ctx);
     }
@@ -2019,6 +2022,19 @@ impl OxyApp {
                 }
                 if ui.button("Delete frame").clicked() {
                     self.apply(|editor| editor.delete_frame());
+                }
+                let count = self.editor.document().tags().len();
+                let label = if count == 0 {
+                    "Tags…".to_string()
+                } else {
+                    format!("Tags ({count})…")
+                };
+                if ui
+                    .button(label)
+                    .on_hover_text("Name ranges of frames for animation")
+                    .clicked()
+                {
+                    self.tags_window.open = !self.tags_window.open;
                 }
             });
             ui.horizontal_wrapped(|ui| {
