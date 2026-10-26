@@ -1,6 +1,6 @@
 //! Editing session: tools, selection, colors, and undo on top of a [`Document`].
 
-use crate::color::{color_ramp, nearest_palette_color, Rgba};
+use crate::color::{color_ramp, nearest_palette_color, shade_step, Rgba};
 use crate::document::Document;
 use crate::draw::{
     brush_offsets, clamp_to_margin, constrain_line, constrain_square, ellipse_points, flood_fill,
@@ -86,6 +86,7 @@ pub struct Editor {
     snap_palette: bool,
     fill_tolerance: u8,
     fill_global: bool,
+    shade: bool,
     /// Cel pixels from before the current pixel-perfect stroke.
     pencil_base: Option<Vec<Rgba>>,
     selection: Option<PixelRect>,
@@ -139,6 +140,7 @@ impl Editor {
             snap_palette: false,
             fill_tolerance: 0,
             fill_global: false,
+            shade: false,
             pencil_base: None,
             selection: None,
             clipboard: None,
@@ -255,6 +257,16 @@ impl Editor {
 
     pub fn set_fill_global(&mut self, global: bool) {
         self.fill_global = global;
+    }
+
+    /// The pencil steps each pixel one swatch along the palette instead of
+    /// painting a color. Off until the user turns it on.
+    pub fn shades(&self) -> bool {
+        self.shade
+    }
+
+    pub fn set_shade(&mut self, enabled: bool) {
+        self.shade = enabled;
     }
 
     /// Pencil, fill, and shapes stamp the nearest palette color. Off until the user turns it on.
@@ -426,7 +438,9 @@ impl Editor {
         let (x, y) = self.clamp_pointer(x, y);
         match self.tool {
             Tool::Pencil | Tool::Eraser => {
-                let perfect = self.tool == Tool::Pencil && self.pixel_perfect;
+                // Shading rewrites the stroke from the pre-stroke cel, the same way
+                // pixel-perfect does, so going back over a pixel shades it once.
+                let perfect = self.tool == Tool::Pencil && (self.pixel_perfect || self.shade);
                 self.gesture = Gesture::Pencil {
                     button,
                     last: (x, y),
@@ -435,7 +449,7 @@ impl Editor {
                 };
                 let color = self.stroke_color(button);
                 if perfect {
-                    self.paint_pixel_perfect(&[(x, y)], color);
+                    self.paint_pixel_perfect(&[(x, y)], button);
                 } else {
                     self.paint(&[(x, y)], color, true);
                 }
@@ -496,7 +510,7 @@ impl Editor {
                     if trail.last() != Some(&(x, y)) {
                         trail.push((x, y));
                     }
-                    self.paint_pixel_perfect(&trail, color);
+                    self.paint_pixel_perfect(&trail, button);
                 } else if (x, y) != last {
                     let points = line_points(last.0, last.1, x, y);
                     self.paint(&points, color, true);
@@ -1228,25 +1242,31 @@ impl Editor {
 
     /// One-pixel pencil only. The whole stroke is rewritten from the pre-stroke cel,
     /// so a corner dropped later is one undo step with the pixels that remain.
-    fn paint_pixel_perfect(&mut self, samples: &[(i32, i32)], color: Option<Rgba>) {
+    fn paint_pixel_perfect(&mut self, samples: &[(i32, i32)], button: MouseButton) {
         let expanded = expand_stroke(samples);
-        let cleaned = if self.brush == 1 {
+        let cleaned = if self.pixel_perfect && self.brush == 1 {
             pixel_perfect_path(&expanded)
         } else {
             expanded
         };
-        self.rewrite_stroke(&cleaned, color);
+        self.rewrite_stroke(&cleaned, button);
     }
 
-    fn rewrite_stroke(&mut self, points: &[(i32, i32)], color: Option<Rgba>) {
+    fn rewrite_stroke(&mut self, points: &[(i32, i32)], button: MouseButton) {
         let frame = self.doc.active_frame();
         let layer = self.doc.active_layer();
         let width = self.doc.width();
-        let stamped = self.stamp(points, color);
+        let stamped = self.stamp(points, self.stroke_color(button));
         let Ok(current_cel) = self.doc.cel(frame, layer) else {
             return;
         };
         let current = current_cel.to_vec();
+        let stamped = if self.shade {
+            let base = self.pencil_base.as_deref().unwrap_or(&current);
+            self.shade_stamped(stamped, base, button)
+        } else {
+            stamped
+        };
         if self.pencil_base.is_none() {
             let mut changes = Vec::new();
             for (x, y, px) in &stamped {
@@ -1288,6 +1308,27 @@ impl Editor {
         }
         self.dirty = true;
         self.generation += 1;
+    }
+
+    /// Each stamped pixel becomes the next swatch after its pre-stroke color
+    /// (left button) or the one before it (right button). Pixels with no
+    /// shade are dropped, so they keep what they had.
+    fn shade_stamped(
+        &self,
+        stamped: Vec<(i32, i32, Rgba)>,
+        base: &[Rgba],
+        button: MouseButton,
+    ) -> Vec<(i32, i32, Rgba)> {
+        let width = self.doc.width();
+        let forward = button == MouseButton::Primary;
+        stamped
+            .into_iter()
+            .filter_map(|(x, y, _)| {
+                let i = (y as u32 * width + x as u32) as usize;
+                let before = *base.get(i)?;
+                shade_step(before, self.doc.palette(), forward).map(|shade| (x, y, shade))
+            })
+            .collect()
     }
 
     fn stamp(&self, points: &[(i32, i32)], color: Option<Rgba>) -> Vec<(i32, i32, Rgba)> {
@@ -2072,6 +2113,81 @@ mod tests {
         assert!(ed.undo());
         assert_eq!(cel_pixel(&ed, 0, 0), base);
         assert_eq!(cel_pixel(&ed, 2, 0), near);
+    }
+
+    #[test]
+    fn shading_steps_each_pixel_once_along_the_palette() {
+        let dark = Rgba::new(10, 10, 10, 255);
+        let mid = Rgba::new(80, 80, 80, 255);
+        let light = Rgba::new(200, 200, 200, 255);
+        let other = Rgba::new(1, 200, 3, 255);
+        let mut ed = Editor::new(4, 1).unwrap();
+        ed.set_palette(vec![dark, mid, light]).unwrap();
+        for (x, color) in [(0, dark), (1, dark), (2, mid), (3, other)] {
+            ed.set_primary(color);
+            ed.pointer_down(x, 0, MouseButton::Primary, false);
+            ed.pointer_up(x, 0, false);
+        }
+        ed.set_shade(true);
+        assert!(ed.shades());
+
+        // Across the row and back again: each pixel moves one swatch, once.
+        ed.pointer_down(0, 0, MouseButton::Primary, false);
+        ed.pointer_move(3, 0, false);
+        ed.pointer_move(0, 0, false);
+        ed.pointer_up(0, 0, false);
+        assert_eq!(cel_pixel(&ed, 0, 0), mid);
+        assert_eq!(cel_pixel(&ed, 1, 0), mid);
+        assert_eq!(cel_pixel(&ed, 2, 0), light);
+        assert_eq!(cel_pixel(&ed, 3, 0), other);
+
+        // A second stroke steps again; the lightest swatch stays.
+        ed.pointer_down(2, 0, MouseButton::Primary, false);
+        ed.pointer_up(2, 0, false);
+        assert_eq!(cel_pixel(&ed, 2, 0), light);
+        ed.pointer_down(0, 0, MouseButton::Primary, false);
+        ed.pointer_up(0, 0, false);
+        assert_eq!(cel_pixel(&ed, 0, 0), light);
+
+        // The right button steps back.
+        ed.pointer_down(1, 0, MouseButton::Secondary, false);
+        ed.pointer_up(1, 0, false);
+        assert_eq!(cel_pixel(&ed, 1, 0), dark);
+
+        // Each stroke was one undo step.
+        assert!(ed.undo());
+        assert_eq!(cel_pixel(&ed, 1, 0), mid);
+        assert!(ed.undo());
+        assert_eq!(cel_pixel(&ed, 0, 0), mid);
+        assert!(ed.undo());
+        assert!(ed.undo());
+        assert_eq!(cel_pixel(&ed, 0, 0), dark);
+        assert_eq!(cel_pixel(&ed, 2, 0), mid);
+    }
+
+    #[test]
+    fn shading_follows_the_mirror_and_leaves_the_eraser_alone() {
+        let dark = Rgba::new(10, 10, 10, 255);
+        let mid = Rgba::new(80, 80, 80, 255);
+        let mut ed = Editor::new(4, 1).unwrap();
+        ed.set_palette(vec![dark, mid]).unwrap();
+        for x in 0..4 {
+            ed.set_primary(dark);
+            ed.pointer_down(x, 0, MouseButton::Primary, false);
+            ed.pointer_up(x, 0, false);
+        }
+        ed.set_shade(true);
+        ed.set_mirror_x(true);
+        ed.pointer_down(0, 0, MouseButton::Primary, false);
+        ed.pointer_up(0, 0, false);
+        assert_eq!(cel_pixel(&ed, 0, 0), mid);
+        assert_eq!(cel_pixel(&ed, 3, 0), mid);
+        assert_eq!(cel_pixel(&ed, 1, 0), dark);
+
+        ed.set_tool(Tool::Eraser);
+        ed.pointer_down(1, 0, MouseButton::Primary, false);
+        ed.pointer_up(1, 0, false);
+        assert_eq!(cel_pixel(&ed, 1, 0), Rgba::CLEAR);
     }
 
     #[test]

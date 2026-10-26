@@ -12,7 +12,7 @@ Infrastructure, then small fixes that already have a place in the code.
 
 OX-002, OX-011, and OX-012 are done, so this list is empty.
 
-Suggested order if a human picks proposals: OX-P24, OX-P25, then OX-P23. OX-P20, OX-P21, OX-P6, and OX-P22 are done. OX-P27 waits for a format decision.
+Suggested order if a human picks proposals: OX-P25, then OX-P23. OX-P20, OX-P21, OX-P6, OX-P22, and OX-P24 are done. OX-P27 waits for a format decision.
 
 ## Scorecard
 
@@ -22,7 +22,7 @@ In the 0.6.1 tree and covered by tests or by the release workflow.
 
 | Area | What exists | Where |
 | --- | --- | --- |
-| Tools | Pencil, eraser, fill, eyedropper, line, rectangle, ellipse, rectangular select. Brush 1–16. Filled or outline shapes. Optional one-pixel pixel-perfect pencil. Fill tolerance 0–255 and a global fill | `editor.rs`, `draw.rs` |
+| Tools | Pencil, eraser, fill, eyedropper, line, rectangle, ellipse, rectangular select. Brush 1–16. Filled or outline shapes. Optional one-pixel pixel-perfect pencil. Fill tolerance 0–255 and a global fill. Shading along the palette (D) | `editor.rs`, `draw.rs` |
 | Selection | Drag to move, arrow nudge, flip, rotate, system-clipboard and in-memory copy and paste, clear, select all. The status line shows the selection size | `editor.rs`, `clipboard.rs`, `app.rs` |
 | Canvas | Resize and crop. Mirror horizontal and vertical while stamping. Optional wrap, and a 3×3 tiled view that export ignores | `document.rs`, `editor.rs`, `canvas.rs` |
 | Layers | Add, delete, duplicate, reorder, rename, visibility, opacity, merge down. At most 32 | `document.rs` |
@@ -237,7 +237,9 @@ With the fill tool, the tools panel shows Global fill and a Tolerance slider fro
 
 ### OX-P24
 
-**Shade along the palette.** P16 made ramps. A later task could add a shading mode to the pencil: left click replaces a pixel with the next swatch in the palette, right click with the previous one, and a pixel that is not in the palette is left alone. It is one undo step per stroke, and pixel-perfect, mirror, and wrap still apply. The rule is tested in `editor.rs`.
+**Shade along the palette.** Status: done. Area: `crates/oxypixel-core/src/color.rs`, `crates/oxypixel-core/src/editor.rs`, `crates/oxypixel/src/app.rs`.
+
+Shade (checkbox, or D) turns the pencil into a shading brush. Left button replaces each pixel with the next swatch after its color, right button with the swatch before it. A color not in the palette, or one at the end it would step past, stays as it is. The stroke is rewritten from the cel as it was before the stroke, so going back over a pixel shades it once, and a stroke is one undo step. Brush size, pixel-perfect, mirror, wrap, and the selection still apply; the eraser is unchanged. `shade_step` is tested in `color.rs` and the stroke in `editor.rs`.
 
 ### OX-P25
 

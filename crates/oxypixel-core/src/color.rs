@@ -139,6 +139,20 @@ pub(crate) fn color_ramp(start: Rgba, end: Rgba, steps: usize) -> Option<Vec<Rgb
     Some(colors)
 }
 
+/// The swatch after (`forward`) or before `color` in `palette`.
+///
+/// `color` is found by its first exact match. A color not in the palette, or
+/// one at the end it would step past, has no shade and returns `None`.
+pub(crate) fn shade_step(color: Rgba, palette: &[Rgba], forward: bool) -> Option<Rgba> {
+    let index = palette.iter().position(|swatch| *swatch == color)?;
+    let next = if forward {
+        index.checked_add(1)?
+    } else {
+        index.checked_sub(1)?
+    };
+    palette.get(next).copied()
+}
+
 /// Closest swatch in squared RGBA distance. Equal distances keep the earlier index.
 /// An empty palette returns `color`.
 pub(crate) fn nearest_palette_color(color: Rgba, palette: &[Rgba]) -> Rgba {
@@ -252,6 +266,23 @@ mod tests {
         assert_eq!(down[1], Rgba::new(5, 0, 0, 255));
         assert_eq!(*down.first().unwrap(), Rgba::new(10, 0, 0, 255));
         assert_eq!(*down.last().unwrap(), Rgba::new(0, 0, 0, 255));
+    }
+
+    #[test]
+    fn shade_step_moves_one_swatch_and_stops_at_the_ends() {
+        let dark = Rgba::new(10, 10, 10, 255);
+        let mid = Rgba::new(80, 80, 80, 255);
+        let light = Rgba::new(200, 200, 200, 255);
+        let palette = [dark, mid, light];
+        assert_eq!(shade_step(dark, &palette, true), Some(mid));
+        assert_eq!(shade_step(mid, &palette, true), Some(light));
+        assert_eq!(shade_step(light, &palette, true), None);
+        assert_eq!(shade_step(mid, &palette, false), Some(dark));
+        assert_eq!(shade_step(dark, &palette, false), None);
+        assert_eq!(shade_step(Rgba::new(1, 2, 3, 255), &palette, true), None);
+        // A repeated color steps from its first copy.
+        assert_eq!(shade_step(mid, &[mid, dark, mid], true), Some(dark));
+        assert_eq!(shade_step(mid, &[], true), None);
     }
 
     #[test]

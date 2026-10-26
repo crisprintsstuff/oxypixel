@@ -106,6 +106,7 @@ These match the current editor. Planned work is listed in [docs/ROADMAP.md](docs
 - Canvas resize and crop
 - Horizontal and vertical mirror while drawing
 - Pixel-perfect pencil (P), off until you turn it on, drops the extra corner of a one-pixel diagonal step. The line tool is unchanged
+- Shade (D) turns the pencil into a shading brush: left steps each pixel to the next palette swatch, right to the one before. Colors not in the palette stay
 - Wrap (T) continues a stroke or fill that leaves an edge on the opposite edge. Tiled view (Shift+T) shows the canvas 3 by 3. Export still writes one copy
 - Primary and secondary colors, hex entry, and the Ink palette
 - Import and export the palette as GIMP `.gpl`, hex `.hex` (one `RRGGBB` per line), or JASC `.pal`. Import replaces the palette and can be undone. Drag swatches to reorder them, and fill a ramp of N steps between two swatches. Snap (S) makes pencil, fill, and shapes use the nearest palette color

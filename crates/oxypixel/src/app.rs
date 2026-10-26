@@ -540,6 +540,7 @@ impl OxyApp {
             Command::TogglePixelPerfect => {
                 self.editor.set_pixel_perfect(!self.editor.pixel_perfect());
             }
+            Command::ToggleShade => self.editor.set_shade(!self.editor.shades()),
             Command::ToggleWrap => {
                 self.editor.set_wrap(!self.editor.wraps());
             }
@@ -1532,6 +1533,16 @@ impl OxyApp {
                     .changed()
                 {
                     self.editor.set_pixel_perfect(perfect);
+                }
+                let mut shade = self.editor.shades();
+                if ui
+                    .checkbox(&mut shade, "Shade (D)")
+                    .on_hover_text(
+                        "The pencil steps each pixel one swatch along the palette: left to the next, right to the one before. Colors not in the palette stay.",
+                    )
+                    .changed()
+                {
+                    self.editor.set_shade(shade);
                 }
                 let mut wrap = self.editor.wraps();
                 if ui
