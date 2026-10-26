@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- OxyPack draws Aseprite blend modes: Multiply, Screen, Overlay, Darken, Lighten, Color Dodge, Color Burn, Hard Light, Soft Light, Difference, Exclusion, Hue, Saturation, Color, Luminosity, Addition, Subtract, and Divide. When a file composites groups separately, a group is drawn as one image and then blended with its own opacity and mode, as Aseprite does. Before, every layer was drawn as Normal and a group's opacity multiplied its children's.
+
 - Frames can have names. Type one in the Name field beside the frame duration; typing is one undo step, and copying a frame keeps its name. The spritesheet JSON uses the name instead of "frame N", OxyPack names the sprite `<file> <name>`, and the frame strip's tooltip shows it. Names are saved in `.oxypix` version 2 (a new optional section), so a file without names or tags is still version 1.
 
 ## [0.8.6] - 2026-10-26

@@ -6,6 +6,7 @@
 //! a window or a dialog.
 
 pub mod aseprite;
+pub mod blend;
 mod files;
 pub mod pack;
 
