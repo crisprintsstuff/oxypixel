@@ -101,7 +101,8 @@ Help, then Check for updates, downloads the tar.gz for an unpacked copy and the 
 These match the current editor. Planned work is listed in [docs/ROADMAP.md](docs/ROADMAP.md) and is not included here.
 
 - Pixel canvas with nearest-neighbor zoom on whole-pixel steps, pan, and an optional grid
-- Pencil, eraser, fill, eyedropper, line, rectangle, ellipse, and rectangular selection. Fill has a tolerance for near colors and a global mode that recolors every match on the layer
+- Pencil, eraser, fill, eyedropper, line, rectangle, ellipse, rectangular selection, and a magic wand. Fill and the wand have a tolerance for near colors and a global mode that take every match on the layer
+- Shift adds a marquee or wand area to the selection and Alt cuts it out, so a selection can be any shape
 - Move, nudge, flip, and rotate a selection (or the active cel when nothing is selected). A 90° turn swaps the sides and stays centered; pixels that do not fit are dropped. Copy publishes a straight-alpha image to the system clipboard and keeps an in-memory patch. Paste uses the system image, or that patch when the clipboard has no image
 - Canvas resize and crop
 - Horizontal and vertical mirror while drawing
@@ -111,8 +112,8 @@ These match the current editor. Planned work is listed in [docs/ROADMAP.md](docs
 - Primary and secondary colors, hex entry, and the Ink palette
 - Import and export the palette as GIMP `.gpl`, hex `.hex` (one `RRGGBB` per line), or JASC `.pal`. Import replaces the palette and can be undone. Drag swatches to reorder them, and fill a ramp of N steps between two swatches. Snap (S) makes pencil, fill, and shapes use the nearest palette color
 - Layers with visibility, opacity, rename, reorder, duplicate, and merge down
-- Undo and redo, including the selection rectangle
-- Animation frames with thumbnails, playback, onion skin for earlier and later frames, a duration up to 10 seconds, GIF export, and a horizontal spritesheet
+- Undo and redo, including the selection
+- Animation frames with thumbnails, playback, onion skin for earlier and later frames, a duration up to 10 seconds, GIF export, and a spritesheet in a row or a grid, with padding and a JSON description for game engines
 - A preview panel of the whole image, with its own playback, that pans the canvas when you click it
 - PNG and spritesheet export at 1×, 2×, or 4× nearest-neighbor
 - `.oxypix` documents, plus PNG, BMP, and GIF import and export
@@ -186,7 +187,7 @@ oxypixel import-palette sprite.oxypix palette.gpl recolored.oxypix
 
 `.oxypix` is the editor's own little-endian document. Version 1 stores the canvas, shared layer stack, frame durations, pixels, and palette. The byte layout is [docs/FORMAT.md](docs/FORMAT.md).
 
-PNG, BMP, and GIF can be imported as a new document or as a layer. A GIF import becomes one composited layer named Imported. Export writes the composited frame, a GIF animation, a BMP, or a horizontal PNG spritesheet.
+PNG, BMP, and GIF can be imported as a new document or as a layer. A GIF import becomes one composited layer named Imported. Export writes the composited frame, a GIF animation, a BMP, or a PNG spritesheet in a row or a grid, optionally with a JSON description.
 
 Palette import and export use GIMP `.gpl`, a hex list (`.hex`, one `RRGGBB` per line, or `RRGGBBAA` when the color has alpha), and JASC `.pal`. A `.txt` file is read as that hex list. Import replaces the document palette. JASC files store opaque colors, so alpha becomes 255.
 
