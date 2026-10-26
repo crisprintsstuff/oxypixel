@@ -18,21 +18,22 @@ From a Visual Studio x64 prompt, or any shell where `cargo` can see the MSVC lin
 rustup toolchain install 1.99.0 --profile minimal --component rustfmt,clippy
 rustup target add x86_64-pc-windows-msvc
 cargo test --workspace
-cargo build --release -p oxypixel
+cargo build --release -p oxypixel -p oxypack
 ```
 
-The executable is `target\release\oxypixel.exe`.
+The executables are `target\release\oxypixel.exe` and `target\release\oxypack.exe`.
 
 Install [NSIS 3](https://nsis.sourceforge.io/) so `makensis` is on `PATH`, then:
 
 ```bat
 if not exist dist mkdir dist
 copy /Y target\release\oxypixel.exe dist\oxypixel.exe
+copy /Y target\release\oxypack.exe dist\oxypack.exe
 copy /Y installer\oxypixel.ico dist\oxypixel.ico
 makensis installer\oxypixel.nsi
 ```
 
-The installer is `dist\OxyPixel-<version>-Setup.exe`. It is a per-user install (`RequestExecutionLevel user`) into `%LOCALAPPDATA%\OxyPixel`, with an uninstaller, Start menu entries, an optional desktop shortcut, and an HKCU `.oxypix` association. Add/Remove Programs reads the uninstall key under `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\OxyPixel`.
+The installer is `dist\OxyPixel-<version>-Setup.exe`. It is a per-user install (`RequestExecutionLevel user`) into `%LOCALAPPDATA%\OxyPixel`, with `oxypack.exe` beside `oxypixel.exe` (the installer does not change `PATH`), an uninstaller, Start menu entries, an optional desktop shortcut, and an HKCU `.oxypix` association. Add/Remove Programs reads the uninstall key under `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\OxyPixel`.
 
 ## Cross-compile from Linux
 

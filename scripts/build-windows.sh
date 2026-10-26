@@ -14,11 +14,13 @@ if ! command -v clang-cl >/dev/null 2>&1; then
   exit 1
 fi
 
-cargo xwin build --release --target x86_64-pc-windows-msvc -p oxypixel --cross-compiler clang-cl
+cargo xwin build --release --target x86_64-pc-windows-msvc -p oxypixel -p oxypack --cross-compiler clang-cl
 
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 mkdir -p dist
 cp -f target/x86_64-pc-windows-msvc/release/oxypixel.exe dist/oxypixel.exe
 cp -f dist/oxypixel.exe "dist/oxypixel-${version}-windows-x86_64.exe"
+cp -f target/x86_64-pc-windows-msvc/release/oxypack.exe dist/oxypack.exe
+cp -f dist/oxypack.exe "dist/oxypack-${version}-windows-x86_64.exe"
 cp -f installer/oxypixel.ico dist/oxypixel.ico
 echo "Wrote dist/oxypixel-${version}-windows-x86_64.exe (unsigned, Authenticode-ready)"
