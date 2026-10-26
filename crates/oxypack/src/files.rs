@@ -59,7 +59,7 @@ pub fn collect(inputs: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
 pub struct Loaded {
     pub sprites: Vec<Sprite>,
     /// Animation tags, counted from this file's first frame.
-    pub tags: Vec<aseprite::Tag>,
+    pub tags: Vec<FrameTag>,
     /// What could not be drawn exactly as Aseprite would, one line each.
     pub notes: Vec<String>,
 }
@@ -95,7 +95,7 @@ pub fn load(path: &Path) -> Result<Loaded, String> {
         sprites_from_document(&doc, &stem).map_err(|err| format!("{}: {err}", path.display()))?;
     Ok(Loaded {
         sprites,
-        tags: Vec::new(),
+        tags: doc.tags().to_vec(),
         notes: Vec::new(),
     })
 }
@@ -214,6 +214,40 @@ mod tests {
             json.contains("\"frameTags\": [{\"name\": \"walk\", \"from\": 2, \"to\": 3, \"direction\": \"forward\"}]"),
             "{json}"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn oxypix_tags_are_packed_after_the_files_before_them() {
+        let dir = std::env::temp_dir().join(format!("oxypack-oxytags-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut doc = oxypixel_core::Document::new(1, 1).unwrap();
+        for _ in 0..2 {
+            doc.add_frame().unwrap();
+        }
+        doc.add_tag(FrameTag {
+            name: "blink".into(),
+            from: 1,
+            to: 2,
+            direction: oxypixel_core::LoopDirection::Reverse,
+            repeat: 4,
+        })
+        .unwrap();
+        oxypixel_core::save_oxypix(&doc, &dir.join("b eye.oxypix")).unwrap();
+        let single = oxypixel_core::Document::new(1, 1).unwrap();
+        std::fs::write(
+            dir.join("a dot.png"),
+            oxypixel_core::export_png_bytes(&single, 0).unwrap(),
+        )
+        .unwrap();
+        let packed = pack_files(std::slice::from_ref(&dir), PackOptions::default()).unwrap();
+        assert_eq!(packed.atlas.placements.len(), 4);
+        assert_eq!(packed.tags.len(), 1);
+        assert_eq!((packed.tags[0].from, packed.tags[0].to), (2, 3));
+        write_atlas(&packed, &dir.join("atlas.png"), true).unwrap();
+        let json = std::fs::read_to_string(dir.join("atlas.json")).unwrap();
+        assert!(json.contains("\"frameTags\": [{\"name\": \"blink\", \"from\": 2, \"to\": 3, \"direction\": \"reverse\", \"repeat\": \"4\"}]"), "{json}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

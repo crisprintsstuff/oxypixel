@@ -5,7 +5,10 @@
 
 use crate::color::{source_over, Rgba};
 use crate::error::{Error, Result};
-use crate::limits::{check_stack, clamp_duration, clamp_name, DEFAULT_FRAME_MS, MAX_PALETTE};
+use crate::limits::{
+    check_stack, clamp_duration, clamp_name, DEFAULT_FRAME_MS, MAX_PALETTE, MAX_TAGS,
+};
+use crate::tags::{self, FrameTag};
 
 /// Name, visibility, and opacity shared by every frame.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -33,6 +36,8 @@ pub struct Document {
     active_frame: usize,
     active_layer: usize,
     palette: Vec<Rgba>,
+    /// Animation tags. A document with any is saved as `.oxypix` version 2.
+    tags: Vec<FrameTag>,
 }
 
 impl Document {
@@ -53,6 +58,7 @@ impl Document {
             active_frame: 0,
             active_layer: 0,
             palette: default_palette(),
+            tags: Vec::new(),
         })
     }
 
@@ -119,6 +125,61 @@ impl Document {
 
     pub fn palette(&self) -> &[Rgba] {
         &self.palette
+    }
+
+    /// Animation tags, in the order they were added.
+    pub fn tags(&self) -> &[FrameTag] {
+        &self.tags
+    }
+
+    /// Add a tag. Returns its index. The name is trimmed and cut to the name
+    /// limit; a blank name or a range outside the frames is an error.
+    pub fn add_tag(&mut self, tag: FrameTag) -> Result<usize> {
+        if self.tags.len() >= MAX_TAGS {
+            return Err(Error::Limit {
+                what: "tags",
+                value: self.tags.len() as u64 + 1,
+                max: MAX_TAGS as u64,
+            });
+        }
+        self.tags.push(tags::checked(tag, self.frames.len())?);
+        Ok(self.tags.len() - 1)
+    }
+
+    /// Replace the tag at `index`, with the same checks as [`Self::add_tag`].
+    pub fn set_tag(&mut self, index: usize, tag: FrameTag) -> Result<()> {
+        let tag = tags::checked(tag, self.frames.len())?;
+        let slot = self
+            .tags
+            .get_mut(index)
+            .ok_or(Error::Index { what: "tag" })?;
+        *slot = tag;
+        Ok(())
+    }
+
+    pub fn remove_tag(&mut self, index: usize) -> Result<()> {
+        if index >= self.tags.len() {
+            return Err(Error::Index { what: "tag" });
+        }
+        self.tags.remove(index);
+        Ok(())
+    }
+
+    /// Replace every tag at once, as the file reader does. All are checked first.
+    pub(crate) fn set_tags(&mut self, list: Vec<FrameTag>) -> Result<()> {
+        if list.len() > MAX_TAGS {
+            return Err(Error::Limit {
+                what: "tags",
+                value: list.len() as u64,
+                max: MAX_TAGS as u64,
+            });
+        }
+        let checked = list
+            .into_iter()
+            .map(|tag| tags::checked(tag, self.frames.len()))
+            .collect::<Result<Vec<_>>>()?;
+        self.tags = checked;
+        Ok(())
     }
 
     pub fn set_active_frame(&mut self, index: usize) -> Result<()> {
@@ -316,6 +377,7 @@ impl Document {
             duration_ms: DEFAULT_FRAME_MS,
             cels,
         });
+        // Appended after every tag, so no tag changes.
         self.active_frame = self.frames.len() - 1;
         Ok(self.active_frame)
     }
@@ -332,6 +394,7 @@ impl Document {
         )?;
         let copy = self.frames[index].clone();
         self.frames.insert(index + 1, copy);
+        tags::frame_inserted(&mut self.tags, index + 1);
         self.active_frame = index + 1;
         Ok(self.active_frame)
     }
@@ -344,6 +407,7 @@ impl Document {
             return Err(Error::Index { what: "frame" });
         }
         self.frames.remove(index);
+        tags::frame_removed(&mut self.tags, index);
         if self.active_frame >= self.frames.len() {
             self.active_frame = self.frames.len() - 1;
         } else if self.active_frame > index {
@@ -533,6 +597,7 @@ impl Document {
             active_frame,
             active_layer,
             palette,
+            tags: Vec::new(),
         })
     }
 }

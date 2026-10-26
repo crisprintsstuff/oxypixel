@@ -12,7 +12,7 @@ Infrastructure, then small fixes that already have a place in the code.
 
 OX-002, OX-011, and OX-012 are done, so this list is empty.
 
-Suggested order if a human picks proposals: OX-P20, OX-P21, OX-P6, OX-P22, OX-P24, OX-P25, and OX-P23 are done. OX-P27 waits for a format decision.
+Suggested order if a human picks proposals: OX-P20, OX-P21, OX-P6, OX-P22, OX-P24, OX-P25, and OX-P23 are done. OX-P27 has its section layout; frame names and blend modes can each add a section.
 
 ## Scorecard
 
@@ -28,7 +28,8 @@ In the 0.8.5 tree and covered by tests or by the release workflow.
 | Layers | Add, delete, duplicate, reorder, rename, visibility, opacity, merge down. At most 32 | `document.rs` |
 | Frames | Add, duplicate, duration 20–10000 ms on the slider, playback clock, thumbnails, onion skin for earlier and later frames | `animation.rs`, `canvas.rs`, `framestrip.rs` |
 | Undo | Up to 50 steps and 256 MiB, including the selection rectangle. Slider drags coalesce | `history.rs` |
-| `.oxypix` | Version 1, little-endian, caps before allocation, trailing bytes rejected | `io/oxypix.rs`, `docs/FORMAT.md` |
+| `.oxypix` | Versions 1 and 2, little-endian, caps before allocation, trailing bytes rejected. Version 2 adds sections after the palette, written only when used; tags are the first | `io/oxypix.rs`, `docs/FORMAT.md` |
+| Tags | Named frame ranges with a direction and a repeat count, edited in the Tags window and marked on the frame strip, undoable, saved in `.oxypix` version 2, written to `meta.frameTags` by `export-sheet --json` and OxyPack | `tags.rs`, `document.rs`, `tagsview.rs`, `framestrip.rs` |
 | Raster | PNG, BMP, and GIF import and export. GIF import is one composited layer. Spritesheet in a row or a grid with padding and a JSON description, and 2×/4× nearest PNG | `io/raster.rs` |
 | References | PNG and JPEG overlays or a floating panel. Placement is a sidecar, not a `.oxypix` field. Export, merge, and the eyedropper skip them unless Sample is on | `reference.rs`, `refsview.rs` |
 | OxyPack | `oxypack` library and command, and File, then Pack sprites… in the editor: PNG, BMP, GIF, `.oxypix`, and `.aseprite` inputs or folders, a shelf- or MaxRects-packed atlas PNG and a JSON hash, padding, width limit, trim, dedupe, power-of-two sizes | `crates/oxypack/` |
@@ -256,7 +257,7 @@ Export spritesheet takes Columns (0 is one row, as before), Padding (clear pixel
 
 ### OX-P27
 
-**`.oxypix` version 2.** Frame names (P11) and blend modes (P18) both need a new version, because version 1 rejects trailing bytes. A later task could design version 2 once and fold those fields in, with room for later fields. It would also decide whether references stay a sidecar. Version 1 files must still open, and saving writes version 2 only when the document uses a version 2 field. This needs a human to accept the format change before work starts. Update [FORMAT.md](FORMAT.md) and the parse limits in the same change.
+**`.oxypix` version 2.** Status: in progress. Version 2 is version 1 plus a list of sections after the palette; a section marked required must be understood, an optional one may be skipped. Saving writes version 2 only when a section is used, so documents without one stay version 1 byte for byte. Tags (section `0x0001`) are the first section. Still open: frame names (P11) and blend modes (P18), which would be a new optional and a new required section, and whether references stay a sidecar. The layout is in [FORMAT.md](FORMAT.md) and tested in `io/oxypix.rs`.
 
 ### OX-P28
 
@@ -264,7 +265,7 @@ Export spritesheet takes Columns (0 is one row, as before), Padding (clear pixel
 
 Done: the `oxypack` library and command described in the scorecard, and the editor's File, then Pack sprites… window, which calls the same `pack_files` and `write_atlas`. Tested in `crates/oxypack/src/pack.rs`, `aseprite.rs`, `files.rs`, `main.rs`, `tests/cli.rs`, and `crates/oxypixel/src/packview.rs`. It stays in this repository and uses only the core's public API. Releases ship `oxypack-<version>-windows-x86_64.exe` (listed in `SHA256SUMS-windows.txt`, not in the updater's `SHA256SUMS.txt`), `oxypack` in the Linux tar.gz, and `/usr/bin/oxypack` in the `.deb`. The Windows installer puts `oxypack.exe` beside `oxypixel.exe` without changing `PATH`. A tester ran the 0.7.5 `oxypack` command on Linux. With 0.8.0, `.aseprite` files from Aseprite 1.13.18.6 packed to the same frames as Aseprite's own export.
 
-Still open, each needing a decision: true group blending and blend modes other than Normal for `.aseprite` files, tilemap layers, and tags for `.oxypix` files, which have no place to store them until `.oxypix` version 2 (OX-P27).
+Still open, each needing a decision: true group blending and blend modes other than Normal for `.aseprite` files, and tilemap layers. Tags for `.oxypix` files are done: they are stored in version 2 and OxyPack writes them.
 
 ## Human only
 

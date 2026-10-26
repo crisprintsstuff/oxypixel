@@ -23,7 +23,11 @@ pub const DEFAULT_FRAME_MS: u32 = 100;
 pub const MAX_BRUSH: u32 = 16;
 pub const MAX_UNDO: usize = 50;
 pub const MAX_UNDO_BYTES: usize = 256 * 1024 * 1024;
-pub const FORMAT_VERSION: u16 = 1;
+/// The newest `.oxypix` version this build reads and writes. A document with
+/// no version 2 field (no tags) is still written as version 1.
+pub const FORMAT_VERSION: u16 = 2;
+/// Most animation tags in one document.
+pub const MAX_TAGS: usize = 256;
 pub const MAGIC: &[u8; 8] = b"OXYPIX1\0";
 /// Widest, and tallest, spritesheet written by export.
 pub const MAX_SHEET_WIDTH: u32 = 16_384;

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Animation tags. Tags… under the frame strip names ranges of frames, with a direction (forward, reverse, ping-pong, or ping-pong reverse) and a repeat count; tagged frames get a mark on the strip. Each change is one undo step, and duplicating or deleting frames moves the tags with them. `export-sheet --json` and OxyPack write them to `meta.frameTags`.
+
+### Changed
+
+- A document with tags is saved as `.oxypix` version 2: version 1 plus sections after the palette, described in `docs/FORMAT.md`. OxyPixel 0.8.5 and earlier cannot open it. A document without tags is still saved as version 1, unchanged.
+
 ### Fixed
 
 - The Linux editor in the 0.7.5, 0.8.0, and 0.8.5 releases needed glibc 2.43, so it did not start on Ubuntu 24.04, Debian 12, and other current systems, and the `.deb` would not install there. The Linux release is built on Ubuntu 24.04 again (it had moved with GitHub's `ubuntu-latest`), and packaging now fails if a binary needs a glibc newer than 2.39. `oxypack` was not affected.

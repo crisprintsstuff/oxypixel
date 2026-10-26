@@ -44,38 +44,11 @@ const LAYER_VISIBLE: u16 = 1;
 const LAYER_BACKGROUND: u16 = 8;
 const LAYER_REFERENCE: u16 = 64;
 
-/// How a tag plays its frames, as Aseprite names it in JSON.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Direction {
-    Forward,
-    Reverse,
-    PingPong,
-    PingPongReverse,
-}
-
-impl Direction {
-    /// The word Aseprite writes in `frameTags`.
-    pub fn json_name(self) -> &'static str {
-        match self {
-            Self::Forward => "forward",
-            Self::Reverse => "reverse",
-            Self::PingPong => "pingpong",
-            Self::PingPongReverse => "pingpong_reverse",
-        }
-    }
-}
-
-/// A named frame range.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Tag {
-    pub name: String,
-    /// First and last frame, both included, counted from 0 in this file.
-    pub from: u32,
-    pub to: u32,
-    pub direction: Direction,
-    /// How many times the range plays. 0 is forever.
-    pub repeat: u16,
-}
+/// A named frame range, counted from 0 in this file. The same type the
+/// editor stores in `.oxypix` version 2.
+pub use oxypixel_core::FrameTag as Tag;
+/// How a tag plays its frames.
+pub use oxypixel_core::LoopDirection as Direction;
 
 /// A decoded file: one composited image per frame.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -462,18 +435,14 @@ pub fn read_aseprite(bytes: &[u8]) -> Result<AseFile> {
                     let count = c.u16()?;
                     c.skip(8)?;
                     for _ in 0..count {
-                        let from = u32::from(c.u16()?);
-                        let to = u32::from(c.u16()?);
-                        let direction = match c.u8()? {
-                            1 => Direction::Reverse,
-                            2 => Direction::PingPong,
-                            3 => Direction::PingPongReverse,
-                            _ => Direction::Forward,
-                        };
+                        let from = usize::from(c.u16()?);
+                        let to = usize::from(c.u16()?);
+                        // Unknown directions play forward, as Aseprite does.
+                        let direction = Direction::from_code(c.u8()?).unwrap_or_default();
                         let repeat = c.u16()?;
                         c.skip(6 + 3 + 1)?;
                         let name = c.string()?;
-                        if from > to || to as usize >= frame_count {
+                        if from > to || to >= frame_count {
                             return Err(bad(format!("tag {name} has frames outside the file")));
                         }
                         tags.push(Tag {

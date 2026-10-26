@@ -1,4 +1,4 @@
-//! Frame strip thumbnails. Names are not stored: a version 1 file has no frame-name field.
+//! Frame strip thumbnails, with a mark under each frame that a tag covers.
 
 use eframe::egui::{
     self, Color32, Pos2, Rect, Sense, Stroke, StrokeKind, TextureHandle, TextureOptions, Vec2,
@@ -7,7 +7,7 @@ use oxypixel_core::Editor;
 
 use crate::cache::FrameComposites;
 use crate::canvas::{self, fitted_rgba};
-use crate::theme::AMBER;
+use crate::theme::{AMBER, TEAL};
 
 /// Slider bounds. The same 20–10000 ms range the file format stores.
 pub(crate) fn duration_limits() -> (u32, u32) {
@@ -113,6 +113,16 @@ pub fn show(
                 Color32::WHITE,
             );
         }
+        let tags = editor.document().tags();
+        if let Some(first) = tags.iter().position(|tag| tag.contains(index)) {
+            // Alternate colors so neighboring tags stay apart.
+            let color = if first % 2 == 0 { TEAL } else { AMBER };
+            let bar = Rect::from_min_max(
+                Pos2::new(rect.min.x + 4.0, rect.min.y + 39.0),
+                Pos2::new(rect.max.x - 4.0, rect.min.y + 41.0),
+            );
+            painter.rect_filled(bar, 1.0, color);
+        }
         let label_color = if selected {
             AMBER
         } else {
@@ -135,9 +145,12 @@ pub fn show(
             .document()
             .frame_duration(index)
             .unwrap_or(oxypixel_core::DEFAULT_FRAME_MS);
+        let tagged = crate::tagsview::names_at(tags, index)
+            .map(|names| format!(" · {names}"))
+            .unwrap_or_default();
         response
             .clone()
-            .on_hover_text(format!("Frame {} · {ms} ms", index + 1));
+            .on_hover_text(format!("Frame {} · {ms} ms{tagged}", index + 1));
         if response.clicked() {
             clicked = Some(index);
         }

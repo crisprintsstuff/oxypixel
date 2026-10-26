@@ -10,8 +10,10 @@ use std::io::Cursor;
 
 use image::codecs::png::PngEncoder;
 use image::{ExtendedColorType, ImageEncoder};
+pub use oxypixel_core::FrameTag;
 use oxypixel_core::{
-    Document, Rgba, DEFAULT_FRAME_MS, MAX_SHEET_PADDING, MAX_SHEET_PIXELS, MAX_SHEET_WIDTH,
+    frame_tags_json, Document, Rgba, DEFAULT_FRAME_MS, MAX_SHEET_PADDING, MAX_SHEET_PIXELS,
+    MAX_SHEET_WIDTH,
 };
 
 /// Why a pack failed.
@@ -136,29 +138,15 @@ impl Placement {
     }
 }
 
-/// An animation tag over a range of sprites, for `meta.frameTags`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FrameTag {
-    pub name: String,
-    /// First and last sprite, both included, as indexes into the packed
-    /// sprites (the order of `frames` in the JSON).
-    pub from: usize,
-    pub to: usize,
-    pub direction: crate::aseprite::Direction,
-    /// How many times the range plays. 0 is forever and is not written.
-    pub repeat: u16,
-}
-
 /// The tags of one file's sprites, moved to where those sprites start in the
-/// whole list.
-pub fn frame_tags(tags: &[crate::aseprite::Tag], first_sprite: usize) -> Vec<FrameTag> {
+/// whole list, so `from` and `to` index the packed sprites (the order of
+/// `frames` in the JSON).
+pub fn frame_tags(tags: &[FrameTag], first_sprite: usize) -> Vec<FrameTag> {
     tags.iter()
         .map(|tag| FrameTag {
-            name: tag.name.clone(),
-            from: first_sprite + tag.from as usize,
-            to: first_sprite + tag.to as usize,
-            direction: tag.direction,
-            repeat: tag.repeat,
+            from: first_sprite + tag.from,
+            to: first_sprite + tag.to,
+            ..tag.clone()
         })
         .collect()
 }
@@ -598,30 +586,13 @@ pub fn atlas_json(atlas: &Atlas, image: &str, tags: &[FrameTag]) -> String {
             "\n"
         });
     }
-    let tag_list: Vec<String> = tags
-        .iter()
-        .map(|tag| {
-            let repeat = if tag.repeat == 0 {
-                String::new()
-            } else {
-                format!(", \"repeat\": \"{}\"", tag.repeat)
-            };
-            format!(
-                "{{\"name\": {}, \"from\": {}, \"to\": {}, \"direction\": \"{}\"{repeat}}}",
-                json_string(&tag.name),
-                tag.from,
-                tag.to,
-                tag.direction.json_name(),
-            )
-        })
-        .collect();
     out.push_str(&format!(
         "  }},\n  \"meta\": {{\"app\": \"OxyPack\", \"version\": \"{}\", \"image\": {}, \"format\": \"RGBA8888\", \"size\": {{\"w\": {}, \"h\": {}}}, \"scale\": \"1\", \"frameTags\": [{}]}}\n}}\n",
         env!("CARGO_PKG_VERSION"),
         json_string(image),
         atlas.width,
         atlas.height,
-        tag_list.join(", "),
+        frame_tags_json(tags),
     ));
     out
 }
@@ -887,18 +858,18 @@ mod tests {
         assert!(text.contains("\"frameTags\": []"));
         let tags = frame_tags(
             &[
-                crate::aseprite::Tag {
+                FrameTag {
                     name: "run \"fast\"".into(),
                     from: 0,
                     to: 1,
-                    direction: crate::aseprite::Direction::PingPong,
+                    direction: oxypixel_core::LoopDirection::PingPong,
                     repeat: 2,
                 },
-                crate::aseprite::Tag {
+                FrameTag {
                     name: "idle".into(),
                     from: 1,
                     to: 1,
-                    direction: crate::aseprite::Direction::Reverse,
+                    direction: oxypixel_core::LoopDirection::Reverse,
                     repeat: 0,
                 },
             ],
