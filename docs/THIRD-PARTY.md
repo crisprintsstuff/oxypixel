@@ -5,6 +5,7 @@ OxyPixel is MIT licensed. The crates below are direct dependencies. Their own tr
 | Crate | Use | License |
 | --- | --- | --- |
 | eframe / egui / epaint | Window, widgets, painting | MIT OR Apache-2.0 |
+| wgpu (Windows only, for its Direct3D 12 backend) | Drawing the window. eframe already uses it; the direct dependency only turns on `dx12` | MIT OR Apache-2.0 |
 | image, png, gif | PNG, JPEG, BMP, and GIF. JPEG is the `image` crate's jpeg feature, used for reference images | MIT OR Apache-2.0 |
 | thiserror | Error messages | MIT OR Apache-2.0 |
 | rfd (Windows only) | Open and save dialogs | MIT |

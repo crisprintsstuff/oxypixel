@@ -55,7 +55,7 @@ The Windows files are unsigned. SmartScreen can warn that the publisher is unkno
 4. The Start menu gets a shortcut, and `.oxypix` files open in OxyPixel. A desktop shortcut is optional.
 5. Launch OxyPixel from the Start menu, or from the last page of setup.
 
-The program needs OpenGL (`opengl32.dll`, which ships with Windows). The release executable links the C runtime statically, so the Visual C++ redistributable is not required.
+The window draws with Direct3D 12 through wgpu, which every supported Windows has; without a GPU it uses Windows' software renderer (WARP). If that fails, it falls back to OpenGL 2.0 or newer. The release executable links the C runtime statically, so the Visual C++ redistributable is not required.
 
 ## Portable Windows build
 
@@ -86,7 +86,7 @@ sudo apt remove oxypixel
 
 On Ubuntu 24.04, `apt install` and `apt remove` were checked for a package built from this tree. Releases before the `.deb` was added published the tar.gz only.
 
-The window needs an X11 display and these libraries: `libGL.so.1`, `libX11.so.6`, `libxkbcommon.so.0`, and `libxkbcommon-x11.so.0`. Wayland copy and paste also loads `libwayland-client.so.0` when the compositor offers the data-control clipboard. The `.deb` depends on the packages that provide them (`libgl1`, `libx11-6`, `libxkbcommon0`, `libxkbcommon-x11-0`, `libxcb1`). Export commands do not need a display:
+The window needs an X11 display. It draws with Vulkan through wgpu when a Vulkan driver is installed (`libvulkan1` and, for example, `mesa-vulkan-drivers`), and otherwise falls back to OpenGL. It needs these libraries: `libGL.so.1`, `libX11.so.6`, `libxkbcommon.so.0`, and `libxkbcommon-x11.so.0`. Wayland copy and paste also loads `libwayland-client.so.0` when the compositor offers the data-control clipboard. The `.deb` depends on the packages that provide them (`libgl1`, `libx11-6`, `libxkbcommon0`, `libxkbcommon-x11-0`, `libxcb1`). Export commands do not need a display:
 
 ```bash
 oxypixel export-png drawing.oxypix frame.png

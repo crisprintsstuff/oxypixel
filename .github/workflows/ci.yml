@@ -129,3 +129,52 @@ jobs:
         run: cargo test --workspace --all-targets
       - name: Release build
         run: cargo build --workspace --release
+      # Start the release exe, wait for its window, close it, and expect a
+      # clean exit. Nothing here can click a message box, so
+      # OXYPIXEL_NO_DIALOG keeps a startup failure on stderr instead of
+      # waiting out the job. APPDATA points at a temp folder so recent files
+      # and recovery copies stay off the runner profile.
+      - name: Launch check
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        timeout-minutes: 2
+        env:
+          OXYPIXEL_NO_DIALOG: "1"
+        run: |
+          $data = Join-Path $env:RUNNER_TEMP "oxypixel-launch"
+          New-Item -ItemType Directory -Force -Path $data | Out-Null
+          $env:APPDATA = $data
+          $err = Join-Path $data "stderr.txt"
+          $p = Start-Process -FilePath "target\release\oxypixel.exe" -PassThru -RedirectStandardError $err
+          # Keep the handle so ExitCode is readable after the process ends.
+          $null = $p.Handle
+          $title = ""
+          $deadline = (Get-Date).AddSeconds(45)
+          while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds 500
+            $p.Refresh()
+            if ($p.HasExited) { break }
+            $title = $p.MainWindowTitle
+            if ($title -like "OxyPixel - *") { break }
+          }
+          if ($p.HasExited) {
+            Write-Host "OxyPixel exited during startup with code $($p.ExitCode)."
+            Get-Content $err -ErrorAction SilentlyContinue
+            exit 1
+          }
+          if ($title -notlike "OxyPixel - *") {
+            Write-Host "No OxyPixel window after 45 seconds (title: '$title')."
+            Stop-Process -Id $p.Id -Force
+            Get-Content $err -ErrorAction SilentlyContinue
+            exit 1
+          }
+          Write-Host "Window up: $title"
+          $null = $p.CloseMainWindow()
+          if (-not $p.WaitForExit(15000)) {
+            Write-Host "OxyPixel did not exit within 15 seconds of closing. A dialog may be open."
+            Stop-Process -Id $p.Id -Force
+            exit 1
+          }
+          Write-Host "Exited with code $($p.ExitCode)."
+          Get-Content $err -ErrorAction SilentlyContinue
+          if ($p.ExitCode -ne 0) { exit 1 }

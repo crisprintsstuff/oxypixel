@@ -12,6 +12,8 @@ The release job already builds the binary in `scripts/package-linux.sh`. `cargo 
 
 ## Runtime dependencies
 
+The window tries wgpu first, which uses Vulkan when `libvulkan.so.1` and a Vulkan driver are installed. The `.deb` recommends `libvulkan1` and `mesa-vulkan-drivers` for that. Without them, wgpu fails to start and the window falls back to OpenGL, so the required list below stays the OpenGL one.
+
 The window needs:
 
 - `libgl1` (`libGL.so.1`)

@@ -17,7 +17,7 @@ name = "oxypixel"
 path = "src/main.rs"
 
 [dependencies]
-eframe = { version = "0.31.1", default-features = false, features = ["default_fonts", "glow"] }
+eframe = { version = "0.31.1", default-features = false, features = ["default_fonts", "glow", "wgpu"] }
 flate2 = "1"
 image = { workspace = true }
 oxypixel-core = { path = "../oxypixel-core" }
@@ -28,11 +28,14 @@ ureq = { version = "2.12.1", default-features = false, features = ["tls"] }
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 arboard = { version = "3.6.1", default-features = false, features = ["image-data", "wayland-data-control"] }
-eframe = { version = "0.31.1", default-features = false, features = ["default_fonts", "glow", "x11"] }
+eframe = { version = "0.31.1", default-features = false, features = ["default_fonts", "glow", "wgpu", "x11"] }
 rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "async-std"] }
 
 [target.'cfg(windows)'.dependencies]
 arboard = { version = "3.6.1", default-features = false, features = ["image-data"] }
+# eframe's wgpu leaves out Direct3D 12. It is the backend every Windows machine
+# has, and its WARP adapter draws without a GPU, which is how CI starts the app.
+wgpu = { version = "24.0.5", default-features = false, features = ["dx12"] }
 rfd = { version = "0.15", default-features = false }
 
 [dev-dependencies]
@@ -52,6 +55,8 @@ copyright = "2026 OxyPixel contributors"
 section = "graphics"
 priority = "optional"
 depends = "$auto, libgl1, libx11-6, libxkbcommon0, libxcb1, libxkbcommon-x11-0"
+# wgpu draws with Vulkan when these are present. Without them it falls back to libGL.
+recommends = "libvulkan1, mesa-vulkan-drivers"
 extended-description = "Draw on a pixel canvas, stack layers, animate frames, and import or export PNG, BMP, GIF, and palette files."
 assets = [
     ["target/release/oxypixel", "usr/bin/", "755"],
