@@ -163,7 +163,7 @@ The full list is [docs/SHORTCUTS.md](docs/SHORTCUTS.md).
 oxypack sprites/ hero.oxypix --trim --dedupe -o atlas.png
 ```
 
-Inputs are `.png`, `.bmp`, `.gif`, and `.oxypix` files or folders of them. `--padding N` (default 1) leaves clear pixels between sprites, `--max-width N` (default 2048) caps the width, `--trim` crops each sprite to its ink and records the offset, `--dedupe` stores repeated frames once, `--pot` rounds the size up to powers of two, and `--no-json` writes only the PNG. It never opens a window, so it fits build scripts and CI. Windows has a standalone `oxypack-<version>-windows-x86_64.exe` download; the Linux archive has `./oxypack` beside `./oxypixel`, and the `.deb` installs `/usr/bin/oxypack`. From source: `cargo build --release -p oxypack`.
+Inputs are `.png`, `.bmp`, `.gif`, and `.oxypix` files or folders of them. `--padding N` (default 1) leaves clear pixels between sprites, `--max-width N` (default 2048) caps the width, `--trim` crops each sprite to its ink and records the offset, `--dedupe` stores repeated frames once, `--pot` rounds the size up to powers of two, `--packer maxrects` fills the gaps rows leave for a shorter atlas, and `--no-json` writes only the PNG. It never opens a window, so it fits build scripts and CI. Windows has a standalone `oxypack-<version>-windows-x86_64.exe` download; the Linux archive has `./oxypack` beside `./oxypixel`, and the `.deb` installs `/usr/bin/oxypack`. From source: `cargo build --release -p oxypack`.
 
 ## Build from source
 

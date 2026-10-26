@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- OxyPack can pack with MaxRects (`--packer maxrects`), which fills the gaps between rows and usually gives a shorter atlas. The row packer stays the default, so existing atlases do not move.
+
 ## [0.7.5] - 2026-10-26
 
 ### Added

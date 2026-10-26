@@ -13,7 +13,7 @@ mod pack;
 
 use pack::{
     atlas_json, atlas_png_bytes, pack_sprites, sprites_from_document, unique_names, PackOptions,
-    Sprite,
+    Packer, Sprite,
 };
 
 const HELP: &str = concat!(
@@ -35,6 +35,8 @@ Options:
   --trim                Crop each sprite to its non-clear pixels
   --dedupe              Store sprites with the same pixels once
   --pot                 Round the atlas size up to powers of two
+  --packer <name>       shelf (default) or maxrects, which fills the gaps
+                        rows leave and usually gives a shorter atlas
   --no-json             Write only the PNG
   -h, --help            Show this help
   -V, --version         Show the version
@@ -80,6 +82,13 @@ fn parse(args: &[String]) -> Result<Parsed, String> {
             "--trim" => options.trim = true,
             "--dedupe" => options.dedupe = true,
             "--pot" => options.power_of_two = true,
+            "--packer" => {
+                options.packer = match rest.next().map(String::as_str) {
+                    Some("shelf") => Packer::Shelf,
+                    Some("maxrects") => Packer::MaxRects,
+                    _ => return Err("--packer takes shelf or maxrects".into()),
+                }
+            }
             "--no-json" => json = false,
             flag if flag.starts_with('-') && flag.len() > 1 => {
                 return Err(format!("unknown option {flag}"))
@@ -236,6 +245,8 @@ mod tests {
             "--max-width",
             "512",
             "--no-json",
+            "--packer",
+            "maxrects",
         ])) else {
             panic!("expected a run");
         };
@@ -247,6 +258,7 @@ mod tests {
         assert_eq!(
             args.options,
             PackOptions {
+                packer: Packer::MaxRects,
                 padding: 0,
                 trim: true,
                 dedupe: true,
@@ -265,6 +277,15 @@ mod tests {
         assert!(parse(&strings(&["a.png", "-o", "x.png", "--padding", "lots"])).is_err());
         assert!(parse(&strings(&["a.png", "-o", "x.png", "--max-width", "0"])).is_err());
         assert!(parse(&strings(&["a.png", "-o", "x.png", "--rotate"])).is_err());
+        assert!(parse(&strings(&[
+            "a.png",
+            "-o",
+            "x.png",
+            "--packer",
+            "guillotine"
+        ]))
+        .is_err());
+        assert!(parse(&strings(&["a.png", "-o", "x.png", "--packer"])).is_err());
         assert!(matches!(parse(&strings(&["--help"])), Ok(Parsed::Help)));
         assert!(matches!(parse(&strings(&["-V"])), Ok(Parsed::Version)));
     }

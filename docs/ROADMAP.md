@@ -31,7 +31,7 @@ In the 0.7.5 tree and covered by tests or by the release workflow.
 | `.oxypix` | Version 1, little-endian, caps before allocation, trailing bytes rejected | `io/oxypix.rs`, `docs/FORMAT.md` |
 | Raster | PNG, BMP, and GIF import and export. GIF import is one composited layer. Spritesheet in a row or a grid with padding and a JSON description, and 2×/4× nearest PNG | `io/raster.rs` |
 | References | PNG and JPEG overlays or a floating panel. Placement is a sidecar, not a `.oxypix` field. Export, merge, and the eyedropper skip them unless Sample is on | `reference.rs`, `refsview.rs` |
-| OxyPack | Separate `oxypack` binary: PNG, BMP, GIF, and `.oxypix` inputs or folders, a shelf-packed atlas PNG and a JSON hash, padding, width limit, trim, dedupe, power-of-two sizes | `crates/oxypack/` |
+| OxyPack | Separate `oxypack` binary: PNG, BMP, GIF, and `.oxypix` inputs or folders, a shelf- or MaxRects-packed atlas PNG and a JSON hash, padding, width limit, trim, dedupe, power-of-two sizes | `crates/oxypack/` |
 | CLI | `export-png`, `export-bmp`, `export-gif`, `export-sheet` (with `--columns`, `--padding`, `--scale`, `--json`), `export-palette`, and `import-palette`. Failures print and exit. Missing file must not hang | `cli.rs`, `tests/cli.rs` |
 | Palette files | GIMP `.gpl`, hex `.hex` (one `RRGGBB` per line, `RRGGBBAA` when alpha is not 255), and JASC `.pal`. Import replaces the palette and is one undo step. Swatches drag to a new index. A ramp of N steps can fill the span between two swatches. Snap (S) makes pencil, fill, and shapes use the nearest palette color. More than 256 colors is an error | `io/palette.rs`, `editor.rs`, `color.rs`, `app.rs` |
 | Window | egui 0.31 on wgpu (Direct3D 12 with WARP on Windows, Vulkan on Linux), falling back to glow OpenGL, nearest-neighbor canvas, whole-pixel zoom, a grid when the cells are readable, pan, shortcuts, tool icons with their shortcut letter, a preview panel beside the canvas | `app.rs`, `canvas.rs`, `preview.rs` |
@@ -267,7 +267,6 @@ Done: the `oxypack` command-line tool described in the scorecard, tested in `cra
 - **`.aseprite` import.** Read Aseprite files from the format's public specification (clean-room, no Aseprite code), so frames, tags, and layers pack directly. This is a new input format with its own parse limits, and it needs the same review as a `.oxypix` change.
 - **Animation tags.** Write `frameTags` in `meta` from tags in `.aseprite` files, or from a sidecar for `.oxypix`.
 - **A window.** A small egui front end to pick inputs, preview the atlas, and save. It could share widgets with the editor.
-- **MaxRects packing.** A tighter packer than the shelf, behind an option, so existing atlases do not move.
 
 ## Human only
 
