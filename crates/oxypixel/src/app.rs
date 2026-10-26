@@ -28,6 +28,7 @@ use crate::toolicons;
 use crate::update::{self, PackageKind, Relation, UpdateReport};
 
 const PRESETS: &[u32] = &[16, 32, 64, 128, 256, 512];
+const AUTO_UPDATE_HINT: &str = "When on, OxyPixel checks GitHub once a day at launch. A newer release is downloaded and checked against its SHA256SUMS.txt in the background, then the menu bar offers it. Nothing is installed until you choose to.";
 
 enum Note {
     Info(String),
@@ -121,6 +122,10 @@ pub struct OxyApp {
     update_report: Option<UpdateReport>,
     update_file: Option<PathBuf>,
     update_rx: Option<Receiver<UpdateMessage>>,
+    /// The running check started by itself at launch, not from the menu. It
+    /// downloads a newer release without opening the window.
+    update_auto: bool,
+    prefs: session::Prefs,
     /// The last copy did not reach the system clipboard, so paste must keep
     /// the in-memory patch even if an older system image is still readable.
     clipboard_local_only: bool,
@@ -166,11 +171,12 @@ impl OxyApp {
             .map(|dir| recovery::autosave_enabled(&dir))
             .unwrap_or(true);
         let recovery = recovery::RecoveryWriter::spawn().ok();
+        let prefs = session::load();
         let mut app = Self {
             editor,
             view: ViewState::default(),
             composites: FrameComposites::default(),
-            preview_panel: PreviewPanel::new(session::load_preview_open()),
+            preview_panel: PreviewPanel::new(prefs.preview_open),
             pack_window: crate::packview::PackWindow::default(),
             tags_window: crate::tagsview::TagsWindow::default(),
             thumbs: ThumbCache::default(),
@@ -209,6 +215,8 @@ impl OxyApp {
             update_report: None,
             update_file: None,
             update_rx: None,
+            update_auto: false,
+            prefs,
             clipboard_local_only: false,
             clipboard_chord: shortcuts::ClipboardChord::default(),
             autosave_enabled,
@@ -231,6 +239,12 @@ impl OxyApp {
             app.open_path(path);
         }
         app.scan_recoveries();
+        let now = session::now_secs();
+        if session::update_check_due(&app.prefs, now) {
+            app.prefs.last_update_check = now;
+            session::save(&app.prefs);
+            app.start_auto_update_check();
+        }
         app
     }
 
@@ -1408,14 +1422,26 @@ impl OxyApp {
                         .clicked()
                     {
                         self.preview_panel.open = !self.preview_panel.open;
-                        session::save_preview_open(self.preview_panel.open);
+                        self.prefs.preview_open = self.preview_panel.open;
+                        session::save(&self.prefs);
                         ui.close_menu();
                     }
                 });
                 ui.menu_button("Help", |ui| {
                     if ui.button("Check for updates").clicked() {
-                        self.start_update_check();
+                        if self.update_ready().is_some() {
+                            self.dialog = Some(DialogKind::Update);
+                        } else {
+                            self.start_update_check();
+                        }
                         ui.close_menu();
+                    }
+                    if ui
+                        .checkbox(&mut self.prefs.auto_update, "Automatic updates")
+                        .on_hover_text(AUTO_UPDATE_HINT)
+                        .changed()
+                    {
+                        session::save(&self.prefs);
                     }
                     if ui.button("Shortcuts").clicked() {
                         self.dialog = Some(DialogKind::Shortcuts);
@@ -1426,6 +1452,17 @@ impl OxyApp {
                         ui.close_menu();
                     }
                 });
+                if self.dialog != Some(DialogKind::Update) {
+                    if let Some(label) = self.update_ready() {
+                        if ui
+                            .button(RichText::new(label).color(AMBER))
+                            .on_hover_text("Open the update window")
+                            .clicked()
+                        {
+                            self.dialog = Some(DialogKind::Update);
+                        }
+                    }
+                }
             });
             let banner = self.note.as_ref().map(|note| match note {
                 Note::Info(text) => (text.clone(), AMBER),
@@ -2231,8 +2268,29 @@ impl OxyApp {
         Some((x, y, color))
     }
 
+    /// The menu bar's label for a newer release found by a check, once any
+    /// download has finished.
+    fn update_ready(&self) -> Option<String> {
+        if self.update_rx.is_some() {
+            return None;
+        }
+        update::ready_label(self.update_report.as_ref()?, self.update_file.is_some())
+    }
+
     fn start_update_check(&mut self) {
         self.dialog = Some(DialogKind::Update);
+        self.update_auto = false;
+        self.begin_update_check();
+    }
+
+    /// The launch check: no window opens, and a newer release is downloaded
+    /// and verified in the background.
+    fn start_auto_update_check(&mut self) {
+        self.update_auto = true;
+        self.begin_update_check();
+    }
+
+    fn begin_update_check(&mut self) {
         self.update_status = Some(UpdateStatus::Checking);
         self.update_report = None;
         self.update_file = None;
@@ -2274,10 +2332,19 @@ impl OxyApp {
                 self.update_rx = None;
                 match result {
                     Ok(report) => {
+                        let fetch = self.update_auto && update::should_auto_download(&report);
                         self.update_report = Some(report);
                         self.update_status = None;
+                        if fetch {
+                            self.start_update_download();
+                        }
                     }
-                    Err(err) => self.update_status = Some(UpdateStatus::Failed(err)),
+                    Err(err) => {
+                        if self.update_auto {
+                            eprintln!("oxypixel: automatic update check failed: {err}");
+                        }
+                        self.update_status = Some(UpdateStatus::Failed(err));
+                    }
                 }
             }
             Ok(UpdateMessage::Downloaded(result)) => {
@@ -2648,13 +2715,16 @@ impl OxyApp {
         let mut close = false;
         let mut download = false;
         let mut install = false;
+        let mut auto_update = self.prefs.auto_update;
         egui::Window::new("Check for updates")
             .collapsible(false)
             .resizable(true)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
-                ui.label("This looks at the public OxyPixel releases on GitHub. It runs only when you open this window.");
+                ui.label("This looks at the public OxyPixel releases on GitHub.");
+                ui.checkbox(&mut auto_update, "Automatic updates");
+                ui.label(RichText::new(AUTO_UPDATE_HINT).small());
                 ui.add_space(6.0);
                 match &self.update_status {
                     Some(UpdateStatus::Checking) => {
@@ -2720,6 +2790,10 @@ impl OxyApp {
                     close = true;
                 }
             });
+        if auto_update != self.prefs.auto_update {
+            self.prefs.auto_update = auto_update;
+            session::save(&self.prefs);
+        }
         if download {
             self.start_update_download();
         }
@@ -2742,7 +2816,7 @@ impl OxyApp {
                 ui.label(format!("OxyPixel {}", env!("CARGO_PKG_VERSION")));
                 ui.label("An original pixel-art editor.");
                 ui.label("MIT License. Drawings stay on this computer.");
-                ui.label("GitHub is contacted only when you choose Check for updates.");
+                ui.label("GitHub is contacted only when you choose Check for updates, or once a day at launch if Automatic updates is on.");
                 if ui.button("Close").clicked() {
                     close = true;
                 }

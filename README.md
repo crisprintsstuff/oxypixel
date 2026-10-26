@@ -65,7 +65,7 @@ The window draws with Direct3D 12 through wgpu, which every supported Windows ha
 
 The tagged Windows build embeds the application icon and a version resource when `rc.exe` is on `PATH`. The release workflow adds that compiler from the Windows SDK. A cross-build made without `rc.exe`, `llvm-rc`, or `windres` on `PATH` does not embed those resources, and File Explorer then shows a generic icon for the exe. The installer shortcut and the `.oxypix` association use `oxypixel.ico` either way. See [docs/BUILD-WINDOWS.md](docs/BUILD-WINDOWS.md).
 
-Help, then Check for updates, can download a newer release and restart into it after the checksum matches.
+Help, then Check for updates, can download a newer release and restart into it after the checksum matches. Turn on Automatic updates (in the Help menu or that window) to check once a day at launch: a newer release is downloaded and verified in the background, and an "Update … ready" button appears in the menu bar. Nothing is installed until you click it.
 
 ## Linux
 
@@ -232,7 +232,7 @@ People and coding agents working in the tree should read [AGENTS.md](AGENTS.md) 
 
 ## Security
 
-OxyPixel does not open a network connection on its own. Help, then Check for updates, is the one request to GitHub, and it downloads a file only after `SHA256SUMS.txt` matches. Document parsing rejects oversized files before it allocates the pixel buffers. Report a problem the way [SECURITY.md](SECURITY.md) describes.
+OxyPixel does not open a network connection on its own unless you turn on Automatic updates, which is off by default. Help, then Check for updates, and that once-a-day launch check are the only requests, both to GitHub, and an update is kept only after `SHA256SUMS.txt` matches. Document parsing rejects oversized files before it allocates the pixel buffers. Report a problem the way [SECURITY.md](SECURITY.md) describes.
 
 ## License
 
