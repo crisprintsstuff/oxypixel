@@ -147,6 +147,91 @@ fn engine_files_and_per_tag_exports() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A 2×1 Aseprite file with one visible layer and one red pixel at (1, 0),
+/// written from the published format.
+fn tiny_aseprite() -> Vec<u8> {
+    let chunk = |kind: u16, data: Vec<u8>| {
+        let mut out = (data.len() as u32 + 6).to_le_bytes().to_vec();
+        out.extend(kind.to_le_bytes());
+        out.extend(data);
+        out
+    };
+    let mut layer = Vec::new();
+    for v in [1u16, 0, 0, 0, 0, 0] {
+        layer.extend(v.to_le_bytes()); // visible, image, level 0, Normal
+    }
+    layer.extend([255, 0, 0, 0]);
+    layer.extend(3u16.to_le_bytes());
+    layer.extend(b"ink");
+    let mut cel = Vec::new();
+    cel.extend(0u16.to_le_bytes()); // layer
+    cel.extend(1i16.to_le_bytes()); // x
+    cel.extend(0i16.to_le_bytes()); // y
+    cel.push(255);
+    cel.extend(0u16.to_le_bytes()); // raw
+    cel.extend([0; 7]);
+    cel.extend(1u16.to_le_bytes());
+    cel.extend(1u16.to_le_bytes());
+    cel.extend([255, 0, 0, 255]);
+    let mut chunks = chunk(0x2004, layer);
+    chunks.extend(chunk(0x2005, cel));
+    let mut frame = (chunks.len() as u32 + 16).to_le_bytes().to_vec();
+    frame.extend(0xF1FAu16.to_le_bytes());
+    frame.extend(2u16.to_le_bytes());
+    frame.extend(100u16.to_le_bytes());
+    frame.extend([0; 2]);
+    frame.extend(2u32.to_le_bytes());
+    frame.extend(chunks);
+    let mut out = (frame.len() as u32 + 128).to_le_bytes().to_vec();
+    out.extend(0xA5E0u16.to_le_bytes());
+    for v in [1u16, 2, 1, 32] {
+        out.extend(v.to_le_bytes()); // frames, width, height, depth
+    }
+    out.extend(1u32.to_le_bytes()); // layer opacity is valid
+    out.resize(128, 0);
+    out.extend(frame);
+    out
+}
+
+#[test]
+fn exports_read_aseprite_files() {
+    let dir = std::env::temp_dir().join(format!("oxypixel-cli-ase-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let src = dir.join("dot.aseprite");
+    std::fs::write(&src, tiny_aseprite()).unwrap();
+    let png = dir.join("dot.png");
+    let output = bin()
+        .args(["export-png", src.to_str().unwrap(), png.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let image = image::ImageReader::open(&png)
+        .unwrap()
+        .decode()
+        .unwrap()
+        .to_rgba8();
+    assert_eq!(image.dimensions(), (2, 1));
+    assert_eq!(image.get_pixel(1, 0).0, [255, 0, 0, 255]);
+    assert_eq!(image.get_pixel(0, 0).0[3], 0);
+    let broken = dir.join("broken.ase");
+    std::fs::write(&broken, b"not aseprite").unwrap();
+    let output = bin()
+        .args([
+            "export-png",
+            broken.to_str().unwrap(),
+            png.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn export_png_writes_the_painted_pixel() {
     let dir = std::env::temp_dir().join(format!(

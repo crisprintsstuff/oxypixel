@@ -30,7 +30,8 @@ pub struct LayerInfo {
 }
 
 impl LayerInfo {
-    pub(crate) fn new(name: String) -> Self {
+    /// A visible, opaque, Normal layer at the top level.
+    pub fn new(name: String) -> Self {
         Self {
             name,
             visible: true,
@@ -285,7 +286,7 @@ impl Document {
         &mut self.palette
     }
 
-    pub(crate) fn cel(&self, frame: usize, layer: usize) -> Result<&[Rgba]> {
+    pub fn cel(&self, frame: usize, layer: usize) -> Result<&[Rgba]> {
         self.frames
             .get(frame)
             .and_then(|f| f.cels.get(layer))
@@ -873,6 +874,47 @@ impl Document {
         let frame = self.frames.get(frame)?;
         let index = (y * self.width + x) as usize;
         Some(self.layers_pixel(frame, 0, self.layers.len(), index))
+    }
+
+    /// A document built from layers and frames, checked the way a loaded
+    /// file is. Each frame is its duration in milliseconds and one cel per
+    /// layer, `width * height` pixels each. A group's cel is cleared. Tags
+    /// are checked against the frame count.
+    pub fn from_layers(
+        width: u32,
+        height: u32,
+        layers: Vec<LayerInfo>,
+        frames: Vec<(u32, Vec<Vec<Rgba>>)>,
+        palette: Vec<Rgba>,
+        tags: Vec<FrameTag>,
+    ) -> Result<Self> {
+        let frames = frames
+            .into_iter()
+            .map(|(duration_ms, mut cels)| {
+                for (cel, layer) in cels.iter_mut().zip(&layers) {
+                    if layer.group {
+                        cel.fill(Rgba::CLEAR);
+                    }
+                }
+                Frame {
+                    duration_ms,
+                    name: String::new(),
+                    cels,
+                }
+            })
+            .collect();
+        let mut doc = Self::from_parts(width, height, layers, frames, 0, 0, palette)?;
+        if doc.layers.first().is_some_and(|layer| layer.group) {
+            doc.active_layer = doc
+                .layers
+                .iter()
+                .position(|layer| !layer.group)
+                .unwrap_or(0);
+        }
+        for tag in tags {
+            doc.add_tag(tag)?;
+        }
+        Ok(doc)
     }
 
     pub(crate) fn from_parts(

@@ -23,7 +23,11 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::rc::Rc;
 
-use oxypixel_core::{Rgba, DEFAULT_FRAME_MS, MAX_FILE_BYTES, MAX_SHEET_PIXELS};
+use oxypixel_core::{
+    default_palette, Document, LayerInfo, Rgba, DEFAULT_FRAME_MS, MAX_DIMENSION, MAX_FILE_BYTES,
+    MAX_FRAMES, MAX_FRAME_MS, MAX_GROUP_DEPTH, MAX_LAYERS, MAX_NAME_BYTES, MAX_PALETTE,
+    MAX_SHEET_PIXELS, MAX_TAGS, MIN_FRAME_MS,
+};
 
 use crate::blend::{blend, BlendMode};
 
@@ -237,6 +241,194 @@ fn mul255(a: u8, b: u8) -> u8 {
 
 /// Decode a whole file. Bytes past the declared size are ignored.
 pub fn read_aseprite(bytes: &[u8]) -> Result<AseFile> {
+    let parsed = parse(bytes)?;
+    let frames = parsed
+        .frames
+        .iter()
+        .map(|(cels, duration)| {
+            (
+                composite(
+                    parsed.width,
+                    parsed.height,
+                    &parsed.layers,
+                    cels,
+                    parsed.group_blend,
+                ),
+                *duration,
+            )
+        })
+        .collect();
+    Ok(AseFile {
+        width: parsed.width,
+        height: parsed.height,
+        frames,
+        tags: parsed.tags,
+        notes: parsed.notes,
+    })
+}
+
+/// Open a file for editing: one OxyPixel layer per Aseprite layer, groups
+/// included, with each frame's cels in place, plus the palette and tags.
+/// Returns the document and notes on what could not be kept exactly.
+///
+/// OxyPixel has no cel opacity, so a cel's opacity is multiplied into its
+/// pixels. Tilemap layers become plain layers, reference layers are left
+/// out, and a cel's z-index is not kept.
+pub fn read_aseprite_document(bytes: &[u8]) -> Result<(Document, Vec<String>)> {
+    let parsed = parse(bytes)?;
+    let (width, height) = (parsed.width, parsed.height);
+    if width > MAX_DIMENSION || height > MAX_DIMENSION {
+        return Err(bad(format!(
+            "the canvas is {width}×{height}, and the editor opens up to {MAX_DIMENSION}×{MAX_DIMENSION}"
+        )));
+    }
+    if parsed.frames.len() > MAX_FRAMES {
+        return Err(bad(format!(
+            "the file has {} frames, and the editor opens up to {MAX_FRAMES}",
+            parsed.frames.len()
+        )));
+    }
+    let mut notes = parsed.notes.clone();
+    // Aseprite layer index to OxyPixel layer index, for the layers kept.
+    let mut kept: Vec<Option<usize>> = vec![None; parsed.layers.len()];
+    let mut layers = Vec::new();
+    for (index, layer) in parsed.layers.iter().enumerate() {
+        if layer.reference {
+            notes.push(format!("reference layer {} is left out", layer.name));
+            continue;
+        }
+        let mut depth = 0usize;
+        let mut up = layer.parent;
+        while let Some(parent) = up {
+            depth += 1;
+            up = parsed.layers[parent].parent;
+        }
+        if depth > usize::from(MAX_GROUP_DEPTH) {
+            return Err(bad(format!(
+                "layer {} is {depth} groups deep, and the editor allows {MAX_GROUP_DEPTH}",
+                layer.name
+            )));
+        }
+        let group = layer.kind == Kind::Group;
+        let (opacity, blend) = if group && !parsed.group_blend {
+            (255, BlendMode::Normal)
+        } else {
+            (layer.opacity, layer.blend)
+        };
+        if layer.kind == Kind::Tilemap {
+            notes.push(format!(
+                "tilemap layer {} is opened as a plain layer",
+                layer.name
+            ));
+        }
+        kept[index] = Some(layers.len());
+        let mut info = LayerInfo::new(clamp_layer_name(&layer.name));
+        info.visible = layer.visible;
+        info.opacity = opacity;
+        info.blend = blend;
+        info.group = group;
+        info.depth = depth as u8;
+        layers.push(info);
+    }
+    if layers.len() > MAX_LAYERS {
+        return Err(bad(format!(
+            "the file has {} layers, and the editor opens up to {MAX_LAYERS}",
+            layers.len()
+        )));
+    }
+    if !parsed.group_blend
+        && parsed.layers.iter().any(|layer| {
+            layer.parent.is_some() && layer.kind != Kind::Group && layer.blend != BlendMode::Normal
+        })
+    {
+        notes.push(
+            "layers inside groups blend within their group, so a blend mode there can look different".into(),
+        );
+    }
+    let size = width as usize * height as usize;
+    let mut frames = Vec::with_capacity(parsed.frames.len());
+    let mut z_note = false;
+    let mut clamped = false;
+    for (cels, duration) in &parsed.frames {
+        let mut buffers = vec![vec![Rgba::CLEAR; size]; layers.len()];
+        for cel in cels {
+            let Some(target) = kept[cel.layer] else {
+                continue;
+            };
+            z_note |= cel.z != 0;
+            draw_cel(
+                cel,
+                cel.opacity,
+                BlendMode::Normal,
+                width,
+                height,
+                &mut buffers[target],
+            );
+        }
+        let ms = (*duration).clamp(MIN_FRAME_MS, MAX_FRAME_MS);
+        clamped |= ms != *duration;
+        frames.push((ms, buffers));
+    }
+    if z_note {
+        notes.push("cels with a z-index are drawn in their own layer's place".into());
+    }
+    if clamped {
+        notes.push(format!(
+            "frame durations are kept between {MIN_FRAME_MS} and {MAX_FRAME_MS} ms"
+        ));
+    }
+    let mut palette = parsed.palette.clone();
+    if palette.len() > MAX_PALETTE {
+        notes.push(format!(
+            "the palette has {} colors; the first {MAX_PALETTE} are kept",
+            palette.len()
+        ));
+        palette.truncate(MAX_PALETTE);
+    }
+    if palette.is_empty() {
+        palette = default_palette();
+    }
+    let mut tags: Vec<Tag> = parsed.tags.clone();
+    if tags.len() > MAX_TAGS {
+        notes.push(format!("only the first {MAX_TAGS} tags are kept"));
+        tags.truncate(MAX_TAGS);
+    }
+    for (i, tag) in tags.iter_mut().enumerate() {
+        if tag.name.trim().is_empty() {
+            tag.name = format!("Tag {}", i + 1);
+        }
+    }
+    let doc = Document::from_layers(width, height, layers, frames, palette, tags)
+        .map_err(|err| bad(err.to_string()))?;
+    notes.dedup();
+    Ok((doc, notes))
+}
+
+/// A layer name cut to the editor's limit on a character boundary.
+fn clamp_layer_name(name: &str) -> String {
+    let mut end = name.len().min(MAX_NAME_BYTES);
+    while !name.is_char_boundary(end) {
+        end -= 1;
+    }
+    name[..end].to_string()
+}
+
+/// A file as it was read: its layers, and each frame's cels.
+struct Parsed {
+    width: u32,
+    height: u32,
+    layers: Vec<Layer>,
+    /// The cels of each frame and its duration in milliseconds.
+    frames: Vec<(Vec<Cel>, u32)>,
+    tags: Vec<Tag>,
+    notes: Vec<String>,
+    /// The colors the file's palette chunks set.
+    palette: Vec<Rgba>,
+    /// The header says group opacity and blend mode are valid.
+    group_blend: bool,
+}
+
+fn parse(bytes: &[u8]) -> Result<Parsed> {
     if bytes.len() as u64 > MAX_FILE_BYTES {
         return Err(bad(format!(
             "the file is larger than {} MiB",
@@ -286,6 +478,7 @@ pub fn read_aseprite(bytes: &[u8]) -> Result<AseFile> {
     let group_opacity_valid = flags & FLAG_GROUP_OPACITY != 0;
     let layer_uuid = flags & FLAG_LAYER_UUID != 0;
     let mut palette = vec![Rgba::CLEAR; 256.max(usize::from(color_count))];
+    let mut palette_len = 0usize;
     let mut layers: Vec<Layer> = Vec::new();
     // Each group's visibility and opacity, by child level.
     // The open groups, by child level.
@@ -504,6 +697,7 @@ pub fn read_aseprite(bytes: &[u8]) -> Result<AseFile> {
                     if palette.len() < size {
                         palette.resize(size, Rgba::CLEAR);
                     }
+                    palette_len = palette_len.max(size);
                     for slot in &mut palette[first..=last] {
                         let entry_flags = c.u16()?;
                         *slot = Rgba::new(c.u8()?, c.u8()?, c.u8()?, c.u8()?);
@@ -530,6 +724,7 @@ pub fn read_aseprite(bytes: &[u8]) -> Result<AseFile> {
                                 *slot = Rgba::new(rgb[0], rgb[1], rgb[2], 255);
                             }
                             index += 1;
+                            palette_len = palette_len.max(index.min(palette.len()));
                         }
                     }
                 }
@@ -625,19 +820,20 @@ pub fn read_aseprite(bytes: &[u8]) -> Result<AseFile> {
                 image,
             });
         }
-        frames.push((
-            composite(width, height, &layers, &cels, group_opacity_valid),
-            duration,
-        ));
+        frames.push((cels, duration));
         pos = frame_end;
     }
     notes.dedup();
-    Ok(AseFile {
+    palette.truncate(palette_len);
+    Ok(Parsed {
         width,
         height,
+        layers,
         frames,
         tags,
         notes,
+        palette,
+        group_blend: group_opacity_valid,
     })
 }
 
@@ -1097,6 +1293,96 @@ pub(crate) mod tests {
 
     fn px(c: [u8; 4]) -> Rgba {
         Rgba::new(c[0], c[1], c[2], c[3])
+    }
+
+    #[test]
+    fn opens_layers_groups_palette_and_tags_for_editing() {
+        let half = [0, 255, 0, 255];
+        let bytes = file(
+            2,
+            2,
+            32,
+            0,
+            vec![
+                (
+                    120,
+                    vec![
+                        palette(&[RED, BLUE, half]),
+                        layer(LAYER_VISIBLE, 0, 0, 0, 255, "back"),
+                        layer(LAYER_VISIBLE, 1, 0, 0, 200, "fx"),
+                        layer(LAYER_VISIBLE, 0, 1, 1, 255, "shade"),
+                        layer(LAYER_VISIBLE | LAYER_REFERENCE, 0, 0, 0, 255, "ref"),
+                        layer(0, 0, 0, 0, 255, "hidden"),
+                        cel(0, 0, 0, 255, 2, 2, &RED.repeat(4)),
+                        cel(2, 1, 0, 255, 1, 2, &BLUE.repeat(2)),
+                        cel(3, 0, 0, 255, 2, 2, &half.repeat(4)),
+                        cel(4, 0, 1, 128, 1, 1, &half),
+                        tags(&[(0, 1, 2, 0, "loop"), (1, 1, 0, 3, " ")]),
+                    ],
+                ),
+                (20_000, vec![cel_link(0, 0), cel(2, 0, 0, 255, 1, 1, &BLUE)]),
+            ],
+        );
+        let (doc, notes) = read_aseprite_document(&bytes).unwrap();
+        let names: Vec<&str> = doc.layers().iter().map(|l| l.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["back", "fx", "shade", "hidden"],
+            "the reference layer is left out"
+        );
+        let fx = &doc.layers()[1];
+        assert!(fx.group && fx.depth == 0 && fx.opacity == 200);
+        let shade = &doc.layers()[2];
+        assert_eq!((shade.depth, shade.blend), (1, BlendMode::Multiply));
+        assert!(!doc.layers()[3].visible);
+        assert!(
+            notes.iter().any(|n| n.contains("reference layer ref")),
+            "{notes:?}"
+        );
+        // The cel at (1, 0) lands in place, and cel opacity is in the pixels.
+        let shade_cel = doc.cel(0, 2).unwrap();
+        assert_eq!(shade_cel[1], px(BLUE));
+        assert_eq!(shade_cel[0], Rgba::CLEAR);
+        assert_eq!(doc.cel(0, 3).unwrap()[2], Rgba::new(0, 255, 0, 128));
+        // Linked cels are copied, durations are clamped.
+        assert_eq!(doc.cel(1, 0).unwrap(), doc.cel(0, 0).unwrap());
+        assert_eq!(doc.frame_duration(0), Some(120));
+        assert_eq!(doc.frame_duration(1), Some(MAX_FRAME_MS));
+        assert!(
+            notes.iter().any(|n| n.contains("frame durations")),
+            "{notes:?}"
+        );
+        assert_eq!(doc.palette(), &[px(RED), px(BLUE), px(half)]);
+        let tags: Vec<(&str, usize, usize)> = doc
+            .tags()
+            .iter()
+            .map(|t| (t.name.as_str(), t.from, t.to))
+            .collect();
+        assert_eq!(tags, [("loop", 0, 1), ("Tag 2", 1, 1)]);
+        assert_eq!(doc.tags()[1].repeat, 3);
+        // The editor draws each frame as the packer flattens it.
+        let flat = read_aseprite(&bytes).unwrap();
+        for (frame, (pixels, _)) in flat.frames.iter().enumerate() {
+            assert_eq!(&doc.composite(frame).unwrap(), pixels, "frame {frame}");
+        }
+    }
+
+    #[test]
+    fn files_too_big_to_edit_are_refused_with_the_reason() {
+        let wide = file(
+            1100,
+            1,
+            32,
+            0,
+            vec![(100, vec![layer(LAYER_VISIBLE, 0, 0, 0, 255, "a")])],
+        );
+        let err = read_aseprite_document(&wide).unwrap_err();
+        assert!(err.0.contains("1100×1"), "{err}");
+        let many: Vec<Chunk> = (0..40)
+            .map(|i| layer(LAYER_VISIBLE, 0, 0, 0, 255, &format!("l{i}")))
+            .collect();
+        let err = read_aseprite_document(&file(1, 1, 32, 0, vec![(100, many)])).unwrap_err();
+        assert!(err.0.contains("40 layers"), "{err}");
     }
 
     #[test]

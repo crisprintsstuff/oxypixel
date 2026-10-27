@@ -7,9 +7,9 @@ use std::time::{Duration, Instant};
 use eframe::egui::{self, Color32, RichText, ViewportCommand};
 use oxypixel_core::{
     advance, decode_first_rgba, export_bmp, export_gif, export_gif_per_tag, export_palette,
-    export_png_scaled, export_sheet_files, fit_into, import_image, import_palette, load_oxypix,
-    save_oxypix, BlendMode, Editor, Error, Fit, PaletteFormat, References, Rgba, SheetFiles,
-    SheetLayout, Tool, Transform, MAX_DIMENSION, MAX_FRAMES, MAX_SHEET_PADDING,
+    export_png_scaled, export_sheet_files, fit_into, import_image, import_palette, save_oxypix,
+    BlendMode, Editor, Error, Fit, PaletteFormat, References, Rgba, SheetFiles, SheetLayout, Tool,
+    Transform, MAX_DIMENSION, MAX_FRAMES, MAX_SHEET_PADDING,
 };
 
 use crate::cache::FrameComposites;
@@ -90,6 +90,8 @@ pub struct OxyApp {
     settings_window: crate::settingsview::SettingsWindow,
     thumbs: ThumbCache,
     save_path: Option<PathBuf>,
+    /// Where Save offers to write a document opened from an Aseprite file.
+    save_suggestion: Option<PathBuf>,
     note: Option<Note>,
     dialog: Option<DialogKind>,
     dialog_error: Option<String>,
@@ -200,6 +202,7 @@ impl OxyApp {
             settings_window: crate::settingsview::SettingsWindow::default(),
             thumbs: ThumbCache::default(),
             save_path: None,
+            save_suggestion: None,
             note: None,
             dialog: None,
             dialog_error: None,
@@ -361,18 +364,36 @@ impl OxyApp {
     }
 
     fn open_path(&mut self, path: PathBuf) {
-        match load_oxypix(&path) {
-            Ok(doc) => {
+        match oxypack::open_document(&path) {
+            Ok((doc, notes)) => {
                 self.detach_recovery();
                 self.editor.replace_document(doc);
                 self.remember_file(&path);
-                self.save_path = Some(path.clone());
-                self.load_reference_sidecar(&path);
-                self.bind_recovery_slot(Some(&path));
                 self.view.fit_next = true;
                 self.playing = false;
                 self.hex = self.editor.primary().to_hex();
-                self.note = None;
+                if oxypack::is_aseprite(&path) {
+                    // The Aseprite file is never written. Save asks for an
+                    // .oxypix path beside it.
+                    self.clear_references();
+                    self.save_path = None;
+                    self.save_suggestion = Some(path.with_extension("oxypix"));
+                    self.bind_recovery_slot(None);
+                    let name = path
+                        .file_name()
+                        .map_or(String::new(), |n| n.to_string_lossy().into_owned());
+                    let mut text = format!("Opened {name}. Save writes an .oxypix file.");
+                    if !notes.is_empty() {
+                        text.push_str(&format!(" Note: {}.", notes.join("; ")));
+                    }
+                    self.note_ok(text);
+                } else {
+                    self.save_path = Some(path.clone());
+                    self.save_suggestion = None;
+                    self.load_reference_sidecar(&path);
+                    self.bind_recovery_slot(Some(&path));
+                    self.note = None;
+                }
             }
             Err(err) => self.note_err(err),
         }
@@ -669,7 +690,7 @@ impl OxyApp {
                 }
                 DropKind::Unsupported => {
                     if !noted {
-                        self.note_err("Drop a .oxypix, PNG, BMP, GIF, or JPEG file.");
+                        self.note_err("Drop a .oxypix, .aseprite, PNG, BMP, GIF, or JPEG file.");
                         noted = true;
                     }
                 }
@@ -1096,6 +1117,7 @@ impl OxyApp {
                 let doc = editor.document().clone();
                 self.editor.replace_document(doc);
                 self.save_path = None;
+                self.save_suggestion = None;
                 self.bind_recovery_slot(None);
                 self.view.fit_next = true;
                 self.playing = false;
@@ -1143,6 +1165,7 @@ impl OxyApp {
             PathKind::Save => self
                 .save_path
                 .as_ref()
+                .or(self.save_suggestion.as_ref())
                 .map(|p| p.display().to_string())
                 .unwrap_or_else(|| "untitled.oxypix".to_string()),
             PathKind::ExportPng => "frame.png".to_string(),
@@ -1213,6 +1236,7 @@ impl OxyApp {
                 self.editor.replace_document(doc);
                 self.note_dir(path);
                 self.save_path = None;
+                self.save_suggestion = None;
                 self.bind_recovery_slot(None);
                 self.view.fit_next = true;
                 self.playing = false;
@@ -1496,6 +1520,7 @@ impl OxyApp {
                 let doc = editor.document().clone();
                 self.editor.replace_document(doc);
                 self.save_path = None;
+                self.save_suggestion = None;
                 self.bind_recovery_slot(None);
                 self.view.fit_next = true;
                 self.playing = false;
@@ -2990,7 +3015,7 @@ impl OxyApp {
 
     fn dialog_path(&mut self, ctx: &egui::Context) {
         let title = match self.path_kind {
-            PathKind::Open => "Open .oxypix",
+            PathKind::Open => "Open .oxypix or .aseprite",
             PathKind::Save => "Save .oxypix",
             PathKind::ImportDocument => "Import image as a new document",
             PathKind::ImportLayer => "Import image as a layer",
@@ -3885,7 +3910,7 @@ enum DropKind {
 
 fn drop_kind(extension: &str) -> DropKind {
     match extension {
-        "oxypix" => DropKind::Open,
+        "oxypix" | "aseprite" | "ase" => DropKind::Open,
         "png" | "bmp" | "gif" => DropKind::Import,
         "jpg" | "jpeg" => DropKind::Reference,
         _ => DropKind::Unsupported,
@@ -3906,7 +3931,8 @@ fn parse_i32(text: &str, label: &str) -> Result<i32, String> {
 
 fn filter_name(kind: PathKind, format: PaletteFormat) -> &'static str {
     match kind {
-        PathKind::Open | PathKind::Save => "OxyPixel document",
+        PathKind::Open => "OxyPixel or Aseprite document",
+        PathKind::Save => "OxyPixel document",
         PathKind::ImportDocument | PathKind::ImportLayer => "Image",
         PathKind::LoadReference => "Reference image",
         PathKind::ExportPng | PathKind::ExportSheet => "PNG",
@@ -3923,7 +3949,8 @@ fn filter_name(kind: PathKind, format: PaletteFormat) -> &'static str {
 
 fn filter_ext(kind: PathKind, format: PaletteFormat) -> &'static [&'static str] {
     match kind {
-        PathKind::Open | PathKind::Save => &["oxypix"],
+        PathKind::Open => &["oxypix", "aseprite", "ase"],
+        PathKind::Save => &["oxypix"],
         PathKind::ImportDocument | PathKind::ImportLayer => &["png", "bmp", "gif"],
         PathKind::LoadReference => &["png", "jpg", "jpeg"],
         PathKind::ExportPng | PathKind::ExportSheet => &["png"],
@@ -3979,6 +4006,8 @@ mod tests {
     #[test]
     fn a_dropped_png_imports_and_a_jpeg_loads_a_reference() {
         assert_eq!(drop_kind("oxypix"), DropKind::Open);
+        assert_eq!(drop_kind("aseprite"), DropKind::Open);
+        assert_eq!(drop_kind("ase"), DropKind::Open);
         assert_eq!(drop_kind("png"), DropKind::Import);
         assert_eq!(drop_kind("bmp"), DropKind::Import);
         assert_eq!(drop_kind("gif"), DropKind::Import);
