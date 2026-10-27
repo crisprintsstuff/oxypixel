@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-10-27
+
 ### Added
 
 - An MCP server for AI assistants: `oxypixel mcp`. Claude Desktop, Claude Code, and other Model Context Protocol clients start it and use its tools. The tools inspect documents, render a frame as an image, create documents, draw with the editor's tools, edit layers, frames, tags, and the palette, export PNG, BMP, GIF, or spritesheets, and pack sprites with OxyPack. Output files are never replaced without `overwrite`, and `--root DIR` keeps the tools inside one folder. It opens no window and no network connection. Setup is in the README.

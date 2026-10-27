@@ -34,7 +34,7 @@ The pictures above are screenshots of OxyPixel 0.9.0. The drawing is a sample fi
 
 ## Status
 
-OxyPixel 0.9.0 is an early release. The Windows downloads are unsigned. Linux publishes a tar.gz and a `.deb`. A canvas side is at most 1024 pixels. What works today, and the open task list, is in [docs/ROADMAP.md](docs/ROADMAP.md).
+OxyPixel 0.9.2 is an early release. The Windows downloads are unsigned. Linux publishes a tar.gz and a `.deb`. A canvas side is at most 1024 pixels. What works today, and the open task list, is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Download
 
@@ -74,18 +74,18 @@ The tagged Windows build embeds the application icon and a version resource when
 
 Each release publishes two Linux files.
 
-`oxypixel-<version>-linux-x86_64.tar.gz` holds the x86_64 `oxypixel` and `oxypack` executables, `LICENSE`, and `README.txt`. Unpack it and run the program from that directory. For 0.9.0:
+`oxypixel-<version>-linux-x86_64.tar.gz` holds the x86_64 `oxypixel` and `oxypack` executables, `LICENSE`, and `README.txt`. Unpack it and run the program from that directory. For 0.9.2:
 
 ```bash
-tar -xzf oxypixel-0.9.0-linux-x86_64.tar.gz
-cd oxypixel-0.9.0-linux-x86_64
+tar -xzf oxypixel-0.9.2-linux-x86_64.tar.gz
+cd oxypixel-0.9.2-linux-x86_64
 ./oxypixel
 ```
 
-`oxypixel-<version>-linux-x86_64.deb` installs `/usr/bin/oxypixel`, `/usr/bin/oxypack`, a desktop entry, a 32×32 icon, and the `.oxypix` mime type. For 0.9.0 the Debian package version is `0.9.0-1`:
+`oxypixel-<version>-linux-x86_64.deb` installs `/usr/bin/oxypixel`, `/usr/bin/oxypack`, a desktop entry, a 32×32 icon, and the `.oxypix` mime type. For 0.9.2 the Debian package version is `0.9.2-1`:
 
 ```bash
-sudo apt install ./oxypixel-0.9.0-linux-x86_64.deb
+sudo apt install ./oxypixel-0.9.2-linux-x86_64.deb
 sudo apt remove oxypixel
 ```
 
