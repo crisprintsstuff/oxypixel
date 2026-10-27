@@ -39,6 +39,8 @@ enum Note {
 enum DialogKind {
     New,
     Canvas,
+    Scale,
+    Replace,
     Path,
     Unsaved,
     About,
@@ -99,6 +101,13 @@ pub struct OxyApp {
     canvas_w: String,
     canvas_h: String,
     canvas_x: String,
+    /// The size typed into Edit, then Scale…, and the size it started from.
+    scale_w: String,
+    scale_h: String,
+    scale_from: (u32, u32),
+    /// Edit, then Replace color…: change every layer, every frame.
+    replace_layers: bool,
+    replace_frames: bool,
     canvas_y: String,
     export_scale: u32,
     /// Spritesheet frames per row. 0 is one row.
@@ -196,6 +205,11 @@ impl OxyApp {
             canvas_w: "32".to_string(),
             canvas_h: "32".to_string(),
             canvas_x: "0".to_string(),
+            scale_w: String::new(),
+            scale_h: String::new(),
+            scale_from: (1, 1),
+            replace_layers: false,
+            replace_frames: false,
             canvas_y: "0".to_string(),
             export_scale: prefs.export_scale,
             sheet_columns: 0,
@@ -860,6 +874,169 @@ impl OxyApp {
         self.dialog = Some(DialogKind::Canvas);
     }
 
+    fn open_scale_dialog(&mut self) {
+        if self.editor.active_is_group() {
+            self.note_err("A group has no pixels. Pick a layer inside it.");
+            return;
+        }
+        let doc = self.editor.document();
+        let size = self
+            .editor
+            .selection()
+            .map_or((doc.width(), doc.height()), |s| (s.width, s.height));
+        self.scale_from = size;
+        self.scale_w = size.0.to_string();
+        self.scale_h = size.1.to_string();
+        self.dialog_error = None;
+        self.dialog = Some(DialogKind::Scale);
+    }
+
+    fn dialog_scale(&mut self, ctx: &egui::Context) {
+        let mut close = false;
+        let mut apply = false;
+        let (from_w, from_h) = self.scale_from;
+        egui::Window::new("Scale")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                let what = if self.editor.selection().is_some() {
+                    "the selection"
+                } else {
+                    "the whole layer"
+                };
+                ui.label(format!(
+                    "Resize {what} from {from_w}×{from_h} with nearest-neighbor pixels. The top-left corner stays put; pixels past the canvas edge are dropped."
+                ));
+                ui.horizontal(|ui| {
+                    ui.label("Width");
+                    ui.add(egui::TextEdit::singleline(&mut self.scale_w).desired_width(72.0));
+                    ui.label("Height");
+                    ui.add(egui::TextEdit::singleline(&mut self.scale_h).desired_width(72.0));
+                });
+                ui.horizontal(|ui| {
+                    for (label, num, den) in [("½×", 1, 2), ("2×", 2, 1), ("3×", 3, 1), ("4×", 4, 1)] {
+                        if ui.button(label).clicked() {
+                            self.scale_w = (from_w * num / den).max(1).to_string();
+                            self.scale_h = (from_h * num / den).max(1).to_string();
+                        }
+                    }
+                });
+                if let Some(error) = &self.dialog_error {
+                    ui.colored_label(Color32::from_rgb(220, 100, 90), error);
+                }
+                ui.horizontal(|ui| {
+                    if ui.button("Scale").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        apply = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        close = true;
+                    }
+                });
+            });
+        if apply {
+            match (
+                self.scale_w.trim().parse::<u32>(),
+                self.scale_h.trim().parse::<u32>(),
+            ) {
+                (Ok(w), Ok(h)) => match self.editor.scale_selection(w, h) {
+                    Ok(()) => {
+                        self.dialog = None;
+                        self.note_ok(format!("Scaled to {w}×{h}."));
+                    }
+                    Err(err) => self.dialog_error = Some(err.to_string()),
+                },
+                _ => self.dialog_error = Some("Width and height must be whole numbers.".into()),
+            }
+        }
+        if close {
+            self.dialog = None;
+        }
+    }
+
+    fn dialog_replace(&mut self, ctx: &egui::Context) {
+        let mut close = false;
+        let mut apply = false;
+        let (from, to) = (self.editor.primary(), self.editor.secondary());
+        egui::Window::new("Replace color")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Change");
+                    swatch(ui, from);
+                    ui.label(from.to_hex());
+                    ui.label("to");
+                    swatch(ui, to);
+                    ui.label(to.to_hex());
+                    if ui
+                        .button("Swap")
+                        .on_hover_text("Swap the two colors")
+                        .clicked()
+                    {
+                        self.editor.swap_colors();
+                        self.hex = self.editor.primary().to_hex();
+                    }
+                });
+                ui.label(
+                    egui::RichText::new(
+                        "The primary color becomes the second color. Only exact matches change.",
+                    )
+                    .small()
+                    .weak(),
+                );
+                ui.checkbox(&mut self.replace_layers, "Every layer");
+                ui.checkbox(&mut self.replace_frames, "Every frame");
+                if self.editor.selection().is_some() {
+                    ui.label(egui::RichText::new("Only inside the selection.").small());
+                }
+                ui.horizontal(|ui| {
+                    if ui.button("Replace").clicked()
+                        || ui.input(|i| i.key_pressed(egui::Key::Enter))
+                    {
+                        apply = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        close = true;
+                    }
+                });
+            });
+        if apply {
+            let (layers, frames) = (self.replace_layers, self.replace_frames);
+            if let Some(count) = self.apply(|editor| editor.replace_color(from, to, layers, frames))
+            {
+                self.dialog = None;
+                match count {
+                    0 => self.note_err(format!("No {} pixels to change.", from.to_hex())),
+                    1 => self.note_ok("Changed 1 pixel."),
+                    n => self.note_ok(format!("Changed {n} pixels.")),
+                }
+            }
+        }
+        if close {
+            self.dialog = None;
+        }
+    }
+
+    fn brush_from_selection(&mut self) {
+        match self.editor.brush_from_selection() {
+            Ok(true) => {
+                if let Some(brush) = self.editor.custom_brush() {
+                    let text = format!(
+                        "The pencil and eraser now stamp the {}×{} selection.",
+                        brush.width, brush.height
+                    );
+                    self.note_ok(text);
+                }
+            }
+            Ok(false) => self.note_err("The selection has no art to make a brush from."),
+            Err(err) => self.note_err(err),
+        }
+    }
+
     fn request_import(&mut self) {
         if self.has_unsaved_changes() {
             self.pending = Some(Pending::Import);
@@ -1440,6 +1617,36 @@ impl OxyApp {
                         self.apply(|editor| editor.transform_pixels(Transform::Rotate180));
                         ui.close_menu();
                     }
+                    if menu_item(ui, "Scale…", "") {
+                        self.open_scale_dialog();
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if menu_item(ui, "Outline in primary color", "") {
+                        let color = self.editor.primary();
+                        if self.apply(|editor| editor.outline(color, false)) == Some(false) {
+                            self.note_err("Nothing to outline: the layer has no art here.");
+                        }
+                        ui.close_menu();
+                    }
+                    if menu_item(ui, "Outline with corners", "") {
+                        let color = self.editor.primary();
+                        if self.apply(|editor| editor.outline(color, true)) == Some(false) {
+                            self.note_err("Nothing to outline: the layer has no art here.");
+                        }
+                        ui.close_menu();
+                    }
+                    if menu_item(ui, "Replace color…", "") {
+                        self.dialog = Some(DialogKind::Replace);
+                        ui.close_menu();
+                    }
+                    if menu_item(ui, "Drop shadow in second color", "") {
+                        let color = self.editor.secondary();
+                        if self.apply(|editor| editor.drop_shadow(color, 1, 1)) == Some(false) {
+                            self.note_err("Nothing to shadow: the layer has no art here.");
+                        }
+                        ui.close_menu();
+                    }
                     ui.separator();
                     if menu_item(ui, "Canvas size…", "") {
                         self.open_canvas_dialog();
@@ -1623,6 +1830,25 @@ impl OxyApp {
                 {
                     self.editor.set_brush(size);
                 }
+                if let Some((w, h)) = self.editor.custom_brush().map(|b| (b.width, b.height)) {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(format!("Custom {w}×{h}")).small())
+                            .on_hover_text("The pencil and eraser stamp the pixels taken from a selection.");
+                        if ui.small_button("Square").on_hover_text("Go back to the square brush").clicked() {
+                            self.editor.clear_custom_brush();
+                        }
+                    });
+                } else if ui
+                    .add_enabled(
+                        self.editor.selection().is_some(),
+                        egui::Button::new("Brush from selection").small(),
+                    )
+                    .on_hover_text("The pencil and eraser stamp the selected pixels in their own colors.")
+                    .on_disabled_hover_text("Select some art first.")
+                    .clicked()
+                {
+                    self.brush_from_selection();
+                }
                 let shapes = matches!(self.editor.tool(), Tool::Rectangle | Tool::Ellipse);
                 let mut filled = self.editor.shape_filled();
                 let fill = ui
@@ -1695,6 +1921,16 @@ impl OxyApp {
                     .changed()
                 {
                     self.editor.set_shade(shade);
+                }
+                let mut dither = self.editor.dithers();
+                if ui
+                    .checkbox(&mut dither, "Dither")
+                    .on_hover_text(
+                        "The pencil paints a checkerboard of both colors. The pattern is fixed to the canvas, so strokes line up.",
+                    )
+                    .changed()
+                {
+                    self.editor.set_dither(dither);
                 }
                 let mut wrap = self.editor.wraps();
                 if ui
@@ -2575,6 +2811,8 @@ impl OxyApp {
         match kind {
             DialogKind::New => self.dialog_new(ctx),
             DialogKind::Canvas => self.dialog_canvas(ctx),
+            DialogKind::Scale => self.dialog_scale(ctx),
+            DialogKind::Replace => self.dialog_replace(ctx),
             DialogKind::Path => self.dialog_path(ctx),
             DialogKind::Unsaved => self.dialog_unsaved(ctx),
             DialogKind::About => self.dialog_about(ctx),
@@ -3514,6 +3752,22 @@ fn menu_item_enabled(ui: &mut egui::Ui, label: &str, shortcut: &str, enabled: bo
         button = button.shortcut_text(shortcut);
     }
     ui.add_enabled(enabled, button).clicked()
+}
+
+/// A small square of `color`, for dialogs that name a color.
+fn swatch(ui: &mut egui::Ui, color: Rgba) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
+    ui.painter().rect_filled(
+        rect,
+        2.0,
+        Color32::from_rgba_unmultiplied(color.r, color.g, color.b, color.a),
+    );
+    ui.painter().rect_stroke(
+        rect,
+        2.0,
+        egui::Stroke::new(1.0_f32, ui.visuals().widgets.noninteractive.bg_stroke.color),
+        egui::StrokeKind::Inside,
+    );
 }
 
 fn tool_hint(tool: Tool) -> &'static str {

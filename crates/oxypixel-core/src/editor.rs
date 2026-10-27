@@ -5,12 +5,13 @@ use crate::color::{color_ramp, nearest_palette_color, shade_step, Rgba};
 use crate::document::Document;
 use crate::draw::{
     brush_offsets, clamp_to_margin, constrain_line, constrain_square, ellipse_points, fill_region,
-    flood_fill, line_points, pixel_perfect_path, rect_on_canvas, rect_points, transform_pixels,
-    turned_rect, wrap_coord, FillLimits, PixelRect, Transform,
+    flood_fill, line_points, outline_points, pixel_perfect_path, rect_on_canvas, rect_points,
+    scale_nearest, shadow_points, transform_pixels, turned_rect, wrap_coord, FillLimits, PixelRect,
+    Transform,
 };
 use crate::error::{Error, Result};
 use crate::history::{History, Snapshot};
-use crate::limits::{clamp_name, MAX_BRUSH};
+use crate::limits::{clamp_name, MAX_BRUSH, MAX_CUSTOM_BRUSH};
 use crate::selection::{self, OutlineEdge, SelectMode};
 use crate::tags::FrameTag;
 
@@ -78,6 +79,15 @@ struct Clipboard {
     mask: Option<Vec<bool>>,
 }
 
+/// Pixels copied from a selection that the pencil and eraser stamp instead
+/// of a square. Clear pixels are not part of the shape.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CustomBrush {
+    pub width: u32,
+    pub height: u32,
+    pub pixels: Vec<Rgba>,
+}
+
 /// Editor state that is not part of the saved document: tool, colors, selection, history.
 #[derive(Debug)]
 pub struct Editor {
@@ -96,6 +106,8 @@ pub struct Editor {
     fill_tolerance: u8,
     fill_global: bool,
     shade: bool,
+    dither: bool,
+    custom_brush: Option<CustomBrush>,
     /// Cel pixels from before the current pixel-perfect stroke.
     pencil_base: Option<Vec<Rgba>>,
     /// Bounding rectangle of the selection. Change it only through [`Self::set_selection`].
@@ -156,6 +168,8 @@ impl Editor {
             fill_tolerance: 0,
             fill_global: false,
             shade: false,
+            dither: false,
+            custom_brush: None,
             pencil_base: None,
             selection: None,
             selection_mask: None,
@@ -285,6 +299,62 @@ impl Editor {
 
     pub fn set_shade(&mut self, enabled: bool) {
         self.shade = enabled;
+    }
+
+    /// The pencil paints a checkerboard of the button's color and the other
+    /// one, fixed to the canvas so strokes line up. Off until the user turns it on.
+    pub fn dithers(&self) -> bool {
+        self.dither
+    }
+
+    pub fn set_dither(&mut self, enabled: bool) {
+        self.dither = enabled;
+    }
+
+    /// The brush the pencil and eraser stamp instead of a square, if one was taken.
+    pub fn custom_brush(&self) -> Option<&CustomBrush> {
+        self.custom_brush.as_ref()
+    }
+
+    /// Take the selected pixels of the active layer as the pencil and eraser
+    /// brush. `Ok(false)` when the selection holds no art, which keeps the
+    /// brush as it was.
+    pub fn brush_from_selection(&mut self) -> Result<bool> {
+        let Some(sel) = self.selection else {
+            return Err(Error::NoSelection);
+        };
+        if self.active_is_group() {
+            return Err(Error::Group(
+                "a group has no pixels; pick a layer inside it",
+            ));
+        }
+        for (what, value) in [("brush width", sel.width), ("brush height", sel.height)] {
+            if value > MAX_CUSTOM_BRUSH {
+                return Err(Error::Limit {
+                    what,
+                    value: u64::from(value),
+                    max: u64::from(MAX_CUSTOM_BRUSH),
+                });
+            }
+        }
+        let mask = self.selection_mask.clone();
+        let Some((_, pixels)) = self.capture_selection(sel, mask.as_deref()) else {
+            return Ok(false);
+        };
+        if pixels.iter().all(|px| px.a == 0) {
+            return Ok(false);
+        }
+        self.custom_brush = Some(CustomBrush {
+            width: sel.width,
+            height: sel.height,
+            pixels,
+        });
+        Ok(true)
+    }
+
+    /// Go back to the square brush.
+    pub fn clear_custom_brush(&mut self) {
+        self.custom_brush = None;
     }
 
     /// Pencil, fill, and shapes stamp the nearest palette color. Off until the user turns it on.
@@ -1061,6 +1131,196 @@ impl Editor {
         }
     }
 
+    /// Resize the selection (or the whole layer) to `new_w` by `new_h` with
+    /// nearest-neighbor sampling, keeping its top-left corner. Pixels that land
+    /// off the canvas are dropped. One undo step.
+    pub fn scale_selection(&mut self, new_w: u32, new_h: u32) -> Result<()> {
+        if self.active_is_group() {
+            return Err(Error::Group(
+                "a group has no pixels; pick a layer inside it",
+            ));
+        }
+        let canvas_w = self.doc.width();
+        let canvas_h = self.doc.height();
+        let had_selection = self.selection.is_some();
+        let sel = self.selection.unwrap_or(PixelRect {
+            x: 0,
+            y: 0,
+            width: canvas_w,
+            height: canvas_h,
+        });
+        let too_big = Error::Limit {
+            what: "pixels in a scaled selection",
+            value: u64::from(new_w).saturating_mul(u64::from(new_h)),
+            max: crate::limits::MAX_CEL_PIXELS,
+        };
+        if new_w == 0
+            || new_h == 0
+            || new_w > 4 * crate::limits::MAX_DIMENSION
+            || new_h > 4 * crate::limits::MAX_DIMENSION
+        {
+            return Err(too_big);
+        }
+        let mask = self.selection_mask.clone();
+        let (base, patch) = self
+            .capture_selection(sel, mask.as_deref())
+            .ok_or(Error::Index { what: "cel" })?;
+        let scaled = scale_nearest(sel.width, sel.height, &patch, new_w, new_h).ok_or(too_big)?;
+        let scaled_mask = match &mask {
+            Some(mask) => Some(
+                scale_nearest(sel.width, sel.height, mask, new_w, new_h).ok_or(Error::Limit {
+                    what: "pixels in a scaled selection",
+                    value: u64::from(new_w).saturating_mul(u64::from(new_h)),
+                    max: crate::limits::MAX_CEL_PIXELS,
+                })?,
+            ),
+            None => None,
+        };
+        let dest = PixelRect {
+            x: sel.x,
+            y: sel.y,
+            width: new_w,
+            height: new_h,
+        };
+        let kept = rect_on_canvas(dest, canvas_w, canvas_h).ok_or(Error::TransformOutside)?;
+        self.cancel_gesture();
+        self.push_undo();
+        let frame = self.doc.active_frame();
+        let layer = self.doc.active_layer();
+        if let Ok(cel) = self.doc.cel_mut(frame, layer) {
+            if cel.len() == base.len() {
+                cel.copy_from_slice(&base);
+            }
+        }
+        self.blit_patch(
+            dest.x,
+            dest.y,
+            new_w,
+            new_h,
+            &scaled,
+            scaled_mask.as_deref(),
+        );
+        if had_selection {
+            let kept_mask = scaled_mask.map(|mask| selection::crop_mask(dest, &mask, kept));
+            self.set_selection(Some(kept), kept_mask);
+        }
+        self.dirty = true;
+        self.generation += 1;
+        Ok(())
+    }
+
+    /// Paint `color` on the clear pixels around the art on the active layer,
+    /// inside the selection when there is one. `corners` includes diagonal
+    /// neighbors. One undo step; `Ok(false)` when there was nothing to outline.
+    pub fn outline(&mut self, color: Rgba, corners: bool) -> Result<bool> {
+        self.paint_effect(color, |w, h, cel, inside| {
+            outline_points(w, h, cel, corners, inside)
+        })
+    }
+
+    /// Paint `color` behind the art, offset by `(dx, dy)`, on clear pixels of
+    /// the active layer. One undo step; `Ok(false)` when nothing changed.
+    pub fn drop_shadow(&mut self, color: Rgba, dx: i32, dy: i32) -> Result<bool> {
+        if dx == 0 && dy == 0 {
+            return Ok(false);
+        }
+        self.paint_effect(color, |w, h, cel, inside| {
+            shadow_points(w, h, cel, dx, dy, inside)
+        })
+    }
+
+    /// Change every `from` pixel to `to` on the active layer of the active
+    /// frame, or on every layer, every frame, or both. Inside the selection
+    /// when there is one. One undo step; returns how many pixels changed.
+    pub fn replace_color(
+        &mut self,
+        from: Rgba,
+        to: Rgba,
+        all_layers: bool,
+        all_frames: bool,
+    ) -> Result<usize> {
+        if !all_layers && self.active_is_group() {
+            return Err(Error::Group(
+                "a group has no pixels; pick a layer inside it",
+            ));
+        }
+        let frames: Vec<usize> = if all_frames {
+            (0..self.doc.frame_count()).collect()
+        } else {
+            vec![self.doc.active_frame()]
+        };
+        let layers: Vec<usize> = if all_layers {
+            (0..self.doc.layer_count())
+                .filter(|&i| self.doc.layer(i).is_some_and(|layer| !layer.group))
+                .collect()
+        } else {
+            vec![self.doc.active_layer()]
+        };
+        let width = self.doc.width();
+        let mut found = Vec::new();
+        for &frame in &frames {
+            for &layer in &layers {
+                let cel = self.doc.cel(frame, layer)?;
+                let hits: Vec<usize> = cel
+                    .iter()
+                    .enumerate()
+                    .filter(|&(i, px)| {
+                        *px == from
+                            && self
+                                .in_selection((i as u32 % width) as i32, (i as u32 / width) as i32)
+                    })
+                    .map(|(i, _)| i)
+                    .collect();
+                if !hits.is_empty() {
+                    found.push((frame, layer, hits));
+                }
+            }
+        }
+        let count = found.iter().map(|(_, _, hits)| hits.len()).sum();
+        if count == 0 || from == to {
+            return Ok(0);
+        }
+        self.mutate(false, |doc| {
+            for (frame, layer, hits) in found {
+                if let Ok(cel) = doc.cel_mut(frame, layer) {
+                    for i in hits {
+                        cel[i] = to;
+                    }
+                }
+            }
+        });
+        Ok(count)
+    }
+
+    fn paint_effect(
+        &mut self,
+        color: Rgba,
+        points: impl FnOnce(u32, u32, &[Rgba], &dyn Fn(i32, i32) -> bool) -> Vec<(i32, i32)>,
+    ) -> Result<bool> {
+        if self.active_is_group() {
+            return Err(Error::Group(
+                "a group has no pixels; pick a layer inside it",
+            ));
+        }
+        let frame = self.doc.active_frame();
+        let layer = self.doc.active_layer();
+        let (w, h) = (self.doc.width(), self.doc.height());
+        let selected = self.selection.is_some();
+        let inside = |x: i32, y: i32| !selected || self.is_selected(x, y);
+        let found = points(w, h, self.doc.cel(frame, layer)?, &inside);
+        if found.is_empty() {
+            return Ok(false);
+        }
+        self.mutate(false, |doc| {
+            if let Ok(cel) = doc.cel_mut(frame, layer) {
+                for (x, y) in found {
+                    cel[(y as u32 * w + x as u32) as usize] = color;
+                }
+            }
+        });
+        Ok(true)
+    }
+
     pub fn clear_selection_pixels(&mut self) -> Result<()> {
         let Some(sel) = self.selection else {
             return Err(Error::NoSelection);
@@ -1401,6 +1661,9 @@ impl Editor {
 
     fn clamp_pointer(&self, x: i32, y: i32) -> (i32, i32) {
         let mut margin = self.brush as i32 + 2;
+        if let Some(brush) = &self.custom_brush {
+            margin = margin.max(brush.width.max(brush.height) as i32 + 2);
+        }
         if self.wrap {
             margin = margin
                 .max(self.doc.width() as i32)
@@ -1612,16 +1875,59 @@ impl Editor {
     }
 
     fn stamp(&self, points: &[(i32, i32)], color: Option<Rgba>) -> Vec<(i32, i32, Rgba)> {
-        let px_color = color.unwrap_or(Rgba::CLEAR);
-        let offsets = brush_offsets(self.brush);
         let width = self.doc.width() as i32;
         let height = self.doc.height() as i32;
         let mut out = Vec::new();
+        if let Some(brush) = self
+            .custom_brush
+            .as_ref()
+            .filter(|_| matches!(self.tool, Tool::Pencil | Tool::Eraser))
+        {
+            // The brush's own colors, centered on each point. The eraser
+            // clears the brush's shape.
+            let (bw, bh) = (brush.width as i32, brush.height as i32);
+            for (x, y) in points {
+                for by in 0..bh {
+                    for bx in 0..bw {
+                        let px = brush.pixels[(by * bw + bx) as usize];
+                        if px.a == 0 {
+                            continue;
+                        }
+                        let px = if color.is_some() { px } else { Rgba::CLEAR };
+                        self.stamp_one(
+                            &mut out,
+                            x - bw / 2 + bx,
+                            y - bh / 2 + by,
+                            px,
+                            width,
+                            height,
+                        );
+                    }
+                }
+            }
+            return out;
+        }
+        let px_color = color.unwrap_or(Rgba::CLEAR);
+        let offsets = brush_offsets(self.brush);
         for (x, y) in points {
             for (dx, dy) in &offsets {
                 let px = x + dx;
                 let py = y + dy;
                 self.stamp_one(&mut out, px, py, px_color, width, height);
+            }
+        }
+        if let (true, Tool::Pencil, Some(color)) = (self.dither, self.tool, color) {
+            // The other button's color fills the odd squares of the checkerboard.
+            let primary = self.button_color(MouseButton::Primary);
+            let other = if color == primary {
+                self.button_color(MouseButton::Secondary)
+            } else {
+                primary
+            };
+            for (x, y, px) in &mut out {
+                if (*x + *y).rem_euclid(2) == 1 {
+                    *px = other;
+                }
             }
         }
         out
@@ -2727,6 +3033,184 @@ mod tests {
         ed.pointer_down(-1, 0, MouseButton::Primary, false);
         assert!(ed.is_selected(7, 7));
         assert!(!ed.can_undo());
+    }
+
+    #[test]
+    fn scale_selection_resizes_from_its_corner_in_one_undo() {
+        let mut ed = Editor::new(8, 8).unwrap();
+        let ink = Rgba::new(200, 10, 10, 255);
+        ed.set_primary(ink);
+        ed.pointer_down(1, 1, MouseButton::Primary, false);
+        ed.pointer_up(1, 1, false);
+        ed.set_tool(Tool::Select);
+        ed.pointer_down(1, 1, MouseButton::Primary, false);
+        ed.pointer_up(2, 2, false);
+        ed.scale_selection(4, 4).unwrap();
+        let cel = ed.document().cel(0, 0).unwrap();
+        let inked: Vec<usize> = (0..64).filter(|&i| cel[i] == ink).collect();
+        assert_eq!(inked, [9, 10, 17, 18], "the one pixel is now 2x2 at (1,1)");
+        assert_eq!(ed.selection(), Some(PixelRect::from_corners(1, 1, 4, 4)));
+        assert!(ed.undo());
+        assert_eq!(
+            ed.document()
+                .cel(0, 0)
+                .unwrap()
+                .iter()
+                .filter(|p| **p == ink)
+                .count(),
+            1
+        );
+        // Growing past the edge keeps only what fits.
+        ed.scale_selection(16, 16).unwrap();
+        assert_eq!(ed.selection(), Some(PixelRect::from_corners(1, 1, 7, 7)));
+        assert!(ed.scale_selection(0, 3).is_err());
+    }
+
+    #[test]
+    fn outline_and_shadow_are_one_undo_step_each_and_respect_the_selection() {
+        let mut ed = Editor::new(5, 5).unwrap();
+        let ink = Rgba::new(255, 255, 255, 255);
+        let line = Rgba::new(0, 0, 0, 255);
+        ed.set_primary(ink);
+        ed.pointer_down(2, 2, MouseButton::Primary, false);
+        ed.pointer_up(2, 2, false);
+        assert!(ed.outline(line, false).unwrap());
+        let cel = ed.document().cel(0, 0).unwrap();
+        assert_eq!(cel.iter().filter(|p| **p == line).count(), 4);
+        assert!(ed.undo());
+        assert!(ed.drop_shadow(line, 1, 1).unwrap());
+        assert_eq!(ed.document().cel(0, 0).unwrap()[3 * 5 + 3], line);
+        assert!(ed.undo());
+        ed.set_tool(Tool::Select);
+        ed.pointer_down(0, 0, MouseButton::Primary, false);
+        ed.pointer_up(4, 1, false);
+        assert!(ed.outline(line, true).unwrap());
+        let cel = ed.document().cel(0, 0).unwrap();
+        assert_eq!(
+            cel.iter().filter(|p| **p == line).count(),
+            3,
+            "only row 1 is selected"
+        );
+        assert!(!ed.drop_shadow(line, 0, 0).unwrap());
+    }
+
+    #[test]
+    fn replace_color_covers_the_chosen_layers_and_frames_in_one_undo() {
+        let mut ed = Editor::new(4, 4).unwrap();
+        let old = Rgba::new(10, 20, 30, 255);
+        let new = Rgba::new(200, 100, 50, 255);
+        paint(&mut ed, 0, 0, old);
+        paint(&mut ed, 3, 3, old);
+        ed.add_layer().unwrap();
+        paint(&mut ed, 1, 1, old);
+        ed.add_frame().unwrap();
+        paint(&mut ed, 2, 2, old);
+        ed.set_active_frame(0).unwrap();
+        let count = |ed: &Editor, frame, layer, color| {
+            ed.document()
+                .cel(frame, layer)
+                .unwrap()
+                .iter()
+                .filter(|p| **p == color)
+                .count()
+        };
+        // The active layer of the active frame only.
+        assert_eq!(ed.replace_color(old, new, false, false).unwrap(), 1);
+        assert_eq!(count(&ed, 0, 0, old), 2);
+        assert!(ed.undo());
+        // Every layer and frame is one undo step.
+        let before = ed.document().clone();
+        assert_eq!(ed.replace_color(old, new, true, true).unwrap(), 4);
+        assert_eq!(count(&ed, 1, 1, new), 1,);
+        assert!(ed.undo());
+        assert_eq!(ed.document(), &before);
+        // Inside the selection only, and nothing to change is no undo step.
+        ed.set_active_layer(0).unwrap();
+        ed.set_tool(Tool::Select);
+        ed.pointer_down(0, 0, MouseButton::Primary, false);
+        ed.pointer_up(1, 1, false);
+        assert_eq!(ed.replace_color(old, new, false, false).unwrap(), 1);
+        assert_eq!(ed.document().cel(0, 0).unwrap()[15], old);
+        assert!(ed.undo());
+        let generation = ed.generation();
+        assert_eq!(ed.replace_color(new, old, true, true).unwrap(), 0);
+        assert_eq!(ed.generation(), generation);
+    }
+
+    #[test]
+    fn dither_alternates_both_colors_on_a_fixed_checkerboard() {
+        let mut ed = Editor::new(4, 2).unwrap();
+        let a = Rgba::new(255, 0, 0, 255);
+        let b = Rgba::new(0, 0, 255, 255);
+        ed.set_primary(a);
+        ed.set_secondary(b);
+        ed.set_dither(true);
+        ed.pointer_down(0, 0, MouseButton::Primary, false);
+        ed.pointer_move(3, 0, false);
+        ed.pointer_up(3, 0, false);
+        let cel = ed.document().cel(0, 0).unwrap().to_vec();
+        assert_eq!(&cel[..4], &[a, b, a, b]);
+        // The right button swaps which color lands on the even squares.
+        ed.pointer_down(0, 1, MouseButton::Secondary, false);
+        ed.pointer_move(3, 1, false);
+        ed.pointer_up(3, 1, false);
+        let cel = ed.document().cel(0, 0).unwrap();
+        assert_eq!(&cel[4..], &[a, b, a, b], "row 1 starts on an odd square");
+        // Shapes and the eraser ignore it.
+        ed.set_tool(Tool::Line);
+        ed.pointer_down(0, 0, MouseButton::Primary, false);
+        ed.pointer_up(3, 0, false);
+        assert_eq!(&ed.document().cel(0, 0).unwrap()[..4], &[a; 4]);
+    }
+
+    #[test]
+    fn a_custom_brush_stamps_the_selected_art_in_its_own_colors() {
+        let mut ed = Editor::new(8, 8).unwrap();
+        let red = Rgba::new(255, 0, 0, 255);
+        let blue = Rgba::new(0, 0, 255, 255);
+        assert!(matches!(ed.brush_from_selection(), Err(Error::NoSelection)));
+        paint(&mut ed, 0, 0, red);
+        paint(&mut ed, 1, 0, blue);
+        ed.set_tool(Tool::Select);
+        ed.pointer_down(0, 0, MouseButton::Primary, false);
+        ed.pointer_up(2, 1, false);
+        assert!(ed.brush_from_selection().unwrap());
+        let brush = ed.custom_brush().unwrap();
+        assert_eq!((brush.width, brush.height), (3, 2));
+        ed.deselect();
+        ed.set_tool(Tool::Pencil);
+        // A 3×2 brush is centered with its top left at (x - 1, y - 1).
+        ed.pointer_down(5, 5, MouseButton::Primary, false);
+        ed.pointer_up(5, 5, false);
+        let cel = ed.document().cel(0, 0).unwrap().to_vec();
+        assert_eq!(cel[4 * 8 + 4], red);
+        assert_eq!(cel[4 * 8 + 5], blue);
+        assert_eq!(
+            cel[4 * 8 + 6],
+            Rgba::CLEAR,
+            "clear brush pixels leave the canvas alone"
+        );
+        assert_eq!(cel.iter().filter(|p| p.a > 0).count(), 4);
+        // The eraser clears the brush's shape only.
+        ed.set_tool(Tool::Eraser);
+        ed.pointer_down(1, 1, MouseButton::Primary, false);
+        ed.pointer_up(1, 1, false);
+        let cel = ed.document().cel(0, 0).unwrap();
+        assert_eq!(cel[0], Rgba::CLEAR);
+        assert_eq!(cel[1], Rgba::CLEAR);
+        ed.clear_custom_brush();
+        assert!(ed.custom_brush().is_none());
+        // An empty selection makes no brush, and a huge one is refused.
+        ed.set_tool(Tool::Select);
+        ed.pointer_down(6, 0, MouseButton::Primary, false);
+        ed.pointer_up(7, 1, false);
+        assert!(!ed.brush_from_selection().unwrap());
+        let mut big = Editor::new(MAX_CUSTOM_BRUSH + 1, 2).unwrap();
+        big.select_all();
+        assert!(matches!(
+            big.brush_from_selection(),
+            Err(Error::Limit { .. })
+        ));
     }
 
     #[test]

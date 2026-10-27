@@ -47,6 +47,93 @@ pub enum Transform {
     Rotate180,
 }
 
+/// A nearest-neighbor copy of a `width` by `height` grid at `new_w` by
+/// `new_h`. `None` for a zero side, a buffer of the wrong length, or a result
+/// larger than one cel.
+pub(crate) fn scale_nearest<T: Copy>(
+    width: u32,
+    height: u32,
+    cells: &[T],
+    new_w: u32,
+    new_h: u32,
+) -> Option<Vec<T>> {
+    if width == 0 || height == 0 || new_w == 0 || new_h == 0 {
+        return None;
+    }
+    if cells.len() as u64 != u64::from(width) * u64::from(height)
+        || u64::from(new_w) * u64::from(new_h) > crate::limits::MAX_CEL_PIXELS
+    {
+        return None;
+    }
+    let mut out = Vec::with_capacity(new_w as usize * new_h as usize);
+    for y in 0..new_h {
+        let sy = (u64::from(y) * u64::from(height) / u64::from(new_h)) as usize;
+        for x in 0..new_w {
+            let sx = (u64::from(x) * u64::from(width) / u64::from(new_w)) as usize;
+            out.push(cells[sy * width as usize + sx]);
+        }
+    }
+    Some(out)
+}
+
+/// Clear pixels that touch an opaque one: the four sides, and with
+/// `corners` the diagonals too. Only pixels where `inside` is true change.
+pub(crate) fn outline_points(
+    width: u32,
+    height: u32,
+    cel: &[Rgba],
+    corners: bool,
+    inside: impl Fn(i32, i32) -> bool,
+) -> Vec<(i32, i32)> {
+    let (w, h) = (width as i32, height as i32);
+    let opaque =
+        |x: i32, y: i32| x >= 0 && y >= 0 && x < w && y < h && cel[(y * w + x) as usize].a != 0;
+    let mut points = Vec::new();
+    for y in 0..h {
+        for x in 0..w {
+            if opaque(x, y) || !inside(x, y) {
+                continue;
+            }
+            let sides =
+                opaque(x - 1, y) || opaque(x + 1, y) || opaque(x, y - 1) || opaque(x, y + 1);
+            let diagonals = corners
+                && (opaque(x - 1, y - 1)
+                    || opaque(x + 1, y - 1)
+                    || opaque(x - 1, y + 1)
+                    || opaque(x + 1, y + 1));
+            if sides || diagonals {
+                points.push((x, y));
+            }
+        }
+    }
+    points
+}
+
+/// Clear pixels at `(dx, dy)` from an opaque one: a hard drop shadow that
+/// stays behind the art. Only pixels where `inside` is true change.
+pub(crate) fn shadow_points(
+    width: u32,
+    height: u32,
+    cel: &[Rgba],
+    dx: i32,
+    dy: i32,
+    inside: impl Fn(i32, i32) -> bool,
+) -> Vec<(i32, i32)> {
+    let (w, h) = (width as i32, height as i32);
+    let mut points = Vec::new();
+    for y in 0..h {
+        for x in 0..w {
+            let (sx, sy) = (x - dx, y - dy);
+            let casts =
+                sx >= 0 && sy >= 0 && sx < w && sy < h && cel[(sy * w + sx) as usize].a != 0;
+            if casts && cel[(y * w + x) as usize].a == 0 && inside(x, y) {
+                points.push((x, y));
+            }
+        }
+    }
+    points
+}
+
 /// Map `pixels` (row-major, `width` by `height`) through `op`.
 ///
 /// Returns the new width, the new height, and the new pixels. A zero side, a
@@ -509,6 +596,42 @@ fn push_fill_neighbor(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nearest_scale_doubles_halves_and_refuses_nonsense() {
+        let grid = [1, 2, 3, 4];
+        assert_eq!(
+            scale_nearest(2, 2, &grid, 4, 4).unwrap(),
+            [1, 1, 2, 2, 1, 1, 2, 2, 3, 3, 4, 4, 3, 3, 4, 4]
+        );
+        assert_eq!(scale_nearest(2, 2, &grid, 1, 1).unwrap(), [1]);
+        assert_eq!(scale_nearest(2, 2, &grid, 3, 1).unwrap(), [1, 1, 2]);
+        assert!(scale_nearest(2, 2, &grid, 0, 4).is_none());
+        assert!(scale_nearest(2, 2, &grid[..3], 4, 4).is_none());
+        assert!(scale_nearest(2, 2, &grid, 4096, 4096).is_none());
+    }
+
+    #[test]
+    fn outline_and_shadow_touch_only_clear_pixels() {
+        let ink = Rgba::new(9, 9, 9, 255);
+        // A single pixel in the middle of a 3x3 cel.
+        let mut cel = vec![Rgba::CLEAR; 9];
+        cel[4] = ink;
+        let sides = outline_points(3, 3, &cel, false, |_, _| true);
+        assert_eq!(sides, [(1, 0), (0, 1), (2, 1), (1, 2)]);
+        assert_eq!(outline_points(3, 3, &cel, true, |_, _| true).len(), 8);
+        assert_eq!(outline_points(3, 3, &cel, true, |x, _| x == 0).len(), 3);
+        assert_eq!(shadow_points(3, 3, &cel, 1, 1, |_, _| true), [(2, 2)]);
+        assert!(
+            shadow_points(3, 3, &cel, 2, 2, |_, _| true).is_empty(),
+            "off the cel"
+        );
+        cel[8] = ink;
+        assert!(
+            shadow_points(3, 3, &cel, 1, 1, |_, _| true).is_empty(),
+            "covered by art"
+        );
+    }
 
     #[test]
     fn line_includes_endpoints() {

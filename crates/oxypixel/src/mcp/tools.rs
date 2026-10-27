@@ -86,7 +86,7 @@ pub(crate) fn list() -> Vec<Value> {
         tool(
             "draw",
             "Draw",
-            "Draw on one layer of one frame with the editor's own tools, then save. Operations run in order. Each is an object with op set to: \"pixels\" (points: [[x,y],...]), \"erase\" (points), \"line\" (from, to), \"rect\" or \"ellipse\" (from, to corners, optional filled), or \"fill\" (at, optional tolerance 0-255 and global). Each operation may set its own color; otherwise the call's color is used. Brush size applies to pixels, erase, and line.",
+            "Draw on one layer of one frame with the editor's own tools, then save. Operations run in order. Each is an object with op set to: \"pixels\" (points: [[x,y],...]), \"erase\" (points), \"line\" (from, to), \"rect\" or \"ellipse\" (from, to corners, optional filled), \"fill\" (at, optional tolerance 0-255 and global), \"outline\" (paints the clear pixels around the layer's art; optional corners), \"shadow\" (a hard drop shadow behind the art; offset [dx, dy], default [1, 1]), or \"replace\" (every pixel of exactly the old color becomes the color). Each operation may set its own color; otherwise the call's color is used. Brush size applies to pixels, erase, and line.",
             json!({
                 "path": path,
                 "frame": frame,
@@ -98,7 +98,10 @@ pub(crate) fn list() -> Vec<Value> {
                     "items": {
                         "type": "object",
                         "properties": {
-                            "op": { "type": "string", "enum": ["pixels", "erase", "line", "rect", "ellipse", "fill"] },
+                            "op": { "type": "string", "enum": ["pixels", "erase", "line", "rect", "ellipse", "fill", "outline", "shadow", "replace"] },
+                            "old": color,
+                            "corners": { "type": "boolean" },
+                            "offset": point,
                             "points": { "type": "array", "items": point },
                             "from": point,
                             "to": point,
@@ -613,6 +616,27 @@ fn apply(
             editor.set_fill_global(opt_bool(op, "global")?.unwrap_or(false));
             editor.pointer_down(x, y, MouseButton::Primary, false);
             editor.pointer_up(x, y, false);
+        }
+        "outline" => {
+            let corners = opt_bool(op, "corners")?.unwrap_or(false);
+            editor
+                .outline(paint()?, corners)
+                .map_err(|err| err.to_string())?;
+        }
+        "shadow" => {
+            let (dx, dy) = match op.get("offset") {
+                Some(value) => point(Some(value), "offset")?,
+                None => (1, 1),
+            };
+            editor
+                .drop_shadow(paint()?, dx, dy)
+                .map_err(|err| err.to_string())?;
+        }
+        "replace" => {
+            let old = color(string(op, "old")?)?;
+            editor
+                .replace_color(old, paint()?, false, false)
+                .map_err(|err| err.to_string())?;
         }
         other => return Err(format!("unknown op {other}")),
     }
