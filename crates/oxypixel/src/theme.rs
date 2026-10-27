@@ -8,6 +8,8 @@ pub const INK: Color32 = Color32::from_rgb(20, 22, 30);
 pub const PANEL: Color32 = Color32::from_rgb(28, 31, 40);
 pub const CHECKER_A: Color32 = Color32::from_rgb(46, 49, 61);
 pub const CHECKER_B: Color32 = Color32::from_rgb(24, 26, 34);
+pub const CHECKER_LIGHT_A: Color32 = Color32::from_rgb(214, 214, 220);
+pub const CHECKER_LIGHT_B: Color32 = Color32::from_rgb(250, 250, 252);
 
 pub fn apply(ctx: &eframe::egui::Context) {
     let mut visuals = Visuals::dark();

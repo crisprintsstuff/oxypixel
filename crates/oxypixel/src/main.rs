@@ -20,6 +20,7 @@ mod recent;
 mod recovery;
 mod refsview;
 mod session;
+mod settingsview;
 mod shortcuts;
 mod tagsview;
 mod theme;

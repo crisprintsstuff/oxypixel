@@ -85,6 +85,7 @@ pub struct OxyApp {
     preview_panel: PreviewPanel,
     pack_window: crate::packview::PackWindow,
     tags_window: crate::tagsview::TagsWindow,
+    settings_window: crate::settingsview::SettingsWindow,
     thumbs: ThumbCache,
     save_path: Option<PathBuf>,
     note: Option<Note>,
@@ -126,6 +127,8 @@ pub struct OxyApp {
     /// downloads a newer release without opening the window.
     update_auto: bool,
     prefs: session::Prefs,
+    /// Points per pixel last frame, to refit the canvas when it changes.
+    last_scale: f32,
     /// The last copy did not reach the system clipboard, so paste must keep
     /// the in-memory patch even if an older system image is still readable.
     clipboard_local_only: bool,
@@ -179,6 +182,7 @@ impl OxyApp {
             preview_panel: PreviewPanel::new(prefs.preview_open),
             pack_window: crate::packview::PackWindow::default(),
             tags_window: crate::tagsview::TagsWindow::default(),
+            settings_window: crate::settingsview::SettingsWindow::default(),
             thumbs: ThumbCache::default(),
             save_path: None,
             note: None,
@@ -187,13 +191,13 @@ impl OxyApp {
             path_kind: PathKind::Open,
             path_buf: String::new(),
             pending: None,
-            new_width: "64".to_string(),
-            new_height: "64".to_string(),
+            new_width: prefs.new_width.to_string(),
+            new_height: prefs.new_height.to_string(),
             canvas_w: "32".to_string(),
             canvas_h: "32".to_string(),
             canvas_x: "0".to_string(),
             canvas_y: "0".to_string(),
-            export_scale: 1,
+            export_scale: prefs.export_scale,
             sheet_columns: 0,
             sheet_padding: 0,
             sheet_json: false,
@@ -217,6 +221,7 @@ impl OxyApp {
             update_rx: None,
             update_auto: false,
             prefs,
+            last_scale: 0.0,
             clipboard_local_only: false,
             clipboard_chord: shortcuts::ClipboardChord::default(),
             autosave_enabled,
@@ -239,6 +244,7 @@ impl OxyApp {
             app.open_path(path);
         }
         app.scan_recoveries();
+        app.apply_view_prefs(&cc.egui_ctx, None);
         let now = session::now_secs();
         if session::update_check_due(&app.prefs, now) {
             app.prefs.last_update_check = now;
@@ -376,6 +382,13 @@ impl OxyApp {
 impl eframe::App for OxyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.send_viewport_cmd(ViewportCommand::Title(self.title()));
+        // A new interface scale takes effect a frame after it is set, and the
+        // canvas fit from before it no longer matches the panel.
+        let scale = ctx.pixels_per_point();
+        if scale != self.last_scale {
+            self.last_scale = scale;
+            self.view.fit_next = true;
+        }
         if ctx.input(|i| i.viewport().close_requested())
             && self.has_unsaved_changes()
             && !self.allow_quit
@@ -423,6 +436,7 @@ impl eframe::App for OxyApp {
         }
         self.pack_window.show(ctx);
         self.tags_window.show(ctx, &mut self.editor);
+        self.show_settings(ctx);
         self.show_dialog(ctx);
         self.consider_autosave(ctx);
     }
@@ -511,6 +525,7 @@ impl OxyApp {
             Command::New => self.request_new(),
             Command::Open => self.request_open(),
             Command::Save => self.request_save(),
+            Command::Settings => self.settings_window.open = !self.settings_window.open,
             Command::SaveAs => self.open_path_dialog(PathKind::Save),
             Command::Quit => self.request_quit(ctx),
             Command::Undo => {
@@ -737,8 +752,82 @@ impl OxyApp {
             self.pending = Some(Pending::New);
             self.dialog = Some(DialogKind::Unsaved);
         } else {
-            self.dialog_error = None;
-            self.dialog = Some(DialogKind::New);
+            self.open_new_dialog();
+        }
+    }
+
+    /// File, then New, starting from the size in Settings.
+    fn open_new_dialog(&mut self) {
+        self.new_width = self.prefs.new_width.to_string();
+        self.new_height = self.prefs.new_height.to_string();
+        self.dialog_error = None;
+        self.dialog = Some(DialogKind::New);
+    }
+
+    /// Bring the view in line with the settings. `old` is what they were, so
+    /// only what changed is touched; `None` applies everything (at launch).
+    fn apply_view_prefs(&mut self, ctx: &egui::Context, old: Option<session::Prefs>) {
+        let prefs = self.prefs;
+        let changed =
+            |pick: fn(&session::Prefs) -> u64| old.is_none_or(|old| pick(&old) != pick(&prefs));
+        if changed(|p| u64::from(p.ui_scale)) {
+            ctx.set_zoom_factor(f32::from(prefs.ui_scale) / 100.0);
+        }
+        if changed(|p| u64::from(p.grid)) {
+            self.view.grid = prefs.grid;
+        }
+        if changed(|p| u64::from(p.preview_open)) {
+            self.preview_panel.open = prefs.preview_open;
+        }
+        if canvas::set_checker_style(prefs.checker) {
+            self.view.reset_checker();
+            self.thumbs = ThumbCache::default();
+            self.preview_panel.invalidate();
+        }
+        let onion = |p: &session::Prefs| {
+            (
+                p.onion_previous,
+                p.onion_next,
+                p.onion_opacity,
+                p.onion_tint,
+            )
+        };
+        if old.is_none_or(|old| onion(&old) != onion(&prefs)) {
+            self.view.onion.previous = prefs.onion_previous;
+            self.view.onion.next = prefs.onion_next;
+            self.view.onion.opacity = prefs.onion_opacity;
+            self.view.onion.tint = prefs.onion_tint;
+        }
+        if changed(|p| u64::from(p.export_scale)) {
+            self.export_scale = prefs.export_scale;
+        }
+        let size = |p: &session::Prefs| (p.new_width, p.new_height);
+        if old.is_some_and(|old| size(&old) != size(&prefs)) {
+            self.new_width = prefs.new_width.to_string();
+            self.new_height = prefs.new_height.to_string();
+        }
+    }
+
+    fn show_settings(&mut self, ctx: &egui::Context) {
+        let state = crate::settingsview::SettingsContext {
+            autosave: self.autosave_enabled,
+            recent_count: self.recent.len(),
+        };
+        let actions = self.settings_window.show(ctx, &self.prefs, &state);
+        if let Some(prefs) = actions.prefs {
+            let old = std::mem::replace(&mut self.prefs, prefs);
+            self.apply_view_prefs(ctx, Some(old));
+            session::save(&self.prefs);
+        }
+        if let Some(enabled) = actions.autosave {
+            self.set_autosave_enabled(enabled);
+        }
+        if actions.clear_recent {
+            recent::clear(&mut self.recent);
+            recent::save(&self.recent);
+        }
+        if actions.check_updates {
+            self.start_update_check();
         }
     }
 
@@ -834,10 +923,7 @@ impl OxyApp {
         self.pending = None;
         self.dialog = None;
         match pending {
-            Pending::New => {
-                self.dialog_error = None;
-                self.dialog = Some(DialogKind::New);
-            }
+            Pending::New => self.open_new_dialog(),
             Pending::Open => self.open_path_dialog(PathKind::Open),
             Pending::OpenAt => {
                 if let Some(path) = self.pending_path.take() {
@@ -1361,6 +1447,11 @@ impl OxyApp {
                     }
                     if menu_item(ui, "Clear selection", "Delete") {
                         self.apply(|editor| editor.clear_selection_pixels());
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if menu_item(ui, "Settings…", "Ctrl+,") {
+                        self.settings_window.open = true;
                         ui.close_menu();
                     }
                 });
