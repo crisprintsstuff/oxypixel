@@ -7,7 +7,8 @@ use crate::blend::{blend, BlendMode};
 use crate::color::{source_over, Rgba};
 use crate::error::{Error, Result};
 use crate::limits::{
-    check_stack, clamp_duration, clamp_name, DEFAULT_FRAME_MS, MAX_PALETTE, MAX_TAGS,
+    check_stack, clamp_duration, clamp_name, DEFAULT_FRAME_MS, MAX_GROUP_DEPTH, MAX_PALETTE,
+    MAX_TAGS,
 };
 use crate::tags::{self, FrameTag};
 
@@ -21,6 +22,47 @@ pub struct LayerInfo {
     /// How the layer mixes with what is below it. A document with any mode
     /// other than Normal is saved with a required `.oxypix` section.
     pub blend: BlendMode,
+    /// A group holds the layers right after it that are one level deeper.
+    /// Its own cels stay clear and are never drawn.
+    pub group: bool,
+    /// How many groups this layer is inside. 0 is the top level.
+    pub depth: u8,
+}
+
+impl LayerInfo {
+    pub(crate) fn new(name: String) -> Self {
+        Self {
+            name,
+            visible: true,
+            opacity: 255,
+            blend: BlendMode::Normal,
+            group: false,
+            depth: 0,
+        }
+    }
+}
+
+/// Whether depths and group flags describe a tree: the first layer is at the
+/// top level, and a layer one level deeper than the one before it follows a
+/// group.
+pub(crate) fn valid_layer_tree(layers: &[LayerInfo]) -> bool {
+    let mut previous: Option<&LayerInfo> = None;
+    for layer in layers {
+        if layer.depth > MAX_GROUP_DEPTH {
+            return false;
+        }
+        let ok = match previous {
+            None => layer.depth == 0,
+            Some(prev) => {
+                layer.depth <= prev.depth || (layer.depth == prev.depth + 1 && prev.group)
+            }
+        };
+        if !ok {
+            return false;
+        }
+        previous = Some(layer);
+    }
+    layers.iter().any(|layer| !layer.group)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -52,12 +94,7 @@ impl Document {
         Ok(Self {
             width,
             height,
-            layers: vec![LayerInfo {
-                name: "Layer 1".to_string(),
-                visible: true,
-                opacity: 255,
-                blend: BlendMode::Normal,
-            }],
+            layers: vec![LayerInfo::new("Layer 1".to_string())],
             frames: vec![Frame {
                 duration_ms: DEFAULT_FRAME_MS,
                 name: String::new(),
@@ -256,7 +293,13 @@ impl Document {
             .ok_or(Error::Index { what: "cel" })
     }
 
+    /// A layer's pixels to change. A group has none to draw on.
     pub(crate) fn cel_mut(&mut self, frame: usize, layer: usize) -> Result<&mut [Rgba]> {
+        if self.layers.get(layer).is_some_and(|l| l.group) {
+            return Err(Error::Group(
+                "a group has no pixels; pick a layer inside it",
+            ));
+        }
         self.frames
             .get_mut(frame)
             .and_then(|f| f.cels.get_mut(layer))
@@ -293,17 +336,203 @@ impl Document {
         } else {
             clamp_name(name)
         };
-        self.layers.push(LayerInfo {
-            name,
-            visible: true,
-            opacity: 255,
-            blend: BlendMode::Normal,
-        });
+        self.layers.push(LayerInfo::new(name));
         let len = (self.width * self.height) as usize;
         for frame in &mut self.frames {
             frame.cels.push(vec![Rgba::CLEAR; len]);
         }
         self.active_layer = self.layers.len() - 1;
+        Ok(())
+    }
+
+    /// Add an empty group on top of the stack.
+    pub fn add_group(&mut self, name: &str) -> Result<()> {
+        let groups = self.layers.iter().filter(|l| l.group).count();
+        let name = if name.is_empty() {
+            format!("Group {}", groups + 1)
+        } else {
+            name.to_string()
+        };
+        self.add_layer(&name)?;
+        if let Some(layer) = self.layers.last_mut() {
+            layer.group = true;
+        }
+        Ok(())
+    }
+
+    /// Put a new group where `index` is and move `index` (with everything
+    /// inside it) into that group.
+    pub fn wrap_in_group(&mut self, index: usize, name: &str) -> Result<()> {
+        if index >= self.layers.len() {
+            return Err(Error::Index { what: "layer" });
+        }
+        let end = self.layer_block_end(index);
+        if self.layers[index..end]
+            .iter()
+            .any(|l| l.depth >= MAX_GROUP_DEPTH)
+        {
+            return Err(Error::Group("groups cannot nest any deeper"));
+        }
+        check_stack(
+            self.width,
+            self.height,
+            self.frames.len(),
+            self.layers.len() + 1,
+        )?;
+        let groups = self.layers.iter().filter(|l| l.group).count();
+        let name = if name.is_empty() {
+            format!("Group {}", groups + 1)
+        } else {
+            clamp_name(name)
+        };
+        let group = LayerInfo {
+            group: true,
+            depth: self.layers[index].depth,
+            ..LayerInfo::new(name)
+        };
+        for layer in &mut self.layers[index..end] {
+            layer.depth += 1;
+        }
+        self.layers.insert(index, group);
+        let len = (self.width * self.height) as usize;
+        for frame in &mut self.frames {
+            frame.cels.insert(index, vec![Rgba::CLEAR; len]);
+        }
+        self.active_layer = index;
+        Ok(())
+    }
+
+    /// One past the last layer in `index`'s block: the layer itself and, for
+    /// a group, everything inside it.
+    pub fn layer_block_end(&self, index: usize) -> usize {
+        let Some(depth) = self.layers.get(index).map(|l| l.depth) else {
+            return index;
+        };
+        let mut end = index + 1;
+        while end < self.layers.len() && self.layers[end].depth > depth {
+            end += 1;
+        }
+        end
+    }
+
+    /// The group `index` is directly inside.
+    pub fn layer_parent(&self, index: usize) -> Option<usize> {
+        let depth = self.layers.get(index)?.depth;
+        if depth == 0 {
+            return None;
+        }
+        (0..index).rev().find(|&k| self.layers[k].depth < depth)
+    }
+
+    /// The layer or group just below `index` in the same group.
+    fn prev_sibling(&self, index: usize) -> Option<usize> {
+        let depth = self.layers.get(index)?.depth;
+        for k in (0..index).rev() {
+            match self.layers[k].depth {
+                d if d < depth => return None,
+                d if d == depth => return Some(k),
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// The layer or group just above `index`'s block in the same group.
+    fn next_sibling(&self, index: usize) -> Option<usize> {
+        let depth = self.layers.get(index)?.depth;
+        let end = self.layer_block_end(index);
+        (end < self.layers.len() && self.layers[end].depth == depth).then_some(end)
+    }
+
+    /// Whether the layer and every group around it are visible.
+    pub fn layer_shown(&self, index: usize) -> bool {
+        let mut at = Some(index);
+        while let Some(i) = at {
+            if !self.layers.get(i).is_some_and(|l| l.visible) {
+                return false;
+            }
+            at = self.layer_parent(i);
+        }
+        true
+    }
+
+    /// Layer indices in the order a layer panel lists them, top first, with
+    /// each group above the layers inside it.
+    pub fn layer_display_order(&self) -> Vec<usize> {
+        let mut order = Vec::with_capacity(self.layers.len());
+        self.list_siblings(0, self.layers.len(), &mut order);
+        order
+    }
+
+    fn list_siblings(&self, start: usize, end: usize, order: &mut Vec<usize>) {
+        let mut heads = Vec::new();
+        let mut i = start;
+        while i < end {
+            heads.push(i);
+            i = self.layer_block_end(i);
+        }
+        for head in heads.into_iter().rev() {
+            order.push(head);
+            if self.layers[head].group {
+                self.list_siblings(head + 1, self.layer_block_end(head), order);
+            }
+        }
+    }
+
+    /// Rearrange layers (and every frame's cels): `order[new] = old`.
+    fn reorder(&mut self, order: &[usize]) {
+        self.layers = order.iter().map(|&old| self.layers[old].clone()).collect();
+        for frame in &mut self.frames {
+            let mut old: Vec<Option<Vec<Rgba>>> = std::mem::take(&mut frame.cels)
+                .into_iter()
+                .map(Some)
+                .collect();
+            frame.cels = order
+                .iter()
+                .map(|&o| old[o].take().unwrap_or_default())
+                .collect();
+        }
+        if let Some(active) = order.iter().position(|&o| o == self.active_layer) {
+            self.active_layer = active;
+        }
+    }
+
+    /// Move a layer (or a whole group) into the group just below it, as that
+    /// group's top layer.
+    pub fn indent_layer(&mut self, index: usize) -> Result<()> {
+        self.prev_sibling(index)
+            .filter(|&k| self.layers[k].group)
+            .ok_or(Error::Group("there is no group just below this layer"))?;
+        let end = self.layer_block_end(index);
+        if self.layers[index..end]
+            .iter()
+            .any(|l| l.depth >= MAX_GROUP_DEPTH)
+        {
+            return Err(Error::Group("groups cannot nest any deeper"));
+        }
+        for layer in &mut self.layers[index..end] {
+            layer.depth += 1;
+        }
+        Ok(())
+    }
+
+    /// Move a layer (or a whole group) out of its group, just above it.
+    pub fn outdent_layer(&mut self, index: usize) -> Result<()> {
+        let parent = self
+            .layer_parent(index)
+            .ok_or(Error::Group("this layer is not in a group"))?;
+        let end = self.layer_block_end(index);
+        let parent_end = self.layer_block_end(parent);
+        let order: Vec<usize> = (0..index)
+            .chain(end..parent_end)
+            .chain(index..end)
+            .chain(parent_end..self.layers.len())
+            .collect();
+        self.reorder(&order);
+        let start = parent_end - (end - index);
+        for layer in &mut self.layers[start..parent_end] {
+            layer.depth -= 1;
+        }
         Ok(())
     }
 
@@ -317,66 +546,97 @@ impl Document {
             self.frames.len(),
             self.layers.len() + 1,
         )?;
-        let mut info = self.layers[index].clone();
-        info.name = clamp_name(&format!("{} copy", info.name));
-        self.layers.insert(index + 1, info);
+        let end = self.layer_block_end(index);
+        check_stack(
+            self.width,
+            self.height,
+            self.frames.len(),
+            self.layers.len() + (end - index),
+        )?;
+        let mut block: Vec<LayerInfo> = self.layers[index..end].to_vec();
+        block[0].name = clamp_name(&format!("{} copy", block[0].name));
+        self.layers.splice(end..end, block);
         for frame in &mut self.frames {
-            let copy = frame.cels[index].clone();
-            frame.cels.insert(index + 1, copy);
+            let copy: Vec<Vec<Rgba>> = frame.cels[index..end].to_vec();
+            frame.cels.splice(end..end, copy);
         }
-        self.active_layer = index + 1;
+        self.active_layer = end;
         Ok(())
     }
 
     pub fn delete_layer(&mut self, index: usize) -> Result<()> {
-        if self.layers.len() == 1 {
-            return Err(Error::LastLayer);
-        }
         if index >= self.layers.len() {
             return Err(Error::Index { what: "layer" });
         }
-        self.layers.remove(index);
-        for frame in &mut self.frames {
-            frame.cels.remove(index);
+        let end = self.layer_block_end(index);
+        let keeps_a_layer = self.layers[..index]
+            .iter()
+            .chain(&self.layers[end..])
+            .any(|l| !l.group);
+        if !keeps_a_layer {
+            return Err(Error::LastLayer);
         }
-        if self.active_layer >= self.layers.len() {
-            self.active_layer = self.layers.len() - 1;
-        } else if self.active_layer > index {
-            self.active_layer -= 1;
+        self.layers.drain(index..end);
+        for frame in &mut self.frames {
+            frame.cels.drain(index..end);
+        }
+        let removed = end - index;
+        if self.active_layer >= end {
+            self.active_layer -= removed;
+        } else if self.active_layer >= index {
+            self.active_layer = index.min(self.layers.len() - 1);
         }
         Ok(())
     }
 
-    /// Move a layer by `delta` positions. Positive is toward the top of the stack.
+    /// Move a layer (or a whole group) past `delta` neighbors in the same
+    /// group. Positive is toward the top of the stack.
     pub fn move_layer(&mut self, index: usize, delta: i32) -> Result<()> {
         if index >= self.layers.len() {
             return Err(Error::Index { what: "layer" });
         }
-        let target = index as i32 + delta;
-        if target < 0 || target >= self.layers.len() as i32 {
-            return Err(Error::Index { what: "layer" });
-        }
-        let target = target as usize;
-        self.layers.swap(index, target);
-        for frame in &mut self.frames {
-            frame.cels.swap(index, target);
-        }
-        if self.active_layer == index {
-            self.active_layer = target;
-        } else if self.active_layer == target {
-            self.active_layer = index;
+        let mut at = index;
+        for _ in 0..delta.unsigned_abs() {
+            let (low, high) = if delta > 0 {
+                (at, self.next_sibling(at))
+            } else {
+                match self.prev_sibling(at) {
+                    Some(prev) => (prev, Some(at)),
+                    None => (at, None),
+                }
+            };
+            let high = high.ok_or(Error::Index { what: "layer" })?;
+            let low_end = high;
+            let high_end = self.layer_block_end(high);
+            let order: Vec<usize> = (0..low)
+                .chain(high..high_end)
+                .chain(low..low_end)
+                .chain(high_end..self.layers.len())
+                .collect();
+            self.reorder(&order);
+            // The moving block was low..low_end going up, or high..high_end going down.
+            at = if delta > 0 {
+                low + (high_end - high)
+            } else {
+                low
+            };
         }
         Ok(())
     }
 
     /// Bake `index` onto the layer below on every frame, then remove it.
     pub fn merge_down(&mut self, index: usize) -> Result<()> {
-        if index == 0 {
-            return Err(Error::BottomLayer);
-        }
         if index >= self.layers.len() {
             return Err(Error::Index { what: "layer" });
         }
+        let below = self.prev_sibling(index).ok_or(Error::BottomLayer)?;
+        if self.layers[index].group || self.layers[below].group {
+            return Err(Error::Group(
+                "groups cannot be merged; merge the layers inside",
+            ));
+        }
+        // An image layer's block is itself, so the sibling below is index - 1.
+        debug_assert_eq!(below, index - 1);
         let upper_opacity = self.layers[index].opacity;
         let upper_blend = self.layers[index].blend;
         let lower_opacity = self.layers[index - 1].opacity;
@@ -552,15 +812,57 @@ impl Document {
             .get(frame)
             .ok_or(Error::Index { what: "frame" })?;
         let mut out = vec![Rgba::CLEAR; (self.width * self.height) as usize];
-        for (info, cel) in self.layers.iter().zip(frame.cels.iter()) {
-            if !info.visible || info.opacity == 0 {
-                continue;
-            }
-            for (dst, src) in out.iter_mut().zip(cel.iter()) {
-                *dst = blend(*dst, *src, info.opacity, info.blend);
-            }
-        }
+        self.draw_layers(frame, 0, self.layers.len(), &mut out);
         Ok(out)
+    }
+
+    /// Draw the sibling layers in `start..end` (and what is inside their
+    /// groups) onto `out`, bottom first. A group is drawn into its own
+    /// buffer, then mixed in with the group's opacity and blend mode.
+    fn draw_layers(&self, frame: &Frame, start: usize, end: usize, out: &mut [Rgba]) {
+        let mut i = start;
+        while i < end {
+            let info = &self.layers[i];
+            let block_end = self.layer_block_end(i);
+            if info.visible && info.opacity > 0 {
+                if info.group {
+                    let mut inside = vec![Rgba::CLEAR; out.len()];
+                    self.draw_layers(frame, i + 1, block_end, &mut inside);
+                    for (dst, src) in out.iter_mut().zip(inside) {
+                        *dst = blend(*dst, src, info.opacity, info.blend);
+                    }
+                } else if let Some(cel) = frame.cels.get(i) {
+                    for (dst, src) in out.iter_mut().zip(cel.iter()) {
+                        *dst = blend(*dst, *src, info.opacity, info.blend);
+                    }
+                }
+            }
+            i = block_end;
+        }
+    }
+
+    fn layers_pixel(&self, frame: &Frame, start: usize, end: usize, index: usize) -> Rgba {
+        let mut color = Rgba::CLEAR;
+        let mut i = start;
+        while i < end {
+            let info = &self.layers[i];
+            let block_end = self.layer_block_end(i);
+            if info.visible && info.opacity > 0 {
+                let src = if info.group {
+                    self.layers_pixel(frame, i + 1, block_end, index)
+                } else {
+                    frame
+                        .cels
+                        .get(i)
+                        .and_then(|cel| cel.get(index))
+                        .copied()
+                        .unwrap_or(Rgba::CLEAR)
+                };
+                color = blend(color, src, info.opacity, info.blend);
+            }
+            i = block_end;
+        }
+        color
     }
 
     /// The composited color of one pixel, using the same rules as [`Self::composite`].
@@ -570,14 +872,7 @@ impl Document {
         }
         let frame = self.frames.get(frame)?;
         let index = (y * self.width + x) as usize;
-        let mut color = Rgba::CLEAR;
-        for (info, cel) in self.layers.iter().zip(frame.cels.iter()) {
-            if !info.visible || info.opacity == 0 {
-                continue;
-            }
-            color = blend(color, *cel.get(index)?, info.opacity, info.blend);
-        }
-        Some(color)
+        Some(self.layers_pixel(frame, 0, self.layers.len(), index))
     }
 
     pub(crate) fn from_parts(
@@ -601,6 +896,9 @@ impl Document {
             if layer.name.len() > crate::limits::MAX_NAME_BYTES {
                 return Err(Error::BadName);
             }
+        }
+        if !valid_layer_tree(&layers) {
+            return Err(Error::BadFlag("layer groups"));
         }
         for frame in &frames {
             if frame.duration_ms < crate::limits::MIN_FRAME_MS
@@ -708,6 +1006,170 @@ mod tests {
             Some(Rgba::new(0, 0, 255, 255))
         );
         assert_eq!(doc.composite_pixel(0, 1, 0), None);
+    }
+
+    /// bg (gray), then group G holding `a` (white) and `b` (red), in a 1×1 document.
+    fn grouped() -> Document {
+        let mut doc = Document::new(1, 1).unwrap();
+        doc.layers[0].name = "bg".into();
+        doc.frames[0].cels[0][0] = Rgba::new(128, 128, 128, 255);
+        doc.add_group("G").unwrap();
+        doc.add_layer("a").unwrap();
+        doc.frames[0].cels[2][0] = Rgba::new(255, 255, 255, 255);
+        doc.indent_layer(2).unwrap();
+        doc.add_layer("b").unwrap();
+        doc.frames[0].cels[3][0] = Rgba::new(255, 0, 0, 255);
+        doc.indent_layer(3).unwrap();
+        doc
+    }
+
+    fn names(doc: &Document) -> Vec<&str> {
+        doc.layers.iter().map(|l| l.name.as_str()).collect()
+    }
+
+    #[test]
+    fn groups_hold_the_layers_after_them_and_list_above_them() {
+        let doc = grouped();
+        assert_eq!(names(&doc), ["bg", "G", "a", "b"]);
+        assert_eq!(
+            doc.layers.iter().map(|l| l.depth).collect::<Vec<_>>(),
+            [0, 0, 1, 1]
+        );
+        assert_eq!(doc.layer_parent(3), Some(1));
+        assert_eq!(doc.layer_parent(1), None);
+        assert_eq!(doc.layer_block_end(1), 4);
+        assert_eq!(doc.layer_display_order(), [1, 3, 2, 0]);
+        assert!(valid_layer_tree(&doc.layers));
+    }
+
+    #[test]
+    fn a_group_is_drawn_alone_then_mixed_with_its_own_mode() {
+        let mut doc = grouped();
+        assert_eq!(doc.composite(0).unwrap()[0], Rgba::new(255, 0, 0, 255));
+        doc.layers[1].blend = BlendMode::Multiply;
+        // The group's red is multiplied onto gray as one picture.
+        let expected = Rgba::new(128, 0, 0, 255);
+        assert_eq!(doc.composite(0).unwrap()[0], expected);
+        assert_eq!(doc.composite_pixel(0, 0, 0), Some(expected));
+        doc.layers[1].visible = false;
+        assert_eq!(doc.composite(0).unwrap()[0], Rgba::new(128, 128, 128, 255));
+        assert!(!doc.layer_shown(3));
+        assert!(doc.layer_shown(0));
+        doc.layers[1].visible = true;
+        doc.layers[1].blend = BlendMode::Normal;
+        doc.layers[1].opacity = 0;
+        assert_eq!(
+            doc.composite_pixel(0, 0, 0),
+            Some(Rgba::new(128, 128, 128, 255))
+        );
+    }
+
+    #[test]
+    fn moves_duplicates_and_deletes_carry_whole_groups() {
+        let mut doc = grouped();
+        doc.active_layer = 0;
+        doc.move_layer(0, 1).unwrap();
+        assert_eq!(names(&doc), ["G", "a", "b", "bg"]);
+        assert_eq!(doc.active_layer, 3);
+        assert!(doc.move_layer(3, 1).is_err());
+        doc.move_layer(3, -1).unwrap();
+        assert_eq!(names(&doc), ["bg", "G", "a", "b"]);
+        assert_eq!(doc.active_layer, 0);
+        // Inside the group, b and a swap places.
+        doc.move_layer(3, -1).unwrap();
+        assert_eq!(names(&doc), ["bg", "G", "b", "a"]);
+        assert!(
+            doc.move_layer(2, -1).is_err(),
+            "b is the bottom of its group"
+        );
+
+        doc.duplicate_layer(1).unwrap();
+        assert_eq!(names(&doc), ["bg", "G", "b", "a", "G copy", "b", "a"]);
+        assert_eq!(doc.active_layer, 4);
+        assert!(valid_layer_tree(&doc.layers));
+        doc.delete_layer(4).unwrap();
+        assert_eq!(names(&doc), ["bg", "G", "b", "a"]);
+
+        doc.outdent_layer(3).unwrap();
+        assert_eq!(names(&doc), ["bg", "G", "b", "a"]);
+        assert_eq!(doc.layers[3].depth, 0);
+        assert!(doc.outdent_layer(3).is_err());
+        assert!(doc.indent_layer(0).is_err(), "nothing below bg");
+        doc.indent_layer(3).unwrap();
+        assert_eq!(doc.layers[3].depth, 1);
+        assert!(valid_layer_tree(&doc.layers));
+    }
+
+    #[test]
+    fn groups_cannot_be_drawn_on_merged_or_left_without_layers() {
+        let mut doc = grouped();
+        assert!(doc.cel_mut(0, 1).is_err());
+        assert!(doc.merge_down(1).is_err(), "a group");
+        assert!(doc.merge_down(2).is_err(), "nothing below a in its group");
+        doc.merge_down(3).unwrap();
+        assert_eq!(names(&doc), ["bg", "G", "a"]);
+        assert_eq!(doc.composite(0).unwrap()[0], Rgba::new(255, 0, 0, 255));
+
+        let mut only = Document::new(1, 1).unwrap();
+        only.add_group("G").unwrap();
+        only.active_layer = 0;
+        only.indent_layer(0).ok();
+        assert!(
+            only.delete_layer(0).is_err(),
+            "the last drawable layer stays"
+        );
+        only.delete_layer(1).unwrap();
+        assert_eq!(only.layer_count(), 1);
+    }
+
+    #[test]
+    fn wrapping_a_layer_puts_a_group_in_its_place() {
+        let mut doc = grouped();
+        let before = doc.composite(0).unwrap();
+        doc.wrap_in_group(0, "Back").unwrap();
+        assert_eq!(names(&doc), ["Back", "bg", "G", "a", "b"]);
+        assert_eq!(
+            doc.layers.iter().map(|l| l.depth).collect::<Vec<_>>(),
+            [0, 1, 0, 1, 1]
+        );
+        assert_eq!(doc.active_layer, 0);
+        doc.wrap_in_group(2, "").unwrap();
+        assert_eq!(names(&doc), ["Back", "bg", "Group 3", "G", "a", "b"]);
+        assert_eq!(
+            doc.layers.iter().map(|l| l.depth).collect::<Vec<_>>(),
+            [0, 1, 0, 1, 2, 2]
+        );
+        assert!(valid_layer_tree(&doc.layers));
+        assert_eq!(doc.composite(0).unwrap(), before);
+    }
+
+    #[test]
+    fn layer_trees_are_checked() {
+        let layer = |group: bool, depth: u8| LayerInfo {
+            group,
+            depth,
+            ..LayerInfo::new("x".into())
+        };
+        assert!(valid_layer_tree(&[
+            layer(false, 0),
+            layer(true, 0),
+            layer(false, 1)
+        ]));
+        assert!(!valid_layer_tree(&[layer(false, 1)]));
+        assert!(
+            !valid_layer_tree(&[layer(false, 0), layer(false, 1)]),
+            "not after a group"
+        );
+        assert!(
+            !valid_layer_tree(&[layer(true, 0), layer(false, 2)]),
+            "skips a level"
+        );
+        assert!(!valid_layer_tree(&[layer(true, 0)]), "no drawable layer");
+        assert!(valid_layer_tree(&[
+            layer(true, 0),
+            layer(false, 1),
+            layer(false, 0)
+        ]));
     }
 
     #[test]

@@ -93,6 +93,17 @@ repeated count times, bottom layer first:
 
 The codes are Aseprite's. Written only when some layer is not Normal. A count that differs from the layer count, an unknown code, or extra bytes are errors. The section is required: OxyPixel 0.9.2 and earlier reject a file that has it, rather than drawing every layer as Normal and losing the modes on save.
 
+### Section `0x8002`: layer groups (required)
+
+```text
+count        u16   must equal layer_count
+repeated count times, bottom layer first:
+  flags      u8    0 a layer, 1 a group
+  depth      u8    how many groups the layer is inside, 0 through 8
+```
+
+A group holds the layers right after it that are one level deeper, so the layer list is a tree written in order. The first layer has depth 0, a layer can be at most one level deeper than the one before it, and only right after a group. At least one layer must not be a group. A group's cels are stored like any layer's but are clear and never drawn; the group is drawn by compositing the layers inside it into their own picture and mixing that picture in with the group's visibility, opacity, and blend mode. Written only when the document has a group. A wrong count, a flag other than 0 or 1, a tree that breaks these rules, or extra bytes are errors. Required, so older OxyPixel refuses the file rather than flattening the groups.
+
 Reference images are not a field in this file. Version 1 has no room for them: trailing bytes are rejected, and a new field would be a new version. A saved document may have a sidecar, `<name>.oxypix.refs`, in the same directory. Save writes it. That file lists PNG or JPEG paths and where each image sits. A path to an image inside the document's directory is relative to that directory; any other path is absolute. The pixels stay in those image files. A reader that only understands this document never sees them, and export does not read the sidecar.
 
 ## Limits

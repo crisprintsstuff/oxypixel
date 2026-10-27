@@ -118,15 +118,19 @@ pub(crate) fn list() -> Vec<Value> {
         tool(
             "add_layer",
             "Add a layer",
-            "Add a clear layer on top of the stack, in every frame.",
-            json!({ "path": path, "name": { "type": "string" } }),
+            "Add a clear layer, or an empty group, on top of the stack, in every frame. Use set_layer's group_into to move layers into a group.",
+            json!({
+                "path": path,
+                "name": { "type": "string" },
+                "group": { "type": "boolean", "description": "Add a group instead of a layer. A group holds the layers moved into it and is drawn as one picture with its own opacity and blend mode." },
+            }),
             &["path"],
             false,
         ),
         tool(
             "set_layer",
             "Change a layer",
-            "Rename a layer, show or hide it, change its opacity or blend mode, or delete it.",
+            "Rename a layer or group, show or hide it, change its opacity or blend mode, move it into or out of a group, or delete it.",
             json!({
                 "path": path,
                 "layer": { "type": "integer", "minimum": 0 },
@@ -134,7 +138,9 @@ pub(crate) fn list() -> Vec<Value> {
                 "visible": { "type": "boolean" },
                 "opacity": { "type": "integer", "minimum": 0, "maximum": 255 },
                 "blend": { "type": "string", "enum": BlendMode::ALL.map(BlendMode::name), "description": "How the layer mixes with the layers below." },
-                "delete": { "type": "boolean", "description": "Delete the layer. The last layer cannot be deleted." },
+                "delete": { "type": "boolean", "description": "Delete the layer, or a group with everything in it. The last drawable layer cannot be deleted." },
+                "group_into": { "type": "boolean", "description": "Move the layer (or group) into the group just below it, as its top layer." },
+                "group_out": { "type": "boolean", "description": "Move the layer (or group) out of its group, just above it." },
             }),
             &["path", "layer"],
             false,
@@ -385,7 +391,15 @@ fn info_json(doc: &Document) -> Value {
         .iter()
         .enumerate()
         .map(|(i, layer)| {
-            json!({ "index": i, "name": layer.name, "visible": layer.visible, "opacity": layer.opacity, "blend": layer.blend.name() })
+            json!({
+                "index": i,
+                "name": layer.name,
+                "visible": layer.visible,
+                "opacity": layer.opacity,
+                "blend": layer.blend.name(),
+                "group": layer.group,
+                "parent": doc.layer_parent(i),
+            })
         })
         .collect();
     let frames: Vec<Value> = (0..doc.frame_count())
@@ -494,6 +508,11 @@ fn draw(args: &Args, paths: &Paths) -> ToolResult {
     let (path, doc) = load(paths, args)?;
     let frame = frame_index(args, &doc)?;
     let layer = layer_index(args, &doc, true)?;
+    if doc.layer(layer).is_some_and(|l| l.group) {
+        return Err(format!(
+            "layer {layer} is a group and has no pixels; draw on a layer inside it"
+        ));
+    }
     let mut editor = Editor::from_document(doc);
     editor
         .set_active_frame(frame)
@@ -603,7 +622,12 @@ fn apply(
 fn add_layer(args: &Args, paths: &Paths) -> ToolResult {
     let (path, doc) = load(paths, args)?;
     let mut editor = Editor::from_document(doc);
-    editor.add_layer().map_err(|err| err.to_string())?;
+    if opt_bool(args, "group")?.unwrap_or(false) {
+        editor.add_group()
+    } else {
+        editor.add_layer()
+    }
+    .map_err(|err| err.to_string())?;
     if let Some(name) = opt_string(args, "name")? {
         editor.rename_layer(name);
     }
@@ -632,6 +656,12 @@ fn set_layer(args: &Args, paths: &Paths) -> ToolResult {
     }
     if let Some(opacity) = opt_int(args, "opacity", 0, 255)? {
         editor.set_layer_opacity(opacity as u8);
+    }
+    if opt_bool(args, "group_into")?.unwrap_or(false) {
+        editor.indent_layer().map_err(|err| err.to_string())?;
+    }
+    if opt_bool(args, "group_out")?.unwrap_or(false) {
+        editor.outdent_layer().map_err(|err| err.to_string())?;
     }
     if let Some(name) = opt_string(args, "blend")? {
         let mode =

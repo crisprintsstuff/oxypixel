@@ -9,6 +9,8 @@ pub enum Error {
     LastLayer,
     #[error("the bottom layer cannot be merged down")]
     BottomLayer,
+    #[error("{0}")]
+    Group(&'static str),
     #[error("that {what} does not exist")]
     Index { what: &'static str },
     #[error("canvas size {width}×{height} is outside 1×1 … {max}×{max}")]

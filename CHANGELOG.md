@@ -11,8 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Layer blend modes. Pick one under a layer's opacity slider: Multiply, Screen, Overlay, Darken, Lighten, Color dodge, Color burn, Hard light, Soft light, Difference, Exclusion, Hue, Saturation, Color, Luminosity, Addition, Subtract, or Divide. The canvas, preview, thumbnails, merge down, PNG, GIF, BMP, and spritesheet exports, OxyPack, and the MCP server (`set_layer` takes `blend`) all use them.
 
+- Layer groups. Group puts the selected layer in a new group, In moves a layer into the group just below it, and Out moves it back out. Up, Down, Copy, and Delete carry a whole group, and hiding a group hides what is inside it. A group is drawn as one picture and mixed in with its own opacity and blend mode, the way Aseprite composites groups. Drawing tools do nothing on a group. The MCP server's `add_layer` takes `group`, `set_layer` takes `group_into` and `group_out`, and `document_info` lists each layer's group and parent.
+
 ### Changed
 
+- A document with a group is saved with another required `.oxypix` section, with the same effect on older versions as blend modes.
 - A document with a layer that is not Normal is saved with a new required `.oxypix` section. OxyPixel 0.9.2 and earlier refuse such a file with "this file needs a newer OxyPixel" instead of drawing it wrong. Documents that only use Normal are saved exactly as before.
 
 ## [0.9.2] - 2026-10-27

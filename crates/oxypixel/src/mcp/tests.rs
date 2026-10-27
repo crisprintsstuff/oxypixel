@@ -285,6 +285,54 @@ fn draw_render_and_edit_a_document() {
     assert_eq!(info["layers"][1]["visible"], false);
     assert_eq!(info["layers"][1]["blend"], "multiply");
     assert_eq!(info["layers"][0]["blend"], "normal");
+    assert_eq!(info["layers"][1]["group"], false);
+
+    // A group: add it, move the Shadow layer below it... then into it.
+    let (err, text, _) = call(
+        &mut server,
+        "add_layer",
+        json!({ "path": "hero.oxypix", "group": true, "name": "FX" }),
+    );
+    assert!(!err && text.contains("layer 2"), "{text}");
+    let (err, text, _) = call(
+        &mut server,
+        "add_layer",
+        json!({ "path": "hero.oxypix", "name": "Spark" }),
+    );
+    assert!(!err, "{text}");
+    let (err, text, _) = call(
+        &mut server,
+        "set_layer",
+        json!({ "path": "hero.oxypix", "layer": 3, "group_into": true }),
+    );
+    assert!(!err, "{text}");
+    let (_, text, _) = call(
+        &mut server,
+        "document_info",
+        json!({ "path": "hero.oxypix" }),
+    );
+    let info: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(info["layers"][2]["group"], true);
+    assert_eq!(info["layers"][3]["parent"], 2);
+    assert_eq!(info["layers"][2]["parent"], Value::Null);
+    let (err, text, _) = call(
+        &mut server,
+        "set_layer",
+        json!({ "path": "hero.oxypix", "layer": 3, "group_out": true }),
+    );
+    assert!(!err, "{text}");
+    let (err, text, _) = call(
+        &mut server,
+        "set_layer",
+        json!({ "path": "hero.oxypix", "layer": 3, "group_out": true }),
+    );
+    assert!(err && text.contains("not in a group"), "{text}");
+    let (err, text, _) = call(
+        &mut server,
+        "draw",
+        json!({ "path": "hero.oxypix", "layer": 2, "color": "#FFFFFF", "operations": [{ "op": "pixels", "points": [[0, 0]] }] }),
+    );
+    assert!(err && text.contains("group"), "{text}");
     assert_eq!(info["frames"][0]["name"], "idle");
     assert_eq!(info["frames"][0]["duration_ms"], 120);
     assert_eq!(info["frames"][1]["name"], "blink");

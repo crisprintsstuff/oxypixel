@@ -532,7 +532,26 @@ impl Editor {
         true
     }
 
+    /// Whether the active layer is a group, which has no pixels to draw on.
+    pub fn active_is_group(&self) -> bool {
+        self.doc
+            .layer(self.doc.active_layer())
+            .is_some_and(|layer| layer.group)
+    }
+
     pub fn pointer_down(&mut self, x: i32, y: i32, button: MouseButton, shift: bool) {
+        let paints = matches!(
+            self.tool,
+            Tool::Pencil
+                | Tool::Eraser
+                | Tool::Bucket
+                | Tool::Line
+                | Tool::Rectangle
+                | Tool::Ellipse
+        );
+        if paints && self.active_is_group() {
+            return;
+        }
         let (x, y) = self.clamp_pointer(x, y);
         match self.tool {
             Tool::Pencil | Tool::Eraser => {
@@ -1074,6 +1093,29 @@ impl Editor {
     pub fn add_layer(&mut self) -> Result<()> {
         let n = self.doc.layer_count() + 1;
         self.structural(|doc| doc.add_layer(&format!("Layer {n}")))
+    }
+
+    /// Add an empty group on top. One undo step.
+    pub fn add_group(&mut self) -> Result<()> {
+        self.structural(|doc| doc.add_group(""))
+    }
+
+    /// Put the active layer in a new group of its own. One undo step.
+    pub fn group_layer(&mut self) -> Result<()> {
+        let index = self.doc.active_layer();
+        self.structural(|doc| doc.wrap_in_group(index, ""))
+    }
+
+    /// Move the active layer into the group just below it. One undo step.
+    pub fn indent_layer(&mut self) -> Result<()> {
+        let index = self.doc.active_layer();
+        self.structural(|doc| doc.indent_layer(index))
+    }
+
+    /// Move the active layer out of its group. One undo step.
+    pub fn outdent_layer(&mut self) -> Result<()> {
+        let index = self.doc.active_layer();
+        self.structural(|doc| doc.outdent_layer(index))
     }
 
     pub fn duplicate_layer(&mut self) -> Result<()> {
@@ -1883,6 +1925,35 @@ mod tests {
         assert_eq!(ed.document().layer_count(), 1);
         assert!(ed.undo());
         assert_eq!(ed.document().layer_count(), 2);
+    }
+
+    #[test]
+    fn groups_are_undoable_and_tools_do_not_draw_on_them() {
+        let mut editor = Editor::new(4, 4).unwrap();
+        editor.add_group().unwrap();
+        assert!(editor.active_is_group());
+        let before = editor.document().clone();
+        editor.set_tool(Tool::Pencil);
+        editor.pointer_down(1, 1, MouseButton::Primary, false);
+        editor.pointer_up(1, 1, false);
+        assert_eq!(
+            editor.document(),
+            &before,
+            "drawing on a group does nothing"
+        );
+        editor.add_layer().unwrap();
+        editor.indent_layer().unwrap();
+        assert_eq!(editor.document().layer(2).unwrap().depth, 1);
+        editor.pointer_down(1, 1, MouseButton::Primary, false);
+        editor.pointer_up(1, 1, false);
+        assert_eq!(
+            editor.document().composite_pixel(0, 1, 1).map(|p| p.a),
+            Some(255)
+        );
+        assert!(editor.undo());
+        assert!(editor.undo());
+        assert_eq!(editor.document().layer(2).unwrap().depth, 0);
+        assert!(editor.outdent_layer().is_err());
     }
 
     #[test]
