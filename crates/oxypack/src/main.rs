@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use oxypack::{pack_files, write_atlas, PackOptions, Packer};
+use oxypack::{counted, pack_files, write_atlas, PackOptions, Packer};
 
 const HELP: &str = concat!(
     "OxyPack ",
@@ -109,9 +109,9 @@ fn run(args: &Args) -> Result<String, String> {
     }
     write_atlas(&packed, &args.output, args.json)?;
     Ok(format!(
-        "packed {} sprites from {} files into {}×{} {}",
-        packed.atlas.placements.len(),
-        packed.file_count,
+        "packed {} from {} into {}×{} {}",
+        counted(packed.atlas.placements.len(), "sprite", "sprites"),
+        counted(packed.file_count, "file", "files"),
         packed.atlas.width,
         packed.atlas.height,
         args.output.display()

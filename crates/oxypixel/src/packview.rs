@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 
 use eframe::egui::{self, Color32, TextureHandle, TextureOptions, Vec2};
-use oxypack::{pack_files, packable, write_atlas, PackOptions, Packed, Packer};
+use oxypack::{counted, pack_files, packable, write_atlas, PackOptions, Packed, Packer};
 
 use crate::native;
 
@@ -208,16 +208,14 @@ impl PackWindow {
             }
             if let Some(packed) = &self.packed {
                 let mut text = format!(
-                    "{} sprites from {} files, {}×{}",
-                    packed.atlas.placements.len(),
-                    packed.file_count,
+                    "{} from {}, {}×{}",
+                    counted(packed.atlas.placements.len(), "sprite", "sprites"),
+                    counted(packed.file_count, "file", "files"),
                     packed.atlas.width,
                     packed.atlas.height
                 );
-                match packed.tags.len() {
-                    0 => {}
-                    1 => text.push_str(", 1 tag"),
-                    n => text.push_str(&format!(", {n} tags")),
+                if !packed.tags.is_empty() {
+                    text.push_str(&format!(", {}", counted(packed.tags.len(), "tag", "tags")));
                 }
                 if self.stale {
                     text.push_str(" (out of date, press Pack)");

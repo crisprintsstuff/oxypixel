@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The Pack sprites window and the `oxypack` summary said "1 sprites" and "1 files". They now use the singular for one.
+
 ## [0.9.0] - 2026-10-26
 
 ### Added
