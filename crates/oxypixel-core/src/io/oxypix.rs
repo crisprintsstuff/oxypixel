@@ -46,6 +46,9 @@ const SECTION_FRAME_NAMES: u16 = 0x0002;
 /// Layer blend modes. Required: a reader that drew every layer as Normal
 /// would show the wrong picture, and saving from it would lose the modes.
 const SECTION_BLEND_MODES: u16 = SECTION_REQUIRED | 0x0001;
+/// Layer groups. Required: a reader that ignored them would flatten the
+/// groups and lose them on save.
+const SECTION_LAYER_GROUPS: u16 = SECTION_REQUIRED | 0x0002;
 /// Most sections in one file.
 const MAX_SECTIONS: usize = 64;
 
@@ -118,7 +121,42 @@ fn sections(doc: &Document) -> Vec<(u16, Vec<u8>)> {
     if doc.layers().iter().any(|l| l.blend != BlendMode::Normal) {
         list.push((SECTION_BLEND_MODES, blend_modes_bytes(doc)));
     }
+    if doc.layers().iter().any(|l| l.group || l.depth > 0) {
+        list.push((SECTION_LAYER_GROUPS, layer_groups_bytes(doc)));
+    }
     list
+}
+
+/// count u16 (the layer count), then per layer, bottom first: flags u8
+/// (bit 0: a group) and depth u8 (how many groups it is inside).
+fn layer_groups_bytes(doc: &Document) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&(doc.layer_count() as u16).to_le_bytes());
+    for layer in doc.layers() {
+        out.push(u8::from(layer.group));
+        out.push(layer.depth);
+    }
+    out
+}
+
+fn read_layer_groups(bytes: &[u8], layer_count: usize) -> Result<Vec<(bool, u8)>> {
+    let mut r = Reader::new(bytes);
+    if r.u16()? as usize != layer_count {
+        return Err(Error::BadFlag("layer group count"));
+    }
+    let mut out = Vec::with_capacity(layer_count);
+    for _ in 0..layer_count {
+        let group = match r.u8()? {
+            0 => false,
+            1 => true,
+            _ => return Err(Error::BadFlag("layer group flags")),
+        };
+        out.push((group, r.u8()?));
+    }
+    if !r.finished() {
+        return Err(Error::TrailingBytes);
+    }
+    Ok(out)
 }
 
 /// count u16 (the layer count), then one u8 mode code per layer, bottom first.
@@ -270,10 +308,9 @@ pub fn load_oxypix_bytes(bytes: &[u8]) -> Result<Document> {
         };
         let opacity = r.u8()?;
         layers.push(LayerInfo {
-            name,
             visible,
             opacity,
-            blend: BlendMode::Normal,
+            ..LayerInfo::new(name)
         });
     }
 
@@ -309,6 +346,7 @@ pub fn load_oxypix_bytes(bytes: &[u8]) -> Result<Document> {
     let mut tags = None;
     let mut frame_names = None;
     let mut blend_modes = None;
+    let mut groups = None;
     if version != VERSION_1 {
         let count = r.u16()? as usize;
         if count > MAX_SECTIONS {
@@ -333,6 +371,10 @@ pub fn load_oxypix_bytes(bytes: &[u8]) -> Result<Document> {
                     return Err(Error::DuplicateSection("blend modes"))
                 }
                 SECTION_BLEND_MODES => blend_modes = Some(read_blend_modes(body, layers.len())?),
+                SECTION_LAYER_GROUPS if groups.is_some() => {
+                    return Err(Error::DuplicateSection("layer groups"))
+                }
+                SECTION_LAYER_GROUPS => groups = Some(read_layer_groups(body, layers.len())?),
                 kind if kind & SECTION_REQUIRED != 0 => return Err(Error::RequiredSection(kind)),
                 // An optional section from a newer writer: skip it.
                 _ => {}
@@ -344,6 +386,10 @@ pub fn load_oxypix_bytes(bytes: &[u8]) -> Result<Document> {
     }
     for (layer, mode) in layers.iter_mut().zip(blend_modes.into_iter().flatten()) {
         layer.blend = mode;
+    }
+    for (layer, (group, depth)) in layers.iter_mut().zip(groups.into_iter().flatten()) {
+        layer.group = group;
+        layer.depth = depth;
     }
     let mut doc = Document::from_parts(
         width,
@@ -493,6 +539,49 @@ mod tests {
             bytes.extend_from_slice(body);
         }
         bytes
+    }
+
+    #[test]
+    fn layer_groups_are_a_required_section_and_round_trip() {
+        let mut doc = Document::demo().unwrap();
+        doc.add_group("Characters").unwrap();
+        doc.add_layer("Hero").unwrap();
+        doc.indent_layer(3).unwrap();
+        let bytes = save_oxypix_bytes(&doc).unwrap();
+        assert_eq!(&bytes[8..10], &2u16.to_le_bytes());
+        let back = load_oxypix_bytes(&bytes).unwrap();
+        assert_eq!(back.layers(), doc.layers());
+        assert_ne!(SECTION_LAYER_GROUPS & SECTION_REQUIRED, 0);
+
+        let plain = Document::demo().unwrap();
+        let section = |body: Vec<u8>| with_sections(&plain, &[(SECTION_LAYER_GROUPS, body)]);
+        let body = |pairs: &[u8]| {
+            let mut out = 2u16.to_le_bytes().to_vec();
+            out.extend_from_slice(pairs);
+            out
+        };
+        // A group on top holding nothing, over a plain layer: fine.
+        assert!(load_oxypix_bytes(&section(body(&[0, 0, 1, 0]))).is_ok());
+        // Mark is one level deep but Paper is not a group.
+        assert!(load_oxypix_bytes(&section(body(&[0, 0, 0, 1]))).is_err());
+        // Every layer a group: nothing to draw on.
+        assert!(load_oxypix_bytes(&section(body(&[1, 0, 1, 0]))).is_err());
+        assert!(
+            load_oxypix_bytes(&section(body(&[0, 0, 2, 0]))).is_err(),
+            "bad flag"
+        );
+        assert!(load_oxypix_bytes(&section(body(&[0, 0]))).is_err(), "short");
+        let mut long = body(&[0, 0, 0, 0]);
+        long.push(0);
+        assert!(load_oxypix_bytes(&section(long)).is_err());
+        let twice = with_sections(
+            &plain,
+            &[
+                (SECTION_LAYER_GROUPS, body(&[0, 0, 0, 0])),
+                (SECTION_LAYER_GROUPS, body(&[0, 0, 0, 0])),
+            ],
+        );
+        assert!(load_oxypix_bytes(&twice).is_err());
     }
 
     #[test]

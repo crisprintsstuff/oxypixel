@@ -13,6 +13,8 @@ pub const MAX_CEL_PIXELS: u64 = 1024 * 1024;
 pub const MAX_TOTAL_PIXELS: u64 = 16 * 1024 * 1024;
 pub const MAX_FRAMES: usize = 256;
 pub const MAX_LAYERS: usize = 32;
+/// Groups inside groups, at most this deep.
+pub const MAX_GROUP_DEPTH: u8 = 8;
 pub const MAX_PALETTE: usize = 256;
 pub const MAX_NAME_BYTES: usize = 128;
 /// Reject files larger than this before parsing or decoding.

@@ -1965,13 +1965,13 @@ impl OxyApp {
                 });
                 ui.separator();
                 ui.heading("Layers");
-                let count = self.editor.document().layer_count();
                 let active = self.editor.document().active_layer();
-                for index in (0..count).rev() {
+                for index in self.editor.document().layer_display_order() {
                     let Some(layer) = self.editor.document().layer(index).cloned() else {
                         continue;
                     };
                     ui.horizontal(|ui| {
+                        ui.add_space(f32::from(layer.depth) * 14.0);
                         let mut visible = layer.visible;
                         if ui
                             .checkbox(&mut visible, "")
@@ -1994,14 +1994,29 @@ impl OxyApp {
                             if resp.lost_focus() {
                                 self.editor.end_coalesce();
                             }
-                        } else if ui
-                            .selectable_label(false, layer.name)
-                            .on_hover_text("Draw on this layer")
-                            .clicked()
-                        {
-                            let _ = self.editor.set_active_layer(index);
+                        } else {
+                            let label = if layer.group {
+                                RichText::new(format!("📁 {}", layer.name)).strong()
+                            } else {
+                                RichText::new(layer.name.clone())
+                            };
+                            let hint = if layer.group {
+                                "A group: its layers are listed under it and drawn as one picture"
+                            } else {
+                                "Draw on this layer"
+                            };
+                            if ui.selectable_label(false, label).on_hover_text(hint).clicked() {
+                                let _ = self.editor.set_active_layer(index);
+                            }
                         }
                     });
+                }
+                if self.editor.active_is_group() {
+                    ui.label(
+                        RichText::new("A group has no pixels. Pick a layer inside it to draw.")
+                            .small()
+                            .weak(),
+                    );
                 }
                 if let Some(layer) = self.editor.document().layer(active) {
                     let mut opacity = layer.opacity;
@@ -2075,6 +2090,29 @@ impl OxyApp {
                         .clicked()
                     {
                         self.apply(|editor| editor.merge_down());
+                    }
+                    if ui
+                        .button("Group")
+                        .on_hover_text(
+                            "Put this layer in a new group. Move more layers in with In",
+                        )
+                        .clicked()
+                    {
+                        self.apply(|editor| editor.group_layer());
+                    }
+                    if ui
+                        .button("In")
+                        .on_hover_text("Move this layer into the group just below it")
+                        .clicked()
+                    {
+                        self.apply(|editor| editor.indent_layer());
+                    }
+                    if ui
+                        .button("Out")
+                        .on_hover_text("Move this layer out of its group")
+                        .clicked()
+                    {
+                        self.apply(|editor| editor.outdent_layer());
                     }
                 });
                 let width = self.editor.document().width();
