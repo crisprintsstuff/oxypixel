@@ -2,6 +2,9 @@
 
 use std::path::PathBuf;
 
+use oxypixel_core::MAX_DIMENSION;
+
+use crate::canvas::{CheckerStyle, ONION_FRAME_CAP};
 use crate::recent;
 
 const FILE_NAME: &str = "view.txt";
@@ -9,7 +12,13 @@ const FILE_NAME: &str = "view.txt";
 /// Seconds between automatic update checks.
 pub const UPDATE_INTERVAL_SECS: u64 = 24 * 60 * 60;
 
-/// The window preferences in `view.txt`, one `key=value` per line.
+/// Interface scale choices, in percent.
+pub const UI_SCALES: [u16; 6] = [75, 90, 100, 125, 150, 200];
+/// Export scale choices.
+pub const EXPORT_SCALES: [u32; 3] = [1, 2, 4];
+
+/// The window preferences in `view.txt`, one `key=value` per line. The
+/// Settings window edits them; a missing or bad line keeps the default.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Prefs {
     /// Whether the preview panel was left open.
@@ -19,6 +28,22 @@ pub struct Prefs {
     pub auto_update: bool,
     /// When the last automatic check started, in seconds since 1970.
     pub last_update_check: u64,
+    /// Interface scale in percent, one of [`UI_SCALES`].
+    pub ui_scale: u16,
+    /// The size File, then New starts with.
+    pub new_width: u32,
+    pub new_height: u32,
+    /// Whether the pixel grid starts on.
+    pub grid: bool,
+    /// What shows behind clear pixels.
+    pub checker: CheckerStyle,
+    /// Onion skin settings it starts with. Onion skin itself starts off.
+    pub onion_previous: u32,
+    pub onion_next: u32,
+    pub onion_opacity: u8,
+    pub onion_tint: bool,
+    /// The PNG and spritesheet export scale it starts with, one of [`EXPORT_SCALES`].
+    pub export_scale: u32,
 }
 
 impl Default for Prefs {
@@ -27,7 +52,28 @@ impl Default for Prefs {
             preview_open: true,
             auto_update: false,
             last_update_check: 0,
+            ui_scale: 100,
+            new_width: 64,
+            new_height: 64,
+            grid: true,
+            checker: CheckerStyle::Dark,
+            onion_previous: 1,
+            onion_next: 1,
+            onion_opacity: 80,
+            onion_tint: true,
+            export_scale: 1,
         }
+    }
+}
+
+impl Prefs {
+    /// Every setting back to its default. The update check time is kept, so
+    /// a reset does not start an extra check.
+    pub fn reset(&mut self) {
+        *self = Self {
+            last_update_check: self.last_update_check,
+            ..Self::default()
+        };
     }
 }
 
@@ -60,11 +106,35 @@ pub(crate) fn parse(text: &str) -> Prefs {
             "0" | "false" => Some(false),
             _ => None,
         };
+        let number = value.trim().parse::<u64>().ok();
+        let d = Prefs::default();
         match key.trim() {
             "preview" => prefs.preview_open = flag.unwrap_or(prefs.preview_open),
             "auto_update" => prefs.auto_update = flag.unwrap_or(prefs.auto_update),
-            "last_update_check" => {
-                prefs.last_update_check = value.trim().parse().unwrap_or(0);
+            "last_update_check" => prefs.last_update_check = number.unwrap_or(0),
+            "ui_scale" => {
+                prefs.ui_scale = number
+                    .and_then(|n| u16::try_from(n).ok())
+                    .filter(|n| UI_SCALES.contains(n))
+                    .unwrap_or(d.ui_scale)
+            }
+            "new_width" => prefs.new_width = side(number).unwrap_or(d.new_width),
+            "new_height" => prefs.new_height = side(number).unwrap_or(d.new_height),
+            "grid" => prefs.grid = flag.unwrap_or(d.grid),
+            "checker" => prefs.checker = CheckerStyle::from_name(value.trim()).unwrap_or(d.checker),
+            "onion_previous" => prefs.onion_previous = frames(number).unwrap_or(d.onion_previous),
+            "onion_next" => prefs.onion_next = frames(number).unwrap_or(d.onion_next),
+            "onion_opacity" => {
+                prefs.onion_opacity = number
+                    .and_then(|n| u8::try_from(n).ok())
+                    .unwrap_or(d.onion_opacity)
+            }
+            "onion_tint" => prefs.onion_tint = flag.unwrap_or(d.onion_tint),
+            "export_scale" => {
+                prefs.export_scale = number
+                    .and_then(|n| u32::try_from(n).ok())
+                    .filter(|n| EXPORT_SCALES.contains(n))
+                    .unwrap_or(d.export_scale)
             }
             _ => {}
         }
@@ -72,13 +142,38 @@ pub(crate) fn parse(text: &str) -> Prefs {
     prefs
 }
 
+fn side(number: Option<u64>) -> Option<u32> {
+    number
+        .and_then(|n| u32::try_from(n).ok())
+        .filter(|n| (1..=MAX_DIMENSION).contains(n))
+}
+
+fn frames(number: Option<u64>) -> Option<u32> {
+    number
+        .and_then(|n| u32::try_from(n).ok())
+        .filter(|n| *n <= ONION_FRAME_CAP)
+}
+
 pub(crate) fn format(prefs: &Prefs) -> String {
-    format!(
-        "preview={}\nauto_update={}\nlast_update_check={}\n",
-        u8::from(prefs.preview_open),
-        u8::from(prefs.auto_update),
-        prefs.last_update_check
-    )
+    let flag = |on: bool| u8::from(on);
+    [
+        format!("preview={}", flag(prefs.preview_open)),
+        format!("auto_update={}", flag(prefs.auto_update)),
+        format!("last_update_check={}", prefs.last_update_check),
+        format!("ui_scale={}", prefs.ui_scale),
+        format!("new_width={}", prefs.new_width),
+        format!("new_height={}", prefs.new_height),
+        format!("grid={}", flag(prefs.grid)),
+        format!("checker={}", prefs.checker.name()),
+        format!("onion_previous={}", prefs.onion_previous),
+        format!("onion_next={}", prefs.onion_next),
+        format!("onion_opacity={}", prefs.onion_opacity),
+        format!("onion_tint={}", flag(prefs.onion_tint)),
+        format!("export_scale={}", prefs.export_scale),
+    ]
+    .iter()
+    .map(|line| format!("{line}\n"))
+    .collect()
 }
 
 /// Whether an automatic update check should run at `now`. Never when the
@@ -141,6 +236,16 @@ mod tests {
             preview_open: false,
             auto_update: true,
             last_update_check: 1_800_000_000,
+            ui_scale: 150,
+            new_width: 32,
+            new_height: 48,
+            grid: false,
+            checker: CheckerStyle::Light,
+            onion_previous: 3,
+            onion_next: 0,
+            onion_opacity: 200,
+            onion_tint: false,
+            export_scale: 4,
         };
         assert_eq!(parse(&format(&prefs)), prefs);
         assert_eq!(parse("last_update_check=-5\n").last_update_check, 0);
@@ -156,6 +261,32 @@ mod tests {
         save(&prefs);
         assert_eq!(load(), prefs);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn out_of_range_settings_fall_back_to_defaults() {
+        let d = Prefs::default();
+        let bad = parse(
+            "ui_scale=137\nnew_width=0\nnew_height=5000\ngrid=perhaps\nchecker=plaid\n\
+             onion_previous=9\nonion_next=-1\nonion_opacity=256\nexport_scale=3\n",
+        );
+        assert_eq!(bad, d);
+        let edge = parse("new_width=1\nnew_height=1024\nonion_previous=8\nonion_opacity=0\n");
+        assert_eq!((edge.new_width, edge.new_height), (1, 1024));
+        assert_eq!((edge.onion_previous, edge.onion_opacity), (8, 0));
+    }
+
+    #[test]
+    fn reset_keeps_the_update_check_time() {
+        let mut prefs = parse("grid=0\nui_scale=200\nauto_update=1\nlast_update_check=99\n");
+        prefs.reset();
+        assert_eq!(
+            prefs,
+            Prefs {
+                last_update_check: 99,
+                ..Prefs::default()
+            }
+        );
     }
 
     #[test]

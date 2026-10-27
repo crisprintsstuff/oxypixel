@@ -28,6 +28,11 @@ pub struct PreviewPanel {
 }
 
 impl PreviewPanel {
+    /// Rebuild the picture on the next draw, after the checkerboard changed.
+    pub fn invalidate(&mut self) {
+        self.texture = None;
+    }
+
     pub fn new(open: bool) -> Self {
         Self {
             open,

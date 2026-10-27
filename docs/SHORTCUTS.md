@@ -51,6 +51,7 @@ Letter shortcuts are ignored while a text field is focused. Escape leaves the te
 | Ctrl+drag | Move the reference image under the pointer. Without Ctrl, tools draw over it |
 | Shift while drawing a line or shape | 45-degree lines, square rectangles and ellipses |
 | Right-drag | Use the secondary color |
+| Ctrl+, | Settings |
 | Ctrl+Q | Quit |
 
 The rectangle and ellipse tools outline by default. Turn on **Fill shape** for a filled stamp. The eraser is freehand only.

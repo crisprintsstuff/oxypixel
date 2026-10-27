@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A Settings window: Edit, then Settings…, or Ctrl+,. It groups the app settings under General, Canvas, Onion skin, Export, and Updates. Changes apply right away and are kept for the next launch, and Reset to defaults puts them back. New settings:
+  - interface scale, 75% to 200%
+  - the size File, then New starts with
+  - grid on or off at launch
+  - a light checkerboard behind clear pixels as well as the dark one
+  - onion skin frame counts, opacity, and tint
+  - the PNG and spritesheet export scale
+
+  Autosave recovery, automatic updates, the preview panel, and Clear recent files are there too. They are still in their menus as well.
+
 ### Fixed
 
 - The Pack sprites window and the `oxypack` summary said "1 sprites" and "1 files". They now use the singular for one.

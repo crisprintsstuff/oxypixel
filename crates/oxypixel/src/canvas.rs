@@ -1,5 +1,7 @@
 //! Canvas view: nearest-neighbor pixels, pan, zoom, and pointer tools.
 
+use std::sync::atomic::{AtomicU8, Ordering};
+
 use eframe::egui::{
     self, Color32, Painter, PointerButton, Pos2, Rect, Sense, Stroke, StrokeKind, TextureHandle,
     TextureOptions, Vec2,
@@ -11,6 +13,55 @@ use oxypixel_core::{
 use crate::cache::FrameComposites;
 use crate::refsview::{self, RefTextures};
 use crate::theme::{self, AMBER};
+
+/// What shows behind clear pixels on the canvas, the frame strip, and the preview.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CheckerStyle {
+    #[default]
+    Dark,
+    Light,
+}
+
+impl CheckerStyle {
+    pub const ALL: [Self; 2] = [Self::Dark, Self::Light];
+
+    /// The word stored in the settings file.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Dark => "dark",
+            Self::Light => "light",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|style| style.name() == name)
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Dark => "Dark checkerboard",
+            Self::Light => "Light checkerboard",
+        }
+    }
+}
+
+/// The checkerboard every view draws. One setting for the whole window, so it
+/// lives here rather than being threaded through each picture function.
+static CHECKER_STYLE: AtomicU8 = AtomicU8::new(0);
+
+/// Change the checkerboard. Returns whether it changed; the caller then drops
+/// the textures that have the old one baked in.
+pub fn set_checker_style(style: CheckerStyle) -> bool {
+    let code = style as u8;
+    CHECKER_STYLE.swap(code, Ordering::Relaxed) != code
+}
+
+fn checker_style() -> CheckerStyle {
+    match CHECKER_STYLE.load(Ordering::Relaxed) {
+        1 => CheckerStyle::Light,
+        _ => CheckerStyle::Dark,
+    }
+}
 
 /// How many neighboring frames onion skin will look at, in one direction.
 pub const ONION_FRAME_CAP: u32 = 8;
@@ -93,6 +144,11 @@ impl Default for ViewState {
 }
 
 impl ViewState {
+    /// Rebuild the checkerboard texture on the next draw, after the style changed.
+    pub fn reset_checker(&mut self) {
+        self.checker = None;
+    }
+
     pub fn fit(&mut self, width: u32, height: u32) {
         if self.panel.width() < 8.0 || self.panel.height() < 8.0 || width == 0 || height == 0 {
             return;
@@ -224,6 +280,16 @@ pub(crate) fn largest_clean_at_most(raw: f32) -> f32 {
 }
 
 /// Fit scale: 92% of the panel, then the largest clean step that still fits.
+/// Whether the canvas panel is laid out for the real window. In the frame a
+/// new interface scale takes effect, egui can lay the panel out on a
+/// placeholder screen thousands of points wide; a fit then would zoom to the
+/// maximum, so it waits a frame.
+fn panel_fits_window(panel: Rect, window: Option<Rect>) -> bool {
+    window.is_none_or(|window| {
+        panel.width() <= window.width() + 1.0 && panel.height() <= window.height() + 1.0
+    })
+}
+
 pub(crate) fn fit_zoom(panel_w: f32, panel_h: f32, width: u32, height: u32) -> f32 {
     if panel_w < 8.0 || panel_h < 8.0 || width == 0 || height == 0 {
         return 1.0;
@@ -247,7 +313,8 @@ pub fn show_canvas(
     let height = editor.document().height();
     let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
     view.panel = rect;
-    if view.fit_next {
+    let window = ui.ctx().input(|i| i.viewport().inner_rect);
+    if view.fit_next && panel_fits_window(rect, window) {
         view.fit(width, height);
     }
     ref_textures.sync(ui.ctx(), refs);
@@ -924,11 +991,11 @@ pub(crate) fn visible_document_bounds(view: &ViewState, width: u32, height: u32)
 }
 
 fn checker(x: u32, y: u32) -> Rgba {
-    let color = if ((x / 4) + (y / 4)) % 2 == 0 {
-        theme::CHECKER_A
-    } else {
-        theme::CHECKER_B
+    let (a, b) = match checker_style() {
+        CheckerStyle::Dark => (theme::CHECKER_A, theme::CHECKER_B),
+        CheckerStyle::Light => (theme::CHECKER_LIGHT_A, theme::CHECKER_LIGHT_B),
     };
+    let color = if ((x / 4) + (y / 4)) % 2 == 0 { a } else { b };
     Rgba::new(color.r(), color.g(), color.b(), 255)
 }
 
@@ -1068,6 +1135,37 @@ fn pixel_at(origin: Pos2, zoom: f32, pos: Pos2) -> (i32, i32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn checker_style_changes_the_clear_pixels_and_reports_a_change() {
+        let dark = Rgba::new(
+            theme::CHECKER_A.r(),
+            theme::CHECKER_A.g(),
+            theme::CHECKER_A.b(),
+            255,
+        );
+        assert!(!set_checker_style(CheckerStyle::Dark));
+        assert_eq!(checker(0, 0), dark);
+        assert!(set_checker_style(CheckerStyle::Light));
+        assert!(!set_checker_style(CheckerStyle::Light));
+        assert_eq!(checker(0, 0).r, theme::CHECKER_LIGHT_A.r());
+        assert!(set_checker_style(CheckerStyle::Dark));
+        assert_eq!(checker(0, 0), dark);
+        for style in CheckerStyle::ALL {
+            assert_eq!(CheckerStyle::from_name(style.name()), Some(style));
+        }
+        assert_eq!(CheckerStyle::from_name("plaid"), None);
+    }
+
+    #[test]
+    fn fit_waits_for_a_panel_inside_the_window() {
+        let window = Rect::from_min_size(Pos2::ZERO, Vec2::new(1200.0, 760.0));
+        let real = Rect::from_min_max(Pos2::new(172.0, 30.0), Pos2::new(700.0, 600.0));
+        let placeholder = Rect::from_min_max(Pos2::new(172.0, 30.0), Pos2::new(7554.0, 7970.0));
+        assert!(panel_fits_window(real, Some(window)));
+        assert!(!panel_fits_window(placeholder, Some(window)));
+        assert!(panel_fits_window(placeholder, None));
+    }
 
     #[test]
     fn only_ctrl_grabs_a_reference() {

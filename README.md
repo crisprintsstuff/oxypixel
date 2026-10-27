@@ -148,6 +148,11 @@ These match the current editor. Planned work is listed in [docs/ROADMAP.md](docs
 - Pack sprites (File menu): pack frames from image, `.oxypix`, and `.aseprite` files into an atlas PNG and JSON. See [OxyPack](#oxypack)
 - Headless `export-png`, `export-bmp`, `export-gif`, `export-sheet`, `export-palette`, and `import-palette` commands that never open a window
 
+### Settings
+
+- Edit, then Settings… (Ctrl+,) holds the app settings in one window, grouped as General, Canvas, Onion skin, Export, and Updates. Changes apply right away and are kept for the next launch, and Reset to defaults puts them all back
+- Interface scale (75% to 200%), the size File, then New starts with, grid on or off, a dark or light checkerboard behind clear pixels, onion skin frame counts, opacity, and tint, the export scale, autosave recovery, automatic updates, and Clear recent files
+
 ### Files and recovery
 
 - Recent files, with a folder hint when names match, a missing-file mark, and Clear recent
@@ -190,6 +195,7 @@ The maintainer develops OxyPixel with AI coding agents. The written rules for th
 | Shift+. / Shift+, / Ctrl+Shift+. | Rotate 90° clockwise, counter-clockwise, or 180° |
 | Comma / Period | Previous / next frame |
 | Ctrl+N / Ctrl+O / Ctrl+S | New, open, save |
+| Ctrl+, | Settings |
 | Enter | Play or pause |
 | Space+drag | Pan |
 | Ctrl+drag | Move a reference image |

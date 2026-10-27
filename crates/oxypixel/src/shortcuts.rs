@@ -13,6 +13,7 @@ pub enum Command {
     Open,
     Save,
     SaveAs,
+    Settings,
     Quit,
     Undo,
     Redo,
@@ -174,6 +175,10 @@ pub const BINDINGS: &[Binding] = &[
         action: "Constrain lines to 45 degrees and shapes to squares",
     },
     Binding {
+        keys: "Ctrl+,",
+        action: "Settings",
+    },
+    Binding {
         keys: "Ctrl+Q",
         action: "Quit",
     },
@@ -202,6 +207,7 @@ pub fn command_from(modifiers: Modifiers, key: Key) -> Option<Command> {
         (true, false, Key::Equals | Key::Plus) => Some(Command::ZoomIn),
         (true, false, Key::Minus) => Some(Command::ZoomOut),
         (true, false, Key::Q) => Some(Command::Quit),
+        (true, false, Key::Comma) => Some(Command::Settings),
         (true, false, Key::C) => Some(Command::Copy),
         (true, false, Key::V) => Some(Command::Paste),
         (false, false, Key::B) => Some(Command::Tool(Tool::Pencil)),
@@ -425,6 +431,22 @@ mod tests {
         assert_eq!(
             command_from(Modifiers::COMMAND, Key::V),
             Some(Command::Paste)
+        );
+    }
+
+    #[test]
+    fn ctrl_comma_opens_settings_and_plain_comma_still_steps_back() {
+        assert_eq!(
+            command_from(Modifiers::COMMAND, Key::Comma),
+            Some(Command::Settings)
+        );
+        assert_eq!(
+            command_from(Modifiers::NONE, Key::Comma),
+            Some(Command::PrevFrame)
+        );
+        assert_eq!(
+            command_from(Modifiers::SHIFT, Key::Comma),
+            Some(Command::Transform(Transform::Rotate90Ccw))
         );
     }
 
