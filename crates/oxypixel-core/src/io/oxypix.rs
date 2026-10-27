@@ -25,6 +25,7 @@
 
 use std::path::Path;
 
+use crate::blend::BlendMode;
 use crate::color::{unpack, Rgba};
 use crate::document::{Document, Frame, LayerInfo};
 use crate::error::{Error, Result};
@@ -42,6 +43,9 @@ const SECTION_REQUIRED: u16 = 0x8000;
 const SECTION_TAGS: u16 = 0x0001;
 /// Frame names. Optional: a reader that skips it loses only the names.
 const SECTION_FRAME_NAMES: u16 = 0x0002;
+/// Layer blend modes. Required: a reader that drew every layer as Normal
+/// would show the wrong picture, and saving from it would lose the modes.
+const SECTION_BLEND_MODES: u16 = SECTION_REQUIRED | 0x0001;
 /// Most sections in one file.
 const MAX_SECTIONS: usize = 64;
 
@@ -111,7 +115,35 @@ fn sections(doc: &Document) -> Vec<(u16, Vec<u8>)> {
     if (0..doc.frame_count()).any(|i| doc.frame_name(i).is_some()) {
         list.push((SECTION_FRAME_NAMES, frame_names_bytes(doc)));
     }
+    if doc.layers().iter().any(|l| l.blend != BlendMode::Normal) {
+        list.push((SECTION_BLEND_MODES, blend_modes_bytes(doc)));
+    }
     list
+}
+
+/// count u16 (the layer count), then one u8 mode code per layer, bottom first.
+fn blend_modes_bytes(doc: &Document) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&(doc.layer_count() as u16).to_le_bytes());
+    out.extend(doc.layers().iter().map(|l| l.blend.code() as u8));
+    out
+}
+
+fn read_blend_modes(bytes: &[u8], layer_count: usize) -> Result<Vec<BlendMode>> {
+    let mut r = Reader::new(bytes);
+    if r.u16()? as usize != layer_count {
+        return Err(Error::BadFlag("blend mode count"));
+    }
+    let mut modes = Vec::with_capacity(layer_count);
+    for _ in 0..layer_count {
+        let mode =
+            BlendMode::from_code(u16::from(r.u8()?)).ok_or(Error::BadFlag("layer blend mode"))?;
+        modes.push(mode);
+    }
+    if !r.finished() {
+        return Err(Error::TrailingBytes);
+    }
+    Ok(modes)
 }
 
 /// count u16 (the frame count), then per frame: name_len u16, name bytes.
@@ -241,6 +273,7 @@ pub fn load_oxypix_bytes(bytes: &[u8]) -> Result<Document> {
             name,
             visible,
             opacity,
+            blend: BlendMode::Normal,
         });
     }
 
@@ -275,6 +308,7 @@ pub fn load_oxypix_bytes(bytes: &[u8]) -> Result<Document> {
     }
     let mut tags = None;
     let mut frame_names = None;
+    let mut blend_modes = None;
     if version != VERSION_1 {
         let count = r.u16()? as usize;
         if count > MAX_SECTIONS {
@@ -295,6 +329,10 @@ pub fn load_oxypix_bytes(bytes: &[u8]) -> Result<Document> {
                     return Err(Error::DuplicateSection("frame names"))
                 }
                 SECTION_FRAME_NAMES => frame_names = Some(read_frame_names(body, frame_count)?),
+                SECTION_BLEND_MODES if blend_modes.is_some() => {
+                    return Err(Error::DuplicateSection("blend modes"))
+                }
+                SECTION_BLEND_MODES => blend_modes = Some(read_blend_modes(body, layers.len())?),
                 kind if kind & SECTION_REQUIRED != 0 => return Err(Error::RequiredSection(kind)),
                 // An optional section from a newer writer: skip it.
                 _ => {}
@@ -303,6 +341,9 @@ pub fn load_oxypix_bytes(bytes: &[u8]) -> Result<Document> {
     }
     if !r.finished() {
         return Err(Error::TrailingBytes);
+    }
+    for (layer, mode) in layers.iter_mut().zip(blend_modes.into_iter().flatten()) {
+        layer.blend = mode;
     }
     let mut doc = Document::from_parts(
         width,
@@ -452,6 +493,55 @@ mod tests {
             bytes.extend_from_slice(body);
         }
         bytes
+    }
+
+    #[test]
+    fn blend_modes_are_a_required_section_and_round_trip() {
+        let mut doc = Document::demo().unwrap();
+        doc.layers_mut()[1].blend = BlendMode::Multiply;
+        let bytes = save_oxypix_bytes(&doc).unwrap();
+        assert_eq!(&bytes[8..10], &2u16.to_le_bytes());
+        let back = load_oxypix_bytes(&bytes).unwrap();
+        assert_eq!(back.layers()[0].blend, BlendMode::Normal);
+        assert_eq!(back.layers()[1].blend, BlendMode::Multiply);
+        assert_eq!(back.composite(0).unwrap(), doc.composite(0).unwrap());
+        assert_ne!(SECTION_BLEND_MODES & SECTION_REQUIRED, 0);
+
+        let mut plain = doc.clone();
+        plain.layers_mut()[1].blend = BlendMode::Normal;
+        assert_eq!(
+            &save_oxypix_bytes(&plain).unwrap()[8..10],
+            &1u16.to_le_bytes()
+        );
+
+        let mut wrong_count = 1u16.to_le_bytes().to_vec();
+        wrong_count.push(1);
+        let err = load_oxypix_bytes(&with_sections(
+            &plain,
+            &[(SECTION_BLEND_MODES, wrong_count)],
+        ));
+        assert!(err.is_err());
+        let mut bad_code = 2u16.to_le_bytes().to_vec();
+        bad_code.extend([0, 99]);
+        assert!(
+            load_oxypix_bytes(&with_sections(&plain, &[(SECTION_BLEND_MODES, bad_code)])).is_err()
+        );
+        let mut good = 2u16.to_le_bytes().to_vec();
+        good.extend([0, 2]);
+        let twice = with_sections(
+            &plain,
+            &[
+                (SECTION_BLEND_MODES, good.clone()),
+                (SECTION_BLEND_MODES, good.clone()),
+            ],
+        );
+        assert!(load_oxypix_bytes(&twice).is_err());
+        let mut long = good.clone();
+        long.push(0);
+        assert!(load_oxypix_bytes(&with_sections(&plain, &[(SECTION_BLEND_MODES, long)])).is_err());
+        let screen =
+            load_oxypix_bytes(&with_sections(&plain, &[(SECTION_BLEND_MODES, good)])).unwrap();
+        assert_eq!(screen.layers()[1].blend, BlendMode::Screen);
     }
 
     #[test]

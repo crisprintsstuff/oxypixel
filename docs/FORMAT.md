@@ -80,6 +80,19 @@ repeated count times:
 
 Written only when at least one frame has a name. A body longer than its names is an error.
 
+### Section `0x8001`: layer blend modes (required)
+
+```text
+count        u16   must equal layer_count
+repeated count times, bottom layer first:
+  mode       u8    0 normal, 1 multiply, 2 screen, 3 overlay, 4 darken, 5 lighten,
+                   6 color dodge, 7 color burn, 8 hard light, 9 soft light,
+                   10 difference, 11 exclusion, 12 hue, 13 saturation, 14 color,
+                   15 luminosity, 16 addition, 17 subtract, 18 divide
+```
+
+The codes are Aseprite's. Written only when some layer is not Normal. A count that differs from the layer count, an unknown code, or extra bytes are errors. The section is required: OxyPixel 0.9.2 and earlier reject a file that has it, rather than drawing every layer as Normal and losing the modes on save.
+
 Reference images are not a field in this file. Version 1 has no room for them: trailing bytes are rejected, and a new field would be a new version. A saved document may have a sidecar, `<name>.oxypix.refs`, in the same directory. Save writes it. That file lists PNG or JPEG paths and where each image sits. A path to an image inside the document's directory is relative to that directory; any other path is absolute. The pixels stay in those image files. A reader that only understands this document never sees them, and export does not read the sidecar.
 
 ## Limits

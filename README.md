@@ -131,6 +131,7 @@ These match the current editor. Planned work is listed in [docs/ROADMAP.md](docs
 ### Layers
 
 - Visibility, opacity, rename, reorder, duplicate, and merge down
+- Blend modes on each layer: Multiply, Screen, Overlay, Darken, Lighten, Color dodge and burn, Hard and Soft light, Difference, Exclusion, Hue, Saturation, Color, Luminosity, Addition, Subtract, and Divide. Exports, OxyPack, and the MCP server draw them too
 - Reference images (PNG or JPEG) on the canvas or in a floating panel, behind the art by default. Ctrl+drag moves one, and Fit to canvas scales it to the document. They are left out of export and saved beside the document, not inside it
 
 ### Animation
@@ -318,7 +319,7 @@ oxypixel import-palette sprite.oxypix palette.gpl recolored.oxypix
 
 ## File formats
 
-`.oxypix` is the editor's own little-endian document. Version 1 stores the canvas, shared layer stack, frame durations, pixels, and palette. Version 2 adds animation tags and frame names and is written only when a document has one of them; OxyPixel 0.8.5 and earlier open version 1 only. The byte layout is [docs/FORMAT.md](docs/FORMAT.md).
+`.oxypix` is the editor's own little-endian document. Version 1 stores the canvas, shared layer stack, frame durations, pixels, and palette. Version 2 adds animation tags, frame names, and layer blend modes and is written only when a document has one of them; OxyPixel 0.8.5 and earlier open version 1 only, and a file with blend modes needs OxyPixel newer than 0.9.2. The byte layout is [docs/FORMAT.md](docs/FORMAT.md).
 
 PNG, BMP, and GIF can be imported as a new document or as a layer. A GIF import becomes one composited layer named Imported. Export writes the composited frame, a GIF animation, a BMP, or a PNG spritesheet in a row or a grid, optionally with a JSON description.
 

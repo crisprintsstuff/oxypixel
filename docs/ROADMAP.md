@@ -12,7 +12,7 @@ Infrastructure, then small fixes that already have a place in the code.
 
 OX-002, OX-011, and OX-012 are done, so this list is empty.
 
-Suggested order if a human picks proposals: OX-P20, OX-P21, OX-P6, OX-P22, OX-P24, OX-P25, and OX-P23 are done. OX-P27 has its section layout, with tags and frame names; blend modes would add a section.
+Suggested order if a human picks proposals: OX-P20, OX-P21, OX-P6, OX-P22, OX-P24, OX-P25, and OX-P23 are done. OX-P27 has its section layout, with tags, frame names, and blend modes (OX-P18).
 
 ## Scorecard
 
@@ -215,7 +215,9 @@ File → Load reference, or a dropped JPEG, keeps the picture beside the documen
 
 ### OX-P18
 
-**Blend modes on a layer, once the file format allows them.** Each layer already has an opacity, and compositing is source-over. A later task could add a few blend modes, such as multiply, screen, and add, stored on the layer. That needs a new `.oxypix` version, so it waits until a human accepts the format change.
+**Blend modes on a layer.** Status: done. Area: `crates/oxypixel-core/src/blend.rs`, `document.rs`, `io/oxypix.rs`, `crates/oxypixel/src/app.rs`.
+
+Each layer has one of Aseprite's 19 blend modes, chosen under the layer opacity slider; one undo step per change. Compositing, merge down, every export, OxyPack, and the MCP server use the same `blend` (moved from OxyPack into the core). A document with any mode other than Normal is saved with the required section `0x8001`, so OxyPixel 0.9.2 and earlier refuse it instead of drawing it wrong; the owner chose that over an optional section. Layer groups are the next step.
 
 ### OX-P20
 
@@ -259,7 +261,7 @@ Export spritesheet takes Columns (0 is one row, as before), Padding (clear pixel
 
 ### OX-P27
 
-**`.oxypix` version 2.** Status: in progress. Version 2 is version 1 plus a list of sections after the palette; a section marked required must be understood, an optional one may be skipped. Saving writes version 2 only when a section is used, so documents without one stay version 1 byte for byte. Tags (section `0x0001`) and frame names (section `0x0002`) are optional sections. Still open: blend modes (P18), which would be a required section, and whether references stay a sidecar. The layout is in [FORMAT.md](FORMAT.md) and tested in `io/oxypix.rs`.
+**`.oxypix` version 2.** Status: in progress. Version 2 is version 1 plus a list of sections after the palette; a section marked required must be understood, an optional one may be skipped. Saving writes version 2 only when a section is used, so documents without one stay version 1 byte for byte. Tags (section `0x0001`) and frame names (section `0x0002`) are optional sections; blend modes (section `0x8001`, P18) are required. Still open: layer groups, and whether references stay a sidecar. The layout is in [FORMAT.md](FORMAT.md) and tested in `io/oxypix.rs`.
 
 ### OX-P28
 
