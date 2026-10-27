@@ -23,6 +23,8 @@ pub const MIN_FRAME_MS: u32 = 20;
 pub const MAX_FRAME_MS: u32 = 10_000;
 pub const DEFAULT_FRAME_MS: u32 = 100;
 pub const MAX_BRUSH: u32 = 16;
+/// Widest, and tallest, brush taken from a selection.
+pub const MAX_CUSTOM_BRUSH: u32 = 64;
 pub const MAX_UNDO: usize = 50;
 pub const MAX_UNDO_BYTES: usize = 256 * 1024 * 1024;
 /// The newest `.oxypix` version this build reads and writes. A document with

@@ -418,7 +418,44 @@ pub fn show_canvas(
             }
         }
     }
-    if let Some((x, y)) = raw_hover.filter(|_| hover.is_some()) {
+    let custom = editor
+        .custom_brush()
+        .filter(|_| matches!(editor.tool(), Tool::Pencil | Tool::Eraser));
+    if let (Some((x, y)), Some(brush)) = (raw_hover.filter(|_| hover.is_some()), custom) {
+        // The brush's own pixels, faded, where the next stamp lands.
+        let (bw, bh) = (brush.width as i32, brush.height as i32);
+        let (left, top) = (x - bw / 2, y - bh / 2);
+        let zoom = view.zoom;
+        if editor.tool() == Tool::Pencil {
+            for by in 0..bh {
+                for bx in 0..bw {
+                    let px = brush.pixels[(by * bw + bx) as usize];
+                    if px.a == 0 {
+                        continue;
+                    }
+                    let cell = Rect::from_min_size(
+                        origin + Vec2::new((left + bx) as f32 * zoom, (top + by) as f32 * zoom),
+                        Vec2::splat(zoom),
+                    );
+                    painter.rect_filled(
+                        cell,
+                        0.0,
+                        Color32::from_rgba_unmultiplied(px.r, px.g, px.b, px.a / 2 + px.a / 4),
+                    );
+                }
+            }
+        }
+        let bounds = Rect::from_min_size(
+            origin + Vec2::new(left as f32 * zoom, top as f32 * zoom),
+            Vec2::new(bw as f32 * zoom, bh as f32 * zoom),
+        );
+        painter.rect_stroke(
+            bounds,
+            0.0,
+            Stroke::new(1.0_f32, Color32::from_white_alpha(160)),
+            StrokeKind::Outside,
+        );
+    } else if let Some((x, y)) = raw_hover.filter(|_| hover.is_some()) {
         if let Some(mark) = hover_rect(editor.tool(), editor.brush(), x, y, origin, view.zoom) {
             let secondary = ui.input(|i| i.pointer.button_down(PointerButton::Secondary));
             let color = editor.hover_color(secondary);

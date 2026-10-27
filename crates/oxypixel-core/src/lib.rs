@@ -25,7 +25,7 @@ pub use blend::{blend, BlendMode};
 pub use color::{source_over, Rgba};
 pub use document::{Document, LayerInfo};
 pub use draw::{PixelRect, Transform};
-pub use editor::{Editor, MouseButton, Tool};
+pub use editor::{CustomBrush, Editor, MouseButton, Tool};
 pub use error::Error;
 pub use io::Fit;
 pub use io::{
@@ -38,9 +38,9 @@ pub use io::{
     PaletteFormat, SheetGrid, SheetLayout,
 };
 pub use limits::{
-    DEFAULT_FRAME_MS, FORMAT_VERSION, MAX_BRUSH, MAX_CEL_PIXELS, MAX_DIMENSION, MAX_FILE_BYTES,
-    MAX_FRAMES, MAX_FRAME_MS, MAX_GROUP_DEPTH, MAX_LAYERS, MAX_PALETTE, MAX_SHEET_PADDING,
-    MAX_SHEET_PIXELS, MAX_SHEET_WIDTH, MAX_TAGS, MAX_TOTAL_PIXELS, MIN_FRAME_MS,
+    DEFAULT_FRAME_MS, FORMAT_VERSION, MAX_BRUSH, MAX_CEL_PIXELS, MAX_CUSTOM_BRUSH, MAX_DIMENSION,
+    MAX_FILE_BYTES, MAX_FRAMES, MAX_FRAME_MS, MAX_GROUP_DEPTH, MAX_LAYERS, MAX_PALETTE,
+    MAX_SHEET_PADDING, MAX_SHEET_PIXELS, MAX_SHEET_WIDTH, MAX_TAGS, MAX_TOTAL_PIXELS, MIN_FRAME_MS,
 };
 pub use reference::{
     sidecar_path, References, MAX_REFERENCES, MAX_REFERENCE_SCALE, MIN_REFERENCE_SCALE,

@@ -261,6 +261,8 @@ Export spritesheet takes Columns (0 is one row, as before), Padding (clear pixel
 
 Edit, then Scale… resizes the selection, or the whole active layer when nothing is selected, to a typed size or by ½×, 2×, 3×, or 4×, with nearest-neighbor sampling. The top-left corner stays put, a masked selection keeps its shape, and pixels past the canvas edge are dropped. One undo step. The same change added Outline (the four sides, or with corners) in the primary color and a one-pixel Drop shadow in the second color, both on clear pixels of the active layer and inside the selection when there is one; the MCP `draw` tool has `outline` and `shadow` operations.
 
+Later in the same work: Edit, then Replace color… (primary to second color on the layer, or every layer and frame, as one undo step; the MCP `draw` tool's `replace` operation), a Dither pencil option (a checkerboard of both colors fixed to the canvas), and Brush from selection (the pencil stamps the selected pixels, up to `MAX_CUSTOM_BRUSH` 64 on a side, in their own colors; the eraser clears their shape). Tested in `editor.rs` and `crates/oxypixel/src/mcp/tests.rs`.
+
 ### OX-P27
 
 **`.oxypix` version 2.** Status: in progress. Version 2 is version 1 plus a list of sections after the palette; a section marked required must be understood, an optional one may be skipped. Saving writes version 2 only when a section is used, so documents without one stay version 1 byte for byte. Tags (section `0x0001`) and frame names (section `0x0002`) are optional sections; blend modes (section `0x8001`, P18) and layer groups (section `0x8002`) are required. Still open: whether references stay a sidecar. The layout is in [FORMAT.md](FORMAT.md) and tested in `io/oxypix.rs`.

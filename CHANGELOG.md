@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Edit, then Scale… resizes the selection, or the whole layer, to a typed size or by ½×, 2×, 3×, or 4× with nearest-neighbor pixels, keeping its top-left corner. One undo step.
 - Edit, then Outline in primary color, Outline with corners, and Drop shadow in second color paint the clear pixels around or behind the art on the active layer, inside the selection when there is one. The MCP `draw` tool has matching `outline` and `shadow` operations.
+- Edit, then Replace color… changes every pixel of the primary color to the second color on the active layer, or on every layer, every frame, or both, inside the selection when there is one. One undo step. The MCP `draw` tool has a matching `replace` operation.
+- Dither, under the tool options, makes the pencil paint a checkerboard of the primary and second colors that stays fixed to the canvas.
+- Brush from selection, under the brush size, makes the pencil stamp the selected pixels (up to 64×64) in their own colors and the eraser clear their shape. The canvas previews it under the pointer, and Square goes back to the normal brush.
 
 ### Changed
 

@@ -109,6 +109,8 @@ These match the current editor. Planned work is listed in [docs/ROADMAP.md](docs
 - Fill and the wand have a tolerance for near colors and a global mode that takes every match on the layer
 - Pixel-perfect pencil (P), off until you turn it on, drops the extra corner of a one-pixel diagonal step
 - Shade (D) turns the pencil into a shading brush: left steps each pixel to the next palette swatch, right to the one before
+- Dither turns the pencil into a checkerboard of both colors, fixed to the canvas so strokes line up
+- Brush from selection makes the pencil stamp the selected pixels in their own colors, and the eraser clear their shape. Square goes back to the normal brush
 - Horizontal and vertical mirror while drawing
 - Wrap (T) continues a stroke or fill that leaves one edge on the opposite edge. Tiled view (Shift+T) shows the canvas 3 by 3 for checking a repeating tile
 - Nearest-neighbor zoom in whole-pixel steps, pan, and an optional grid
@@ -127,6 +129,7 @@ These match the current editor. Planned work is listed in [docs/ROADMAP.md](docs
 - Primary and secondary colors, hex entry, and the 16-color Ink palette
 - Drag swatches to reorder them, and fill a ramp of N steps between two swatches
 - Snap (S) makes pencil, fill, and shapes use the nearest palette color
+- Edit, then Replace color… changes every pixel of the primary color to the second color on the layer, or on every layer and frame, in one undo step
 - Import and export the palette as GIMP `.gpl`, hex `.hex`, or JASC `.pal`. Import replaces the palette and can be undone
 
 ### Layers
