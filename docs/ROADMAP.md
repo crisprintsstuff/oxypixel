@@ -257,7 +257,9 @@ Export spritesheet takes Columns (0 is one row, as before), Padding (clear pixel
 
 ### OX-P26
 
-**Scale a selection.** P9 flips and turns a selection; resizing it is still missing. A later task could scale the selected pixels by a whole-number factor up or down, or to a typed size, with nearest-neighbor sampling only. It is one undo step, and pixels that land outside the cel are dropped as in P9.
+**Scale a selection.** Status: done. Area: `crates/oxypixel-core/src/draw.rs`, `editor.rs`, `crates/oxypixel/src/app.rs`.
+
+Edit, then Scale… resizes the selection, or the whole active layer when nothing is selected, to a typed size or by ½×, 2×, 3×, or 4×, with nearest-neighbor sampling. The top-left corner stays put, a masked selection keeps its shape, and pixels past the canvas edge are dropped. One undo step. The same change added Outline (the four sides, or with corners) in the primary color and a one-pixel Drop shadow in the second color, both on clear pixels of the active layer and inside the selection when there is one; the MCP `draw` tool has `outline` and `shadow` operations.
 
 ### OX-P27
 

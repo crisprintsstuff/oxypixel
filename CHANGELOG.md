@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Layer groups. Group puts the selected layer in a new group, In moves a layer into the group just below it, and Out moves it back out. Up, Down, Copy, and Delete carry a whole group, and hiding a group hides what is inside it. A group is drawn as one picture and mixed in with its own opacity and blend mode, the way Aseprite composites groups. Drawing tools do nothing on a group. The MCP server's `add_layer` takes `group`, `set_layer` takes `group_into` and `group_out`, and `document_info` lists each layer's group and parent.
 
+- Edit, then Scale… resizes the selection, or the whole layer, to a typed size or by ½×, 2×, 3×, or 4× with nearest-neighbor pixels, keeping its top-left corner. One undo step.
+- Edit, then Outline in primary color, Outline with corners, and Drop shadow in second color paint the clear pixels around or behind the art on the active layer, inside the selection when there is one. The MCP `draw` tool has matching `outline` and `shadow` operations.
+
 ### Changed
 
 - A document with a group is saved with another required `.oxypix` section, with the same effect on older versions as blend modes.

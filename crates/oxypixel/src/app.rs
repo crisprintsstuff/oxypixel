@@ -39,6 +39,7 @@ enum Note {
 enum DialogKind {
     New,
     Canvas,
+    Scale,
     Path,
     Unsaved,
     About,
@@ -99,6 +100,10 @@ pub struct OxyApp {
     canvas_w: String,
     canvas_h: String,
     canvas_x: String,
+    /// The size typed into Edit, then Scale…, and the size it started from.
+    scale_w: String,
+    scale_h: String,
+    scale_from: (u32, u32),
     canvas_y: String,
     export_scale: u32,
     /// Spritesheet frames per row. 0 is one row.
@@ -196,6 +201,9 @@ impl OxyApp {
             canvas_w: "32".to_string(),
             canvas_h: "32".to_string(),
             canvas_x: "0".to_string(),
+            scale_w: String::new(),
+            scale_h: String::new(),
+            scale_from: (1, 1),
             canvas_y: "0".to_string(),
             export_scale: prefs.export_scale,
             sheet_columns: 0,
@@ -860,6 +868,87 @@ impl OxyApp {
         self.dialog = Some(DialogKind::Canvas);
     }
 
+    fn open_scale_dialog(&mut self) {
+        if self.editor.active_is_group() {
+            self.note_err("A group has no pixels. Pick a layer inside it.");
+            return;
+        }
+        let doc = self.editor.document();
+        let size = self
+            .editor
+            .selection()
+            .map_or((doc.width(), doc.height()), |s| (s.width, s.height));
+        self.scale_from = size;
+        self.scale_w = size.0.to_string();
+        self.scale_h = size.1.to_string();
+        self.dialog_error = None;
+        self.dialog = Some(DialogKind::Scale);
+    }
+
+    fn dialog_scale(&mut self, ctx: &egui::Context) {
+        let mut close = false;
+        let mut apply = false;
+        let (from_w, from_h) = self.scale_from;
+        egui::Window::new("Scale")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                let what = if self.editor.selection().is_some() {
+                    "the selection"
+                } else {
+                    "the whole layer"
+                };
+                ui.label(format!(
+                    "Resize {what} from {from_w}×{from_h} with nearest-neighbor pixels. The top-left corner stays put; pixels past the canvas edge are dropped."
+                ));
+                ui.horizontal(|ui| {
+                    ui.label("Width");
+                    ui.add(egui::TextEdit::singleline(&mut self.scale_w).desired_width(72.0));
+                    ui.label("Height");
+                    ui.add(egui::TextEdit::singleline(&mut self.scale_h).desired_width(72.0));
+                });
+                ui.horizontal(|ui| {
+                    for (label, num, den) in [("½×", 1, 2), ("2×", 2, 1), ("3×", 3, 1), ("4×", 4, 1)] {
+                        if ui.button(label).clicked() {
+                            self.scale_w = (from_w * num / den).max(1).to_string();
+                            self.scale_h = (from_h * num / den).max(1).to_string();
+                        }
+                    }
+                });
+                if let Some(error) = &self.dialog_error {
+                    ui.colored_label(Color32::from_rgb(220, 100, 90), error);
+                }
+                ui.horizontal(|ui| {
+                    if ui.button("Scale").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        apply = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        close = true;
+                    }
+                });
+            });
+        if apply {
+            match (
+                self.scale_w.trim().parse::<u32>(),
+                self.scale_h.trim().parse::<u32>(),
+            ) {
+                (Ok(w), Ok(h)) => match self.editor.scale_selection(w, h) {
+                    Ok(()) => {
+                        self.dialog = None;
+                        self.note_ok(format!("Scaled to {w}×{h}."));
+                    }
+                    Err(err) => self.dialog_error = Some(err.to_string()),
+                },
+                _ => self.dialog_error = Some("Width and height must be whole numbers.".into()),
+            }
+        }
+        if close {
+            self.dialog = None;
+        }
+    }
+
     fn request_import(&mut self) {
         if self.has_unsaved_changes() {
             self.pending = Some(Pending::Import);
@@ -1438,6 +1527,32 @@ impl OxyApp {
                     }
                     if menu_item(ui, "Rotate 180", "Ctrl+Shift+.") {
                         self.apply(|editor| editor.transform_pixels(Transform::Rotate180));
+                        ui.close_menu();
+                    }
+                    if menu_item(ui, "Scale…", "") {
+                        self.open_scale_dialog();
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if menu_item(ui, "Outline in primary color", "") {
+                        let color = self.editor.primary();
+                        if self.apply(|editor| editor.outline(color, false)) == Some(false) {
+                            self.note_err("Nothing to outline: the layer has no art here.");
+                        }
+                        ui.close_menu();
+                    }
+                    if menu_item(ui, "Outline with corners", "") {
+                        let color = self.editor.primary();
+                        if self.apply(|editor| editor.outline(color, true)) == Some(false) {
+                            self.note_err("Nothing to outline: the layer has no art here.");
+                        }
+                        ui.close_menu();
+                    }
+                    if menu_item(ui, "Drop shadow in second color", "") {
+                        let color = self.editor.secondary();
+                        if self.apply(|editor| editor.drop_shadow(color, 1, 1)) == Some(false) {
+                            self.note_err("Nothing to shadow: the layer has no art here.");
+                        }
                         ui.close_menu();
                     }
                     ui.separator();
@@ -2575,6 +2690,7 @@ impl OxyApp {
         match kind {
             DialogKind::New => self.dialog_new(ctx),
             DialogKind::Canvas => self.dialog_canvas(ctx),
+            DialogKind::Scale => self.dialog_scale(ctx),
             DialogKind::Path => self.dialog_path(ctx),
             DialogKind::Unsaved => self.dialog_unsaved(ctx),
             DialogKind::About => self.dialog_about(ctx),

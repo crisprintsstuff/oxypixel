@@ -117,7 +117,8 @@ These match the current editor. Planned work is listed in [docs/ROADMAP.md](docs
 ### Selections
 
 - Shift adds a marquee or wand area to the selection and Alt cuts it out, so a selection can be any shape
-- Move, nudge, flip, and rotate a selection, or the active cel when nothing is selected. A 90° turn swaps the sides and stays centered
+- Move, nudge, flip, rotate, and scale a selection, or the active cel when nothing is selected. A 90° turn swaps the sides and stays centered; Scale… takes a typed size or ½× to 4× with nearest-neighbor pixels
+- Outline the art on a layer in the primary color (sides only, or with corners), and add a one-pixel drop shadow in the second color, inside the selection when there is one
 - Copy puts a straight-alpha image on the system clipboard. Paste uses the system image, or the last copy when the clipboard has no image
 - Canvas resize and crop
 

@@ -355,6 +355,35 @@ fn draw_render_and_edit_a_document() {
 }
 
 #[test]
+fn outline_and_shadow_ops_paint_around_the_art() {
+    let dir = TempDir::new("fx");
+    let mut server = Server::new(Some(dir.0.clone()));
+    call(
+        &mut server,
+        "create_document",
+        json!({ "path": "dot.oxypix", "width": 5, "height": 5 }),
+    );
+    let (err, text, _) = call(
+        &mut server,
+        "draw",
+        json!({
+            "path": "dot.oxypix",
+            "color": "#FFFFFF",
+            "operations": [
+                { "op": "pixels", "points": [[2, 2]] },
+                { "op": "shadow", "offset": [1, 1], "color": "#3C5C9A" },
+                { "op": "outline", "color": "#14161F" },
+            ],
+        }),
+    );
+    assert!(!err, "{text}");
+    let path = dir.0.join("dot.oxypix");
+    assert_eq!(pixel(&path, 0, 3, 3), Rgba::new(0x3C, 0x5C, 0x9A, 255));
+    assert_eq!(pixel(&path, 0, 2, 1), Rgba::new(0x14, 0x16, 0x1F, 255));
+    assert_eq!(pixel(&path, 0, 0, 0), Rgba::CLEAR);
+}
+
+#[test]
 fn export_and_pack_write_new_files_only() {
     let dir = TempDir::new("export");
     let mut server = Server::new(Some(dir.0.clone()));

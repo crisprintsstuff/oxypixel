@@ -5,8 +5,9 @@ use crate::color::{color_ramp, nearest_palette_color, shade_step, Rgba};
 use crate::document::Document;
 use crate::draw::{
     brush_offsets, clamp_to_margin, constrain_line, constrain_square, ellipse_points, fill_region,
-    flood_fill, line_points, pixel_perfect_path, rect_on_canvas, rect_points, transform_pixels,
-    turned_rect, wrap_coord, FillLimits, PixelRect, Transform,
+    flood_fill, line_points, outline_points, pixel_perfect_path, rect_on_canvas, rect_points,
+    scale_nearest, shadow_points, transform_pixels, turned_rect, wrap_coord, FillLimits, PixelRect,
+    Transform,
 };
 use crate::error::{Error, Result};
 use crate::history::{History, Snapshot};
@@ -1059,6 +1060,133 @@ impl Editor {
                 }
             }
         }
+    }
+
+    /// Resize the selection (or the whole layer) to `new_w` by `new_h` with
+    /// nearest-neighbor sampling, keeping its top-left corner. Pixels that land
+    /// off the canvas are dropped. One undo step.
+    pub fn scale_selection(&mut self, new_w: u32, new_h: u32) -> Result<()> {
+        if self.active_is_group() {
+            return Err(Error::Group(
+                "a group has no pixels; pick a layer inside it",
+            ));
+        }
+        let canvas_w = self.doc.width();
+        let canvas_h = self.doc.height();
+        let had_selection = self.selection.is_some();
+        let sel = self.selection.unwrap_or(PixelRect {
+            x: 0,
+            y: 0,
+            width: canvas_w,
+            height: canvas_h,
+        });
+        let too_big = Error::Limit {
+            what: "pixels in a scaled selection",
+            value: u64::from(new_w).saturating_mul(u64::from(new_h)),
+            max: crate::limits::MAX_CEL_PIXELS,
+        };
+        if new_w == 0
+            || new_h == 0
+            || new_w > 4 * crate::limits::MAX_DIMENSION
+            || new_h > 4 * crate::limits::MAX_DIMENSION
+        {
+            return Err(too_big);
+        }
+        let mask = self.selection_mask.clone();
+        let (base, patch) = self
+            .capture_selection(sel, mask.as_deref())
+            .ok_or(Error::Index { what: "cel" })?;
+        let scaled = scale_nearest(sel.width, sel.height, &patch, new_w, new_h).ok_or(too_big)?;
+        let scaled_mask = match &mask {
+            Some(mask) => Some(
+                scale_nearest(sel.width, sel.height, mask, new_w, new_h).ok_or(Error::Limit {
+                    what: "pixels in a scaled selection",
+                    value: u64::from(new_w).saturating_mul(u64::from(new_h)),
+                    max: crate::limits::MAX_CEL_PIXELS,
+                })?,
+            ),
+            None => None,
+        };
+        let dest = PixelRect {
+            x: sel.x,
+            y: sel.y,
+            width: new_w,
+            height: new_h,
+        };
+        let kept = rect_on_canvas(dest, canvas_w, canvas_h).ok_or(Error::TransformOutside)?;
+        self.cancel_gesture();
+        self.push_undo();
+        let frame = self.doc.active_frame();
+        let layer = self.doc.active_layer();
+        if let Ok(cel) = self.doc.cel_mut(frame, layer) {
+            if cel.len() == base.len() {
+                cel.copy_from_slice(&base);
+            }
+        }
+        self.blit_patch(
+            dest.x,
+            dest.y,
+            new_w,
+            new_h,
+            &scaled,
+            scaled_mask.as_deref(),
+        );
+        if had_selection {
+            let kept_mask = scaled_mask.map(|mask| selection::crop_mask(dest, &mask, kept));
+            self.set_selection(Some(kept), kept_mask);
+        }
+        self.dirty = true;
+        self.generation += 1;
+        Ok(())
+    }
+
+    /// Paint `color` on the clear pixels around the art on the active layer,
+    /// inside the selection when there is one. `corners` includes diagonal
+    /// neighbors. One undo step; `Ok(false)` when there was nothing to outline.
+    pub fn outline(&mut self, color: Rgba, corners: bool) -> Result<bool> {
+        self.paint_effect(color, |w, h, cel, inside| {
+            outline_points(w, h, cel, corners, inside)
+        })
+    }
+
+    /// Paint `color` behind the art, offset by `(dx, dy)`, on clear pixels of
+    /// the active layer. One undo step; `Ok(false)` when nothing changed.
+    pub fn drop_shadow(&mut self, color: Rgba, dx: i32, dy: i32) -> Result<bool> {
+        if dx == 0 && dy == 0 {
+            return Ok(false);
+        }
+        self.paint_effect(color, |w, h, cel, inside| {
+            shadow_points(w, h, cel, dx, dy, inside)
+        })
+    }
+
+    fn paint_effect(
+        &mut self,
+        color: Rgba,
+        points: impl FnOnce(u32, u32, &[Rgba], &dyn Fn(i32, i32) -> bool) -> Vec<(i32, i32)>,
+    ) -> Result<bool> {
+        if self.active_is_group() {
+            return Err(Error::Group(
+                "a group has no pixels; pick a layer inside it",
+            ));
+        }
+        let frame = self.doc.active_frame();
+        let layer = self.doc.active_layer();
+        let (w, h) = (self.doc.width(), self.doc.height());
+        let selected = self.selection.is_some();
+        let inside = |x: i32, y: i32| !selected || self.is_selected(x, y);
+        let found = points(w, h, self.doc.cel(frame, layer)?, &inside);
+        if found.is_empty() {
+            return Ok(false);
+        }
+        self.mutate(false, |doc| {
+            if let Ok(cel) = doc.cel_mut(frame, layer) {
+                for (x, y) in found {
+                    cel[(y as u32 * w + x as u32) as usize] = color;
+                }
+            }
+        });
+        Ok(true)
     }
 
     pub fn clear_selection_pixels(&mut self) -> Result<()> {
@@ -2727,6 +2855,65 @@ mod tests {
         ed.pointer_down(-1, 0, MouseButton::Primary, false);
         assert!(ed.is_selected(7, 7));
         assert!(!ed.can_undo());
+    }
+
+    #[test]
+    fn scale_selection_resizes_from_its_corner_in_one_undo() {
+        let mut ed = Editor::new(8, 8).unwrap();
+        let ink = Rgba::new(200, 10, 10, 255);
+        ed.set_primary(ink);
+        ed.pointer_down(1, 1, MouseButton::Primary, false);
+        ed.pointer_up(1, 1, false);
+        ed.set_tool(Tool::Select);
+        ed.pointer_down(1, 1, MouseButton::Primary, false);
+        ed.pointer_up(2, 2, false);
+        ed.scale_selection(4, 4).unwrap();
+        let cel = ed.document().cel(0, 0).unwrap();
+        let inked: Vec<usize> = (0..64).filter(|&i| cel[i] == ink).collect();
+        assert_eq!(inked, [9, 10, 17, 18], "the one pixel is now 2x2 at (1,1)");
+        assert_eq!(ed.selection(), Some(PixelRect::from_corners(1, 1, 4, 4)));
+        assert!(ed.undo());
+        assert_eq!(
+            ed.document()
+                .cel(0, 0)
+                .unwrap()
+                .iter()
+                .filter(|p| **p == ink)
+                .count(),
+            1
+        );
+        // Growing past the edge keeps only what fits.
+        ed.scale_selection(16, 16).unwrap();
+        assert_eq!(ed.selection(), Some(PixelRect::from_corners(1, 1, 7, 7)));
+        assert!(ed.scale_selection(0, 3).is_err());
+    }
+
+    #[test]
+    fn outline_and_shadow_are_one_undo_step_each_and_respect_the_selection() {
+        let mut ed = Editor::new(5, 5).unwrap();
+        let ink = Rgba::new(255, 255, 255, 255);
+        let line = Rgba::new(0, 0, 0, 255);
+        ed.set_primary(ink);
+        ed.pointer_down(2, 2, MouseButton::Primary, false);
+        ed.pointer_up(2, 2, false);
+        assert!(ed.outline(line, false).unwrap());
+        let cel = ed.document().cel(0, 0).unwrap();
+        assert_eq!(cel.iter().filter(|p| **p == line).count(), 4);
+        assert!(ed.undo());
+        assert!(ed.drop_shadow(line, 1, 1).unwrap());
+        assert_eq!(ed.document().cel(0, 0).unwrap()[3 * 5 + 3], line);
+        assert!(ed.undo());
+        ed.set_tool(Tool::Select);
+        ed.pointer_down(0, 0, MouseButton::Primary, false);
+        ed.pointer_up(4, 1, false);
+        assert!(ed.outline(line, true).unwrap());
+        let cel = ed.document().cel(0, 0).unwrap();
+        assert_eq!(
+            cel.iter().filter(|p| **p == line).count(),
+            3,
+            "only row 1 is selected"
+        );
+        assert!(!ed.drop_shadow(line, 0, 0).unwrap());
     }
 
     #[test]
