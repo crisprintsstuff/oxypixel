@@ -602,3 +602,36 @@ fn render_scale_fits_about_512_pixels() {
     assert_eq!(fit_scale(1024, 16, 512), 1);
     assert_eq!(fit_scale(0, 0, 512), 512);
 }
+
+#[test]
+fn tilemap_layers_are_listed_and_drawing_edits_their_tiles() {
+    let dir = TempDir::new("tiles");
+    let mut server = Server::new(Some(dir.0.clone()));
+    let mut doc = oxypixel_core::Document::new(4, 2).unwrap();
+    let set = doc.add_tileset("ground", 2, 2).unwrap();
+    doc.add_tile(set, vec![Rgba::CLEAR; 4]).unwrap();
+    doc.add_tilemap_layer("map", set).unwrap();
+    doc.set_tile(0, 1, 0, 0, 1).unwrap();
+    doc.set_tile(0, 1, 1, 0, 1).unwrap();
+    let path = dir.0.join("map.oxypix");
+    oxypixel_core::save_oxypix(&doc, &path).unwrap();
+    let (err, text, _) = call(
+        &mut server,
+        "document_info",
+        json!({ "path": "map.oxypix" }),
+    );
+    assert!(!err, "{text}");
+    let info: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(info["layers"][1]["tileset"], 0);
+    assert_eq!(info["tilesets"][0]["tile_width"], 2);
+    assert_eq!(info["tilesets"][0]["tiles"], 1);
+    let (err, text, _) = call(
+        &mut server,
+        "draw",
+        json!({ "path": "map.oxypix", "layer": 1, "color": "#FF0000", "operations": [{ "op": "pixels", "points": [[0, 0]] }] }),
+    );
+    assert!(!err, "{text}");
+    // Both cells hold tile 1, so the pixel shows in both.
+    assert_eq!(pixel(&path, 0, 0, 0), Rgba::new(255, 0, 0, 255));
+    assert_eq!(pixel(&path, 0, 2, 0), Rgba::new(255, 0, 0, 255));
+}

@@ -33,6 +33,7 @@ use crate::limits::{
     check_file_len, check_stack, clamp_name, FORMAT_VERSION, MAGIC, MAX_NAME_BYTES, MAX_TAGS,
 };
 use crate::tags::{FrameTag, LoopDirection};
+use crate::tilemap::{Tileset, MAX_TILES, MAX_TILESETS, MAX_TILESET_PIXELS};
 
 /// Version 1: no sections.
 const VERSION_1: u16 = 1;
@@ -49,6 +50,13 @@ const SECTION_BLEND_MODES: u16 = SECTION_REQUIRED | 0x0001;
 /// Layer groups. Required: a reader that ignored them would flatten the
 /// groups and lose them on save.
 const SECTION_LAYER_GROUPS: u16 = SECTION_REQUIRED | 0x0002;
+/// Tilesets. Required: their tiles are what tilemap layers draw.
+const SECTION_TILESETS: u16 = SECTION_REQUIRED | 0x0003;
+/// Which layers are tilemaps, and their grids in every frame. Required: a
+/// reader that kept only the pixels would lose the tiles on save.
+const SECTION_TILEMAPS: u16 = SECTION_REQUIRED | 0x0004;
+/// A layer that is not a tilemap, in the tilemaps section.
+const NO_TILESET: u16 = u16::MAX;
 /// Most sections in one file.
 const MAX_SECTIONS: usize = 64;
 
@@ -88,7 +96,7 @@ pub fn save_oxypix_bytes(doc: &Document) -> Result<Vec<u8>> {
     for frame in doc.frames() {
         out.extend_from_slice(&frame.duration_ms.to_le_bytes());
         for cel in &frame.cels {
-            for px in cel {
+            for px in cel.iter() {
                 out.extend_from_slice(&px.to_bytes());
             }
         }
@@ -124,7 +132,147 @@ fn sections(doc: &Document) -> Vec<(u16, Vec<u8>)> {
     if doc.layers().iter().any(|l| l.group || l.depth > 0) {
         list.push((SECTION_LAYER_GROUPS, layer_groups_bytes(doc)));
     }
+    if !doc.tilesets().is_empty() {
+        list.push((SECTION_TILESETS, tilesets_bytes(doc)));
+    }
+    if doc.layers().iter().any(|l| l.tileset.is_some()) {
+        list.push((SECTION_TILEMAPS, tilemaps_bytes(doc)));
+    }
     list
+}
+
+/// count u16, then per tileset: name_len u16, name bytes, tile_width u16,
+/// tile_height u16, tile_count u32, then every tile's RGBA pixels in order.
+fn tilesets_bytes(doc: &Document) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&(doc.tilesets().len() as u16).to_le_bytes());
+    for set in doc.tilesets() {
+        let name = clamp_name(&set.name);
+        out.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        out.extend_from_slice(name.as_bytes());
+        out.extend_from_slice(&(set.tile_width() as u16).to_le_bytes());
+        out.extend_from_slice(&(set.tile_height() as u16).to_le_bytes());
+        out.extend_from_slice(&(set.len() as u32).to_le_bytes());
+        for tile in set.tiles() {
+            for px in tile {
+                out.extend_from_slice(&px.to_bytes());
+            }
+        }
+    }
+    out
+}
+
+fn read_tilesets(bytes: &[u8]) -> Result<Vec<Tileset>> {
+    let mut r = Reader::new(bytes);
+    let count = r.u16()? as usize;
+    if count > MAX_TILESETS {
+        return Err(Error::Limit {
+            what: "tilesets",
+            value: count as u64,
+            max: MAX_TILESETS as u64,
+        });
+    }
+    let mut sets = Vec::with_capacity(count);
+    for _ in 0..count {
+        let name_len = r.u16()? as usize;
+        if name_len > MAX_NAME_BYTES {
+            return Err(Error::BadName);
+        }
+        let name = std::str::from_utf8(r.bytes(name_len)?)
+            .map_err(|_| Error::BadName)?
+            .to_string();
+        let tile_width = u32::from(r.u16()?);
+        let tile_height = u32::from(r.u16()?);
+        let mut set = Tileset::new(name, tile_width, tile_height)?;
+        let tiles = r.u32()? as u64;
+        let total = tiles * u64::from(tile_width) * u64::from(tile_height);
+        if tiles > MAX_TILES as u64 || total > MAX_TILESET_PIXELS {
+            return Err(Error::Limit {
+                what: "pixels in a tileset",
+                value: total,
+                max: MAX_TILESET_PIXELS,
+            });
+        }
+        let tile_bytes = (tile_width * tile_height * 4) as usize;
+        for _ in 0..tiles {
+            let pixels = unpack(r.bytes(tile_bytes)?).ok_or(Error::Truncated)?;
+            set.push(pixels)?;
+        }
+        sets.push(set);
+    }
+    if !r.finished() {
+        return Err(Error::TrailingBytes);
+    }
+    Ok(sets)
+}
+
+/// count u16 (the layer count), then per layer its tileset u16 (65535 for
+/// a layer that is not a tilemap), then for each frame, for each tilemap
+/// layer bottom first, its grid: cols*rows u32 entries, row by row.
+fn tilemaps_bytes(doc: &Document) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&(doc.layer_count() as u16).to_le_bytes());
+    for layer in doc.layers() {
+        out.extend_from_slice(&layer.tileset.unwrap_or(NO_TILESET).to_le_bytes());
+    }
+    for frame in 0..doc.frame_count() {
+        for layer in 0..doc.layer_count() {
+            if let Some(grid) = doc.tile_grid(frame, layer) {
+                for value in grid {
+                    out.extend_from_slice(&value.to_le_bytes());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Each layer's tileset, and `grids[frame][layer]`. Grid sizes come from
+/// the tilesets.
+#[allow(clippy::type_complexity)]
+fn read_tilemaps(
+    bytes: &[u8],
+    tilesets: &[Tileset],
+    (width, height): (u32, u32),
+    layer_count: usize,
+    frame_count: usize,
+) -> Result<(Vec<Option<u16>>, Vec<Vec<Option<Vec<u32>>>>)> {
+    let mut r = Reader::new(bytes);
+    if r.u16()? as usize != layer_count {
+        return Err(Error::BadFlag("tilemap layer count"));
+    }
+    let mut layer_sets = Vec::with_capacity(layer_count);
+    for _ in 0..layer_count {
+        layer_sets.push(match r.u16()? {
+            NO_TILESET => None,
+            set if usize::from(set) < tilesets.len() => Some(set),
+            _ => return Err(Error::BadFlag("tilemap tileset")),
+        });
+    }
+    let mut grids = Vec::with_capacity(frame_count);
+    for _ in 0..frame_count {
+        let mut frame = Vec::with_capacity(layer_count);
+        for set in &layer_sets {
+            frame.push(match set {
+                None => None,
+                Some(set) => {
+                    let (cols, rows) = tilesets[usize::from(*set)].grid_size(width, height);
+                    let cells = cols as usize * rows as usize;
+                    let raw = r.bytes(cells * 4)?;
+                    Some(
+                        raw.chunks_exact(4)
+                            .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                            .collect(),
+                    )
+                }
+            });
+        }
+        grids.push(frame);
+    }
+    if !r.finished() {
+        return Err(Error::TrailingBytes);
+    }
+    Ok((layer_sets, grids))
 }
 
 /// count u16 (the layer count), then per layer, bottom first: flags u8
@@ -325,7 +473,7 @@ pub fn load_oxypix_bytes(bytes: &[u8]) -> Result<Document> {
         for _ in 0..layer_count {
             let raw = r.bytes(cel_bytes)?;
             let pixels = unpack(raw).ok_or(Error::Truncated)?;
-            cels.push(pixels);
+            cels.push(pixels.into());
         }
         frames.push(Frame {
             duration_ms,
@@ -347,6 +495,8 @@ pub fn load_oxypix_bytes(bytes: &[u8]) -> Result<Document> {
     let mut frame_names = None;
     let mut blend_modes = None;
     let mut groups = None;
+    let mut tilesets = None;
+    let mut tilemaps = None;
     if version != VERSION_1 {
         let count = r.u16()? as usize;
         if count > MAX_SECTIONS {
@@ -375,6 +525,15 @@ pub fn load_oxypix_bytes(bytes: &[u8]) -> Result<Document> {
                     return Err(Error::DuplicateSection("layer groups"))
                 }
                 SECTION_LAYER_GROUPS => groups = Some(read_layer_groups(body, layers.len())?),
+                SECTION_TILESETS if tilesets.is_some() => {
+                    return Err(Error::DuplicateSection("tilesets"))
+                }
+                SECTION_TILESETS => tilesets = Some(read_tilesets(body)?),
+                // Read once the tilesets are known: the grid sizes come from them.
+                SECTION_TILEMAPS if tilemaps.is_some() => {
+                    return Err(Error::DuplicateSection("tilemaps"))
+                }
+                SECTION_TILEMAPS => tilemaps = Some(body),
                 kind if kind & SECTION_REQUIRED != 0 => return Err(Error::RequiredSection(kind)),
                 // An optional section from a newer writer: skip it.
                 _ => {}
@@ -405,6 +564,21 @@ pub fn load_oxypix_bytes(bytes: &[u8]) -> Result<Document> {
     }
     for (index, name) in frame_names.into_iter().flatten().enumerate() {
         doc.set_frame_name(index, &name)?;
+    }
+    let tilesets = tilesets.unwrap_or_default();
+    if let Some(body) = tilemaps {
+        let (layer_sets, grids) = read_tilemaps(
+            body,
+            &tilesets,
+            (width, height),
+            doc.layer_count(),
+            doc.frame_count(),
+        )?;
+        doc.attach_tilemaps(tilesets, layer_sets, grids)?;
+    } else if !tilesets.is_empty() {
+        let layer_sets = vec![None; doc.layer_count()];
+        let grids = vec![vec![None; doc.layer_count()]; doc.frame_count()];
+        doc.attach_tilemaps(tilesets, layer_sets, grids)?;
     }
     Ok(doc)
 }
@@ -461,6 +635,94 @@ mod tests {
     use super::*;
     use crate::color::Rgba;
     use crate::limits::{MAGIC, MAX_FILE_BYTES};
+
+    fn tiled() -> Document {
+        let mut doc = Document::new(3, 3).unwrap();
+        let set = doc.add_tileset("ground", 2, 2).unwrap();
+        let red = Rgba::new(255, 0, 0, 255);
+        doc.add_tile(set, vec![red, Rgba::CLEAR, Rgba::CLEAR, red])
+            .unwrap();
+        doc.add_tilemap_layer("map", set).unwrap();
+        doc.set_tile(0, 1, 1, 1, 1 | crate::tilemap::TILE_FLIP_X)
+            .unwrap();
+        doc.add_frame().unwrap();
+        doc.set_tile(1, 1, 0, 0, 1).unwrap();
+        doc
+    }
+
+    #[test]
+    fn tilesets_and_grids_round_trip_in_required_sections() {
+        let doc = tiled();
+        let bytes = save_oxypix_bytes(&doc).unwrap();
+        let back = load_oxypix_bytes(&bytes).unwrap();
+        assert_eq!(back, doc);
+        assert_eq!(
+            back.tile_grid(0, 1).unwrap(),
+            &[0, 0, 0, 1 | crate::tilemap::TILE_FLIP_X]
+        );
+        // The mirrored tile at (2, 2) is clipped to one pixel: the tile's top-right.
+        assert_eq!(back.cel(0, 1).unwrap()[8], Rgba::CLEAR);
+        assert_eq!(back.tilesets()[0].name, "ground");
+        let kinds = section_kinds(&bytes);
+        assert!(kinds.contains(&SECTION_TILESETS) && kinds.contains(&SECTION_TILEMAPS));
+        // Unused tilesets are kept without the tilemaps section.
+        let mut unused = Document::new(2, 2).unwrap();
+        unused.add_tileset("spare", 4, 4).unwrap();
+        let back = load_oxypix_bytes(&save_oxypix_bytes(&unused).unwrap()).unwrap();
+        assert_eq!(back.tilesets().len(), 1);
+    }
+
+    #[test]
+    fn broken_tilemap_sections_are_errors() {
+        let doc = tiled();
+        let sections = sections(&doc);
+        let tilemaps = sections
+            .iter()
+            .find(|(k, _)| *k == SECTION_TILEMAPS)
+            .unwrap()
+            .1
+            .clone();
+        let tilesets = read_tilesets(
+            &sections
+                .iter()
+                .find(|(k, _)| *k == SECTION_TILESETS)
+                .unwrap()
+                .1,
+        )
+        .unwrap();
+        let read = |body: &[u8]| read_tilemaps(body, &tilesets, (3, 3), 2, 2);
+        assert!(read(&tilemaps).is_ok());
+        let mut extra = tilemaps.clone();
+        extra.push(0);
+        assert!(matches!(read(&extra), Err(Error::TrailingBytes)));
+        assert!(read(&tilemaps[..tilemaps.len() - 1]).is_err());
+        let mut missing_set = tilemaps.clone();
+        missing_set[4] = 7; // layer 1's tileset
+        assert!(read(&missing_set).is_err());
+        // A tile number past the end of the tileset.
+        let (sets, mut grids) = read(&tilemaps).unwrap();
+        grids[0][1].as_mut().unwrap()[0] = 9;
+        let mut plain = Document::new(3, 3).unwrap();
+        plain.add_layer("map").unwrap();
+        plain.add_frame().unwrap();
+        assert!(plain
+            .attach_tilemaps(tilesets.clone(), sets.clone(), grids)
+            .is_err());
+        // A tileset whose pixels run short.
+        let mut set_bytes = sections
+            .iter()
+            .find(|(k, _)| *k == SECTION_TILESETS)
+            .unwrap()
+            .1
+            .clone();
+        set_bytes.pop();
+        assert!(read_tilesets(&set_bytes).is_err());
+    }
+
+    fn section_kinds(bytes: &[u8]) -> Vec<u16> {
+        let doc = load_oxypix_bytes(bytes).unwrap();
+        sections(&doc).into_iter().map(|(kind, _)| kind).collect()
+    }
 
     #[test]
     fn roundtrip_preserves_pixels_layers_and_palette() {

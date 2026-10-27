@@ -41,6 +41,7 @@ enum DialogKind {
     Canvas,
     Scale,
     Replace,
+    Tilemap,
     Path,
     Unsaved,
     About,
@@ -110,6 +111,12 @@ pub struct OxyApp {
     /// Edit, then Replace color…: change every layer, every frame.
     replace_layers: bool,
     replace_frames: bool,
+    /// Layer, then Tilemap…: the tile size of a new tileset, or an existing one.
+    tilemap_w: u32,
+    tilemap_h: u32,
+    tilemap_set: Option<usize>,
+    /// The active tileset's tiles in one texture: generation, tileset, texture, columns.
+    tile_atlas: Option<(u64, usize, egui::TextureHandle, u32)>,
     canvas_y: String,
     export_scale: u32,
     /// Spritesheet frames per row. 0 is one row.
@@ -219,6 +226,10 @@ impl OxyApp {
             scale_from: (1, 1),
             replace_layers: false,
             replace_frames: false,
+            tilemap_w: 16,
+            tilemap_h: 16,
+            tilemap_set: None,
+            tile_atlas: None,
             canvas_y: "0".to_string(),
             export_scale: prefs.export_scale,
             sheet_columns: 0,
@@ -1050,6 +1061,219 @@ impl OxyApp {
         if close {
             self.dialog = None;
         }
+    }
+
+    fn dialog_tilemap(&mut self, ctx: &egui::Context) {
+        let mut close = false;
+        let mut apply = false;
+        let sets: Vec<(String, u32, u32)> = self
+            .editor
+            .document()
+            .tilesets()
+            .iter()
+            .map(|set| (set.name.clone(), set.tile_width(), set.tile_height()))
+            .collect();
+        egui::Window::new("New tilemap layer")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                ui.label("A tilemap layer is a grid of tiles from a tileset. Drawing on it changes the tiles, and every copy of a tile changes with it.");
+                if !sets.is_empty() {
+                    ui.radio_value(&mut self.tilemap_set, None, "New tileset");
+                    for (i, (name, w, h)) in sets.iter().enumerate() {
+                        ui.radio_value(&mut self.tilemap_set, Some(i), format!("{name} ({w}×{h})"));
+                    }
+                }
+                ui.add_enabled_ui(self.tilemap_set.is_none(), |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Tile size");
+                        ui.add(egui::DragValue::new(&mut self.tilemap_w).range(1..=oxypixel_core::MAX_TILE_SIDE).suffix(" px"));
+                        ui.label("×");
+                        ui.add(egui::DragValue::new(&mut self.tilemap_h).range(1..=oxypixel_core::MAX_TILE_SIDE).suffix(" px"));
+                    });
+                    ui.horizontal(|ui| {
+                        for side in [8, 16, 32] {
+                            if ui.button(format!("{side}×{side}")).clicked() {
+                                self.tilemap_w = side;
+                                self.tilemap_h = side;
+                            }
+                        }
+                    });
+                });
+                if let Some(error) = &self.dialog_error {
+                    ui.colored_label(Color32::from_rgb(220, 100, 90), error);
+                }
+                ui.horizontal(|ui| {
+                    if ui.button("Add").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        apply = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        close = true;
+                    }
+                });
+            });
+        if apply {
+            let (set, w, h) = (self.tilemap_set, self.tilemap_w, self.tilemap_h);
+            match self.editor.add_tilemap_layer(set, w, h) {
+                Ok(()) => {
+                    self.dialog = None;
+                    self.note_ok("Added a tilemap layer. Draw on it to make tiles, or turn on Tile mode to place them.");
+                }
+                Err(err) => self.dialog_error = Some(err.to_string()),
+            }
+        }
+        if close {
+            self.dialog = None;
+        }
+    }
+
+    /// The Tiles section under the layers, for the active tilemap layer.
+    fn tiles_panel(&mut self, ui: &mut egui::Ui, set: usize) {
+        let Some(tileset) = self.editor.document().tileset(set) else {
+            return;
+        };
+        let (tw, th, count) = (tileset.tile_width(), tileset.tile_height(), tileset.len());
+        let name = tileset.name.clone();
+        ui.separator();
+        ui.label(RichText::new(format!("Tiles: {name}, {tw}×{th}")).strong());
+        let mut tile_mode = self.editor.tile_mode();
+        if ui
+            .checkbox(&mut tile_mode, "Tile mode")
+            .on_hover_text("The pencil places the selected tile, the eraser or right button empties a cell, fill fills matching cells, and the eyedropper picks a tile.")
+            .changed()
+        {
+            self.editor.set_tile_mode(tile_mode);
+        }
+        let hint = if tile_mode {
+            "Pencil places the selected tile. Eraser or right button empties a cell."
+        } else {
+            "Drawing changes the tiles under it and every copy of them. Drawing on an empty cell makes a new tile."
+        };
+        ui.label(RichText::new(hint).small().weak());
+        let selected = self.editor.selected_tile();
+        ui.horizontal(|ui| {
+            for (label, flip, tip) in [
+                (
+                    "Flip H",
+                    oxypixel_core::TILE_FLIP_X,
+                    "Place the tile mirrored left to right",
+                ),
+                (
+                    "Flip V",
+                    oxypixel_core::TILE_FLIP_Y,
+                    "Place the tile mirrored top to bottom",
+                ),
+            ] {
+                if ui
+                    .selectable_label(selected & flip != 0, label)
+                    .on_hover_text(tip)
+                    .clicked()
+                {
+                    self.editor.set_selected_tile(selected ^ flip);
+                }
+            }
+            if ui
+                .add_enabled(count > 0, egui::Button::new("Duplicate"))
+                .on_hover_text("Copy the selected tile into a new tile, to start a variant")
+                .clicked()
+            {
+                self.apply(|editor| editor.duplicate_tile());
+            }
+        });
+        if count == 0 {
+            ui.label(
+                RichText::new("No tiles yet. Draw on the layer to make one.")
+                    .small()
+                    .weak(),
+            );
+            return;
+        }
+        let Some((texture, cols)) = self.tile_texture(ui.ctx(), set) else {
+            return;
+        };
+        let rows = (count as u32).div_ceil(cols);
+        let side = 28.0;
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(3.0, 3.0);
+            for id in 1..=count as u32 {
+                let (rect, response) =
+                    ui.allocate_exact_size(egui::vec2(side, side), egui::Sense::click());
+                let index = id - 1;
+                let (col, row) = (index % cols, index / cols);
+                let uv = egui::Rect::from_min_max(
+                    egui::pos2(col as f32 / cols as f32, row as f32 / rows as f32),
+                    egui::pos2(
+                        (col + 1) as f32 / cols as f32,
+                        (row + 1) as f32 / rows as f32,
+                    ),
+                );
+                let painter = ui.painter();
+                painter.rect_filled(rect, 2.0, Color32::from_gray(48));
+                let scale = (side / tw.max(th) as f32).min(side);
+                let image = egui::Rect::from_center_size(
+                    rect.center(),
+                    egui::vec2(tw as f32 * scale, th as f32 * scale),
+                );
+                painter.image(texture.id(), image, uv, Color32::WHITE);
+                let chosen = selected & oxypixel_core::TILE_ID_MASK == id;
+                let stroke = if chosen {
+                    egui::Stroke::new(2.0_f32, Color32::from_rgb(232, 168, 56))
+                } else {
+                    egui::Stroke::new(1.0_f32, Color32::from_gray(70))
+                };
+                painter.rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
+                if response.on_hover_text(format!("Tile {id}")).clicked() {
+                    self.editor
+                        .set_selected_tile(id | (selected & oxypixel_core::TILE_FLIPS));
+                }
+            }
+        });
+    }
+
+    /// One texture with every tile of `set`, rebuilt when the document changes.
+    fn tile_texture(
+        &mut self,
+        ctx: &egui::Context,
+        set: usize,
+    ) -> Option<(egui::TextureHandle, u32)> {
+        let generation = self.editor.generation();
+        if let Some((gen, cached, texture, cols)) = &self.tile_atlas {
+            if *gen == generation && *cached == set {
+                return Some((texture.clone(), *cols));
+            }
+        }
+        let tileset = self.editor.document().tileset(set)?;
+        let (tw, th, count) = (
+            tileset.tile_width(),
+            tileset.tile_height(),
+            tileset.len() as u32,
+        );
+        let cols = (f64::from(count).sqrt().ceil() as u32).max(1);
+        let rows = count.div_ceil(cols).max(1);
+        let (w, h) = ((cols * tw) as usize, (rows * th) as usize);
+        let mut pixels = vec![Color32::TRANSPARENT; w * h];
+        for id in 1..=count {
+            let Some(tile) = tileset.tile(id) else {
+                continue;
+            };
+            let (col, row) = ((id - 1) % cols, (id - 1) / cols);
+            for y in 0..th {
+                for x in 0..tw {
+                    let p = tile[(y * tw + x) as usize];
+                    let at = ((row * th + y) as usize) * w + (col * tw + x) as usize;
+                    pixels[at] = Color32::from_rgba_unmultiplied(p.r, p.g, p.b, p.a);
+                }
+            }
+        }
+        let image = egui::ColorImage {
+            size: [w, h],
+            pixels,
+        };
+        let texture = ctx.load_texture("oxypixel-tiles", image, egui::TextureOptions::NEAREST);
+        self.tile_atlas = Some((generation, set, texture.clone(), cols));
+        Some((texture, cols))
     }
 
     fn brush_from_selection(&mut self) {
@@ -2308,11 +2532,15 @@ impl OxyApp {
                         } else {
                             let label = if layer.group {
                                 RichText::new(format!("📁 {}", layer.name)).strong()
+                            } else if layer.tileset.is_some() {
+                                RichText::new(format!("🗺 {}", layer.name))
                             } else {
                                 RichText::new(layer.name.clone())
                             };
                             let hint = if layer.group {
                                 "A group: its layers are listed under it and drawn as one picture"
+                            } else if layer.tileset.is_some() {
+                                "A tilemap layer: a grid of tiles from a tileset"
                             } else {
                                 "Draw on this layer"
                             };
@@ -2328,6 +2556,10 @@ impl OxyApp {
                             .small()
                             .weak(),
                     );
+                }
+                if let Some(set) = self.editor.document().layer_tileset(active) {
+                    self.tiles_panel(ui, set);
+                    ui.separator();
                 }
                 if let Some(layer) = self.editor.document().layer(active) {
                     let mut opacity = layer.opacity;
@@ -2401,6 +2633,15 @@ impl OxyApp {
                         .clicked()
                     {
                         self.apply(|editor| editor.merge_down());
+                    }
+                    if ui
+                        .button("Tilemap")
+                        .on_hover_text("Add a tilemap layer: a grid of tiles from a tileset")
+                        .clicked()
+                    {
+                        self.dialog_error = None;
+                        self.tilemap_set = None;
+                        self.dialog = Some(DialogKind::Tilemap);
                     }
                     if ui
                         .button("Group")
@@ -2888,6 +3129,7 @@ impl OxyApp {
             DialogKind::Canvas => self.dialog_canvas(ctx),
             DialogKind::Scale => self.dialog_scale(ctx),
             DialogKind::Replace => self.dialog_replace(ctx),
+            DialogKind::Tilemap => self.dialog_tilemap(ctx),
             DialogKind::Path => self.dialog_path(ctx),
             DialogKind::Unsaved => self.dialog_unsaved(ctx),
             DialogKind::About => self.dialog_about(ctx),

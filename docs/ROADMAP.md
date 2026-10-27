@@ -289,6 +289,14 @@ Not yet: Unity animation clips (`.anim`), and opening the exported files in Godo
 
 The OxyPack reader now parses a file into its layers and each frame's cels, then either flattens them (packing, as before) or builds a `Document`: one layer per Aseprite layer with its group depth, visibility, opacity, and blend mode (a group's opacity and mode only when the header says they are valid), each cel drawn into place on a full-canvas cel, frame durations clamped to 20 to 10,000 ms, the palette (the first 256 colors), and the tags (blank names become `Tag N`). Cel opacity is multiplied into the pixels, tilemap layers become image layers, reference layers are left out, and a cel z-index is not kept; each case adds a note shown in the status line. Files past the editor's limits are refused with the reason. The editor opens such a file without a save path, so Save asks for `<name>.oxypix`; the Aseprite file is never written. The MCP tools still take `.oxypix` only, because their edits save in place. Tested in `aseprite.rs` (every frame composites the same as the flattened read) and `crates/oxypixel/tests/cli.rs`.
 
+### OX-P31
+
+**Tilemap layers.** Status: done. Area: `crates/oxypixel-core/src/tilemap.rs`, `document.rs`, `editor.rs`, `io/oxypix.rs`, `crates/oxypixel/src/app.rs`, `canvas.rs`.
+
+A tilemap layer names a tileset (`LayerInfo::tileset`) and each of its cels keeps a grid of tile references (tile number plus x, y, and diagonal flip bits, as Aseprite stores them) beside its pixels, which are drawn from the grid. Every editor change ends in `Document::sync_tiles`: pixels on a tilemap layer that differ from what the grid draws are written into the tiles (an empty cell gets a new tile of what was drawn there), then every cel using that tileset is drawn again, so all tools, transforms, and the MCP server edit tiles without knowing about them. Tile mode adds placing, emptying, filling, and picking whole tiles. New frames get empty grids, copies keep theirs, and a canvas resize moves cells by whole tiles of the shift. A layer cannot be merged into a tilemap layer. Saved in the required sections `0x8003` and `0x8004` (see FORMAT.md). Tested in `tilemap.rs`, `editor.rs`, `io/oxypix.rs`, and `crates/oxypixel/src/mcp/tests.rs`.
+
+Not yet: removing unused tiles, reordering tiles, and opening Aseprite tilemap layers as tilemaps (they open as plain layers).
+
 ## Human only
 
 ### OX-H1

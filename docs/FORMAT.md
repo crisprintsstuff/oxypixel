@@ -104,6 +104,33 @@ repeated count times, bottom layer first:
 
 A group holds the layers right after it that are one level deeper, so the layer list is a tree written in order. The first layer has depth 0, a layer can be at most one level deeper than the one before it, and only right after a group. At least one layer must not be a group. A group's cels are stored like any layer's but are clear and never drawn; the group is drawn by compositing the layers inside it into their own picture and mixing that picture in with the group's visibility, opacity, and blend mode. Written only when the document has a group. A wrong count, a flag other than 0 or 1, a tree that breaks these rules, or extra bytes are errors. Required, so older OxyPixel refuses the file rather than flattening the groups.
 
+### Section `0x8003`: tilesets (required)
+
+```text
+count          u16   at most 32
+repeated count times:
+  name_len     u16   at most 128
+  name         name_len bytes of UTF-8
+  tile_width   u16   1 through 256
+  tile_height  u16   1 through 256
+  tile_count   u32   at most 4096, and tile_count*tile_width*tile_height at most 4,194,304
+  pixels       tile_count times tile_width*tile_height*4 bytes, RGBA, tile 1 first
+```
+
+Tiles are numbered from 1; 0 is an empty cell. Written when the document has a tileset, used or not. Pixels that run short, a size outside the limits, a bad name, or extra bytes are errors. Required, so older OxyPixel refuses the file rather than dropping the tiles.
+
+### Section `0x8004`: tilemap layers (required)
+
+```text
+count          u16   must equal layer_count
+repeated count times, bottom layer first:
+  tileset      u16   the tileset this layer's grid uses, or 65535 for a layer that is not a tilemap
+then for each frame, for each tilemap layer, bottom layer first:
+  grid         cols*rows u32 entries, row by row
+```
+
+A grid covers the canvas from its top-left corner: `cols` is the width divided by the tile width and `rows` the height divided by the tile height, both rounded up, so the last column and row can be cut off by the canvas edge. Each entry is a tile number in its low 29 bits, plus flip bits: bit 31 mirrors the tile left to right, bit 30 top to bottom, and bit 29 across its top-left to bottom-right diagonal before the other two (square tiles only). An empty cell is 0 with no flip bits. A tilemap layer's cels are stored in the frame records like any layer's, and the reader draws them again from the grids. Written when the document has a tilemap layer, after section `0x8003`'s data is known (the grid sizes come from it); a group cannot be a tilemap. A wrong count, a tileset that does not exist, a tile number past the end of its tileset, a diagonal flip on tiles that are not square, a grid that runs short, or extra bytes are errors.
+
 Reference images are not a field in this file. Version 1 has no room for them: trailing bytes are rejected, and a new field would be a new version. A saved document may have a sidecar, `<name>.oxypix.refs`, in the same directory. Save writes it. That file lists PNG or JPEG paths and where each image sits. A path to an image inside the document's directory is relative to that directory; any other path is absolute. The pixels stay in those image files. A reader that only understands this document never sees them, and export does not read the sidecar.
 
 ## Limits
@@ -118,6 +145,10 @@ Reference images are not a field in this file. Version 1 has no room for them: t
 | Palette colors | 256 |
 | Tags | 256 |
 | Sections (version 2) | 64 |
+| Tilesets | 32 |
+| Tiles in one tileset | 4,096 |
+| Tile side | 256 |
+| Pixels in one tileset | 4,194,304 |
 | File size | 80 MiB |
 
 `layer_count` and `frame_count` are checked against these caps before any pixel buffer is allocated.

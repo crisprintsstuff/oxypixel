@@ -460,7 +460,7 @@ fn still_document(width: u32, height: u32, pixels: Vec<Rgba>) -> Result<Document
         vec![Frame {
             duration_ms: DEFAULT_FRAME_MS,
             name: String::new(),
-            cels: vec![pixels],
+            cels: vec![pixels.into()],
         }],
         0,
         0,
@@ -503,7 +503,7 @@ fn import_gif(bytes: &[u8]) -> Result<Document> {
         frames.push(Frame {
             duration_ms,
             name: String::new(),
-            cels: vec![pixels],
+            cels: vec![pixels.into()],
         });
     }
     Document::from_parts(
@@ -618,11 +618,11 @@ mod tests {
     #[test]
     fn gif_roundtrip_keeps_frame_count_and_solids() {
         let mut doc = Document::new(2, 2).unwrap();
-        for px in &mut doc.frames_mut()[0].cels[0] {
+        for px in doc.frames_mut()[0].cels[0].iter_mut() {
             *px = Rgba::new(255, 0, 0, 255);
         }
         doc.add_frame().unwrap();
-        for px in &mut doc.frames_mut()[1].cels[0] {
+        for px in doc.frames_mut()[1].cels[0].iter_mut() {
             *px = Rgba::new(0, 0, 255, 255);
         }
         doc.set_frame_duration(0, 100).unwrap();

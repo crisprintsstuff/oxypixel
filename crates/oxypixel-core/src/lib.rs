@@ -19,6 +19,7 @@ mod limits;
 mod reference;
 mod selection;
 mod tags;
+mod tilemap;
 
 pub use animation::advance;
 pub use blend::{blend, BlendMode};
@@ -49,3 +50,7 @@ pub use reference::{
 };
 pub use selection::{OutlineEdge, SelectMode};
 pub use tags::{FrameTag, LoopDirection};
+pub use tilemap::{
+    Tileset, MAX_TILES, MAX_TILESETS, MAX_TILESET_PIXELS, MAX_TILE_SIDE, TILE_FLIPS, TILE_FLIP_D,
+    TILE_FLIP_X, TILE_FLIP_Y, TILE_ID_MASK,
+};

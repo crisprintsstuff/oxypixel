@@ -11,6 +11,8 @@ pub enum Error {
     BottomLayer,
     #[error("{0}")]
     Group(&'static str),
+    #[error("{0}")]
+    Tilemap(&'static str),
     #[error("that {what} does not exist")]
     Index { what: &'static str },
     #[error("canvas size {width}×{height} is outside 1×1 … {max}×{max}")]

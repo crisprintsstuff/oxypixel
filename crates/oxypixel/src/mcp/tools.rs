@@ -406,6 +406,7 @@ fn info_json(doc: &Document) -> Value {
                 "blend": layer.blend.name(),
                 "group": layer.group,
                 "parent": doc.layer_parent(i),
+                "tileset": layer.tileset,
             })
         })
         .collect();
@@ -426,6 +427,13 @@ fn info_json(doc: &Document) -> Value {
         })
         .collect();
     let palette: Vec<String> = doc.palette().iter().map(|c| c.to_hex()).collect();
+    let tilesets: Vec<Value> = doc
+        .tilesets()
+        .iter()
+        .map(|set| {
+            json!({ "name": set.name, "tile_width": set.tile_width(), "tile_height": set.tile_height(), "tiles": set.len() })
+        })
+        .collect();
     json!({
         "width": doc.width(),
         "height": doc.height(),
@@ -433,6 +441,7 @@ fn info_json(doc: &Document) -> Value {
         "frames": frames,
         "tags": tags,
         "palette": palette,
+        "tilesets": tilesets,
     })
 }
 
