@@ -73,6 +73,29 @@ fn packs_a_folder_and_a_document_into_a_png_and_json() {
 }
 
 #[test]
+fn one_sprite_from_one_file_is_singular() {
+    let dir = temp_dir("single");
+    std::fs::write(
+        dir.join("coin.png"),
+        oxypixel_core::export_png_bytes(doc(3, 3, 1, 0, 0).document(), 0).unwrap(),
+    )
+    .unwrap();
+    let output = bin()
+        .arg(dir.join("coin.png"))
+        .arg("-o")
+        .arg(dir.join("atlas.png"))
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let summary = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        summary.contains("packed 1 sprite from 1 file into 3×3"),
+        "{summary}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn errors_exit_without_writing() {
     let dir = temp_dir("errors");
     let out = dir.join("atlas.png");

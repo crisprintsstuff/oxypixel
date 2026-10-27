@@ -205,7 +205,7 @@ OxyPack packs sprites from many files into one atlas PNG and writes a JSON hash 
 oxypack sprites/ hero.oxypix --trim --dedupe -o atlas.png
 ```
 
-![The Pack sprites window over the editor. campfire.oxypix is the input, and the result reads "4 sprites from 1 files, 259×64, 2 tags", with the four packed frames shown in a row.](docs/images/pack.png)
+![The Pack sprites window over the editor. campfire.oxypix is the input, and the result reads "4 sprites from 1 file, 259×64, 2 tags", with the four packed frames shown in a row.](docs/images/pack.png)
 
 ### What it reads
 
