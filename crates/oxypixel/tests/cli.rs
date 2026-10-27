@@ -304,3 +304,72 @@ fn export_does_not_write_a_recovery_file() {
     assert!(!data.join("autosave.txt").exists());
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn mcp_server_answers_over_stdio_and_exits_at_end_of_input() {
+    use std::io::{Read, Write};
+    use std::process::Stdio;
+
+    let dir = std::env::temp_dir().join(format!("oxypixel-cli-mcp-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut child = bin()
+        .args(["mcp", "--root", dir.to_str().unwrap()])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let input = concat!(
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"create_document","arguments":{"path":"a.oxypix","width":4,"height":4}}}"#,
+        "\n",
+    );
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            panic!("oxypixel mcp did not exit after its input ended");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    assert!(status.success());
+    let mut stdout = String::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut stdout)
+        .unwrap();
+    let replies: Vec<serde_json::Value> = stdout
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("each stdout line is JSON-RPC"))
+        .collect();
+    assert_eq!(replies.len(), 3, "{stdout}");
+    assert_eq!(replies[0]["result"]["serverInfo"]["name"], "oxypixel");
+    assert!(replies[1]["result"]["tools"].as_array().unwrap().len() >= 10);
+    assert_eq!(replies[2]["result"]["isError"], false, "{stdout}");
+    assert!(dir.join("a.oxypix").is_file());
+
+    let bad = bin()
+        .args(["mcp", "--root", dir.join("missing").to_str().unwrap()])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(bad.status.code(), Some(2));
+    let _ = std::fs::remove_dir_all(&dir);
+}

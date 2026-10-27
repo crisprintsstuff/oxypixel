@@ -13,6 +13,7 @@ mod cli;
 mod clipboard;
 mod framestrip;
 mod icon;
+mod mcp;
 mod native;
 mod packview;
 mod preview;

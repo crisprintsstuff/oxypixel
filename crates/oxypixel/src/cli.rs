@@ -24,6 +24,7 @@ pub fn dispatch(args: &[String]) -> Option<i32> {
         "export-sheet" => export_sheet_cmd(args),
         "export-palette" => export_palette_cmd(args),
         "import-palette" => import_palette_cmd(args),
+        "mcp" => crate::mcp::run(&args[1..]),
         _ => return None,
     };
     Some(i32::from(code))
@@ -185,6 +186,7 @@ Usage:
   oxypixel export-sheet INPUT.oxypix OUTPUT.png [--columns N] [--padding N] [--scale 1|2|4] [--json]
   oxypixel export-palette INPUT.oxypix OUTPUT.gpl
   oxypixel import-palette INPUT.oxypix PALETTE.gpl OUTPUT.oxypix
+  oxypixel mcp [--root DIR]
   oxypixel --help
   oxypixel --version
 
@@ -194,5 +196,7 @@ export-palette writes the document palette as GIMP .gpl, hex .hex, or JASC .pal.
 import-palette replaces that palette and writes a new .oxypix. A .txt palette is read as hex.
 export-sheet puts frames in one row unless --columns is set. --padding leaves clear pixels between
 cells, and --json writes OUTPUT.json with each frame's rectangle and duration.
+mcp runs a Model Context Protocol server on stdin and stdout for AI assistants; with --root,
+its tools may only read and write inside DIR.
 "
 );

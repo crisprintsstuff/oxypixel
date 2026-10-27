@@ -24,6 +24,7 @@ The pictures above are screenshots of OxyPixel 0.9.0. The drawing is a sample fi
 - [How it's built](#how-its-built)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [OxyPack](#oxypack)
+- [MCP server for AI assistants](#mcp-server-for-ai-assistants)
 - [Build from source](#build-from-source)
 - [File formats](#file-formats)
 - [Documentation](#documentation)
@@ -245,6 +246,45 @@ The command never opens a window, so it fits build scripts and CI. The Pack spri
 - **From source:** `cargo build --release -p oxypack`.
 
 Outside tests: a tester ran the `oxypack` command from the 0.7.5 Linux build. With 0.8.0, `.aseprite` files saved by Aseprite 1.13.18.6 packed to the same frames as Aseprite's own export. Reports on other files and versions are welcome in an issue.
+
+## MCP server for AI assistants
+
+`oxypixel mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server, so an AI assistant such as Claude Desktop or Claude Code can make and edit pixel art with OxyPixel. The assistant starts the command and talks to it over stdin and stdout. It opens no window and makes no network connection.
+
+| Tool | What it does |
+| --- | --- |
+| `document_info` | Size, layers, frames with durations and names, tags, and palette of a `.oxypix` |
+| `render` | One frame as a PNG image, scaled up, so the assistant can see its work |
+| `create_document` | A new document, clear or filled with a color |
+| `draw` | Pixels, erasing, lines, rectangles, ellipses, and fills, with the editor's own tools |
+| `add_layer`, `set_layer` | Add, rename, hide, fade, or delete layers |
+| `add_frame`, `set_frame` | Add or copy frames, and rename, time, or delete them |
+| `set_tags`, `set_palette` | Replace the animation tags or the palette |
+| `export` | PNG, BMP, GIF, or a spritesheet with JSON |
+| `pack_sprites` | The OxyPack atlas packer |
+
+Editing tools save the document in place. `create_document`, `export`, and `pack_sprites` will not replace an existing file unless the call says `overwrite: true`. Add `--root DIR` to keep every path the tools read or write inside one folder.
+
+Claude Code:
+
+```bash
+claude mcp add oxypixel -- oxypixel mcp --root ~/sprites
+```
+
+Claude Desktop, in `claude_desktop_config.json`. On Windows, set `command` to the full path of `oxypixel.exe` (the installer puts it in `%LOCALAPPDATA%\OxyPixel`), writing each `\` as `\\` in JSON. On Linux the `.deb` installs `/usr/bin/oxypixel`.
+
+```json
+{
+  "mcpServers": {
+    "oxypixel": {
+      "command": "oxypixel",
+      "args": ["mcp", "--root", "/home/you/sprites"]
+    }
+  }
+}
+```
+
+Then ask, for example: "Make a 16×16 coin in coin.oxypix with a four-frame spin, tag it spin, and export a spritesheet with JSON."
 
 ## Build from source
 
