@@ -235,7 +235,7 @@ fn draw_render_and_edit_a_document() {
     let (err, _, _) = call(
         &mut server,
         "set_layer",
-        json!({ "path": "hero.oxypix", "layer": 1, "opacity": 128, "visible": false }),
+        json!({ "path": "hero.oxypix", "layer": 1, "opacity": 128, "visible": false, "blend": "multiply" }),
     );
     assert!(!err);
     let (err, text, _) = call(
@@ -283,6 +283,8 @@ fn draw_render_and_edit_a_document() {
     assert_eq!(info["layers"][1]["name"], "Shadow");
     assert_eq!(info["layers"][1]["opacity"], 128);
     assert_eq!(info["layers"][1]["visible"], false);
+    assert_eq!(info["layers"][1]["blend"], "multiply");
+    assert_eq!(info["layers"][0]["blend"], "normal");
     assert_eq!(info["frames"][0]["name"], "idle");
     assert_eq!(info["frames"][0]["duration_ms"], 120);
     assert_eq!(info["frames"][1]["name"], "blink");

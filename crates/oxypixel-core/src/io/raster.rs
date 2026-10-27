@@ -15,6 +15,7 @@ use image::{
     ImageReader, Limits, RgbaImage,
 };
 
+use crate::blend::BlendMode;
 use crate::color::{pack, unpack, Rgba};
 use crate::document::{Document, Frame, LayerInfo};
 use crate::error::{Error, Result};
@@ -421,6 +422,7 @@ fn still_document(width: u32, height: u32, pixels: Vec<Rgba>) -> Result<Document
             name: "Imported".to_string(),
             visible: true,
             opacity: 255,
+            blend: BlendMode::Normal,
         }],
         vec![Frame {
             duration_ms: DEFAULT_FRAME_MS,
@@ -478,6 +480,7 @@ fn import_gif(bytes: &[u8]) -> Result<Document> {
             name: "Imported".to_string(),
             visible: true,
             opacity: 255,
+            blend: BlendMode::Normal,
         }],
         frames,
         0,

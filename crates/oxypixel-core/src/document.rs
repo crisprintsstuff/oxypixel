@@ -3,6 +3,7 @@
 //! Layers are properties (name, visibility, opacity) shared by every frame.
 //! Each frame stores its own pixels for those layers, plus a duration.
 
+use crate::blend::{blend, BlendMode};
 use crate::color::{source_over, Rgba};
 use crate::error::{Error, Result};
 use crate::limits::{
@@ -10,13 +11,16 @@ use crate::limits::{
 };
 use crate::tags::{self, FrameTag};
 
-/// Name, visibility, and opacity shared by every frame.
+/// Name, visibility, opacity, and blend mode shared by every frame.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LayerInfo {
     pub name: String,
     pub visible: bool,
     /// 0 is hidden, 255 is fully opaque. Applied at composite time.
     pub opacity: u8,
+    /// How the layer mixes with what is below it. A document with any mode
+    /// other than Normal is saved with a required `.oxypix` section.
+    pub blend: BlendMode,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -52,6 +56,7 @@ impl Document {
                 name: "Layer 1".to_string(),
                 visible: true,
                 opacity: 255,
+                blend: BlendMode::Normal,
             }],
             frames: vec![Frame {
                 duration_ms: DEFAULT_FRAME_MS,
@@ -292,6 +297,7 @@ impl Document {
             name,
             visible: true,
             opacity: 255,
+            blend: BlendMode::Normal,
         });
         let len = (self.width * self.height) as usize;
         for frame in &mut self.frames {
@@ -372,13 +378,14 @@ impl Document {
             return Err(Error::Index { what: "layer" });
         }
         let upper_opacity = self.layers[index].opacity;
+        let upper_blend = self.layers[index].blend;
         let lower_opacity = self.layers[index - 1].opacity;
         for frame in &mut self.frames {
             let upper = frame.cels[index].clone();
             let lower = &mut frame.cels[index - 1];
             for (dst, src) in lower.iter_mut().zip(upper.iter()) {
                 let base = source_over(Rgba::CLEAR, *dst, lower_opacity);
-                *dst = source_over(base, *src, upper_opacity);
+                *dst = blend(base, *src, upper_opacity, upper_blend);
             }
         }
         self.layers[index - 1].opacity = 255;
@@ -550,7 +557,7 @@ impl Document {
                 continue;
             }
             for (dst, src) in out.iter_mut().zip(cel.iter()) {
-                *dst = source_over(*dst, *src, info.opacity);
+                *dst = blend(*dst, *src, info.opacity, info.blend);
             }
         }
         Ok(out)
@@ -568,7 +575,7 @@ impl Document {
             if !info.visible || info.opacity == 0 {
                 continue;
             }
-            color = source_over(color, *cel.get(index)?, info.opacity);
+            color = blend(color, *cel.get(index)?, info.opacity, info.blend);
         }
         Some(color)
     }
@@ -701,6 +708,21 @@ mod tests {
             Some(Rgba::new(0, 0, 255, 255))
         );
         assert_eq!(doc.composite_pixel(0, 1, 0), None);
+    }
+
+    #[test]
+    fn layers_composite_and_merge_with_their_blend_mode() {
+        let mut doc = Document::new(1, 1).unwrap();
+        doc.frames[0].cels[0][0] = Rgba::new(128, 128, 128, 255);
+        doc.add_layer("tint").unwrap();
+        doc.frames[0].cels[1][0] = Rgba::new(255, 0, 0, 255);
+        doc.layers[1].blend = BlendMode::Multiply;
+        let expected = Rgba::new(128, 0, 0, 255);
+        assert_eq!(doc.composite(0).unwrap()[0], expected);
+        assert_eq!(doc.composite_pixel(0, 0, 0), Some(expected));
+        doc.merge_down(1).unwrap();
+        assert_eq!(doc.layer_count(), 1);
+        assert_eq!(doc.composite(0).unwrap()[0], expected);
     }
 
     #[test]

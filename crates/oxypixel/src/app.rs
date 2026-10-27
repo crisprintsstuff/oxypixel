@@ -8,7 +8,7 @@ use eframe::egui::{self, Color32, RichText, ViewportCommand};
 use oxypixel_core::{
     advance, decode_first_rgba, export_bmp, export_gif, export_palette, export_png_scaled,
     export_spritesheet_layout, fit_into, import_image, import_palette, load_oxypix, save_oxypix,
-    Editor, Error, Fit, PaletteFormat, References, Rgba, SheetLayout, Tool, Transform,
+    BlendMode, Editor, Error, Fit, PaletteFormat, References, Rgba, SheetLayout, Tool, Transform,
     MAX_DIMENSION, MAX_FRAMES, MAX_SHEET_PADDING,
 };
 
@@ -2005,6 +2005,7 @@ impl OxyApp {
                 }
                 if let Some(layer) = self.editor.document().layer(active) {
                     let mut opacity = layer.opacity;
+                    let current_blend = layer.blend;
                     let slider = ui.add(egui::Slider::new(&mut opacity, 0..=255).text("Opacity"));
                     if slider.drag_started() || slider.gained_focus() {
                         self.editor.begin_coalesce();
@@ -2014,6 +2015,22 @@ impl OxyApp {
                     }
                     if slider.drag_stopped() || slider.lost_focus() {
                         self.editor.end_coalesce();
+                    }
+                    let mut mode = current_blend;
+                    ui.horizontal(|ui| {
+                        egui::ComboBox::from_id_salt("layer-blend")
+                            .selected_text(mode.label())
+                            .show_ui(ui, |ui| {
+                                for option in BlendMode::ALL {
+                                    ui.selectable_value(&mut mode, option, option.label());
+                                }
+                            })
+                            .response
+                            .on_hover_text("How this layer mixes with the layers below it");
+                        ui.label("Blend");
+                    });
+                    if mode != current_blend {
+                        self.editor.set_layer_blend(mode);
                     }
                 }
                 ui.horizontal_wrapped(|ui| {

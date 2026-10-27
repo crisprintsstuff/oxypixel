@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 
 mod animation;
+mod blend;
 mod clipboard;
 mod color;
 mod document;
@@ -20,6 +21,7 @@ mod selection;
 mod tags;
 
 pub use animation::advance;
+pub use blend::{blend, BlendMode};
 pub use color::{source_over, Rgba};
 pub use document::{Document, LayerInfo};
 pub use draw::{PixelRect, Transform};

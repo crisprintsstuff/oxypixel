@@ -1,5 +1,6 @@
 //! Editing session: tools, selection, colors, and undo on top of a [`Document`].
 
+use crate::blend::BlendMode;
 use crate::color::{color_ramp, nearest_palette_color, shade_step, Rgba};
 use crate::document::Document;
 use crate::draw::{
@@ -1173,6 +1174,19 @@ impl Editor {
         });
     }
 
+    /// Change how the active layer mixes with the layers below. One undo step.
+    pub fn set_layer_blend(&mut self, mode: BlendMode) {
+        let index = self.doc.active_layer();
+        if self.doc.layer(index).map(|l| l.blend) == Some(mode) {
+            return;
+        }
+        self.mutate(false, |doc| {
+            if let Some(layer) = doc.layers_mut().get_mut(index) {
+                layer.blend = mode;
+            }
+        });
+    }
+
     pub fn set_active_layer(&mut self, index: usize) -> Result<()> {
         self.cancel_gesture();
         self.doc.set_active_layer(index)?;
@@ -1869,6 +1883,18 @@ mod tests {
         assert_eq!(ed.document().layer_count(), 1);
         assert!(ed.undo());
         assert_eq!(ed.document().layer_count(), 2);
+    }
+
+    #[test]
+    fn blend_mode_change_is_one_undo_step() {
+        let mut editor = Editor::demo().unwrap();
+        editor.set_active_layer(1).unwrap();
+        editor.set_layer_blend(BlendMode::Screen);
+        editor.set_layer_blend(BlendMode::Screen);
+        assert_eq!(editor.document().layer(1).unwrap().blend, BlendMode::Screen);
+        assert!(editor.undo());
+        assert_eq!(editor.document().layer(1).unwrap().blend, BlendMode::Normal);
+        assert!(!editor.can_undo());
     }
 
     #[test]

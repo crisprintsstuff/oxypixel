@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Layer blend modes. Pick one under a layer's opacity slider: Multiply, Screen, Overlay, Darken, Lighten, Color dodge, Color burn, Hard light, Soft light, Difference, Exclusion, Hue, Saturation, Color, Luminosity, Addition, Subtract, or Divide. The canvas, preview, thumbnails, merge down, PNG, GIF, BMP, and spritesheet exports, OxyPack, and the MCP server (`set_layer` takes `blend`) all use them.
+
+### Changed
+
+- A document with a layer that is not Normal is saved with a new required `.oxypix` section. OxyPixel 0.9.2 and earlier refuse such a file with "this file needs a newer OxyPixel" instead of drawing it wrong. Documents that only use Normal are saved exactly as before.
+
 ## [0.9.2] - 2026-10-27
 
 ### Added

@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use oxypack::{counted, pack_files, write_atlas, PackOptions, Packer};
 use oxypixel_core::{
     export_bmp, export_gif, export_png_scaled, export_spritesheet_layout, load_oxypix, save_oxypix,
-    Document, Editor, FrameTag, LoopDirection, MouseButton, Rgba, SheetLayout, Tool, MAX_BRUSH,
-    MAX_DIMENSION, MAX_FRAME_MS, MAX_PALETTE, MIN_FRAME_MS,
+    BlendMode, Document, Editor, FrameTag, LoopDirection, MouseButton, Rgba, SheetLayout, Tool,
+    MAX_BRUSH, MAX_DIMENSION, MAX_FRAME_MS, MAX_PALETTE, MIN_FRAME_MS,
 };
 use serde_json::{json, Map, Value};
 
@@ -126,13 +126,14 @@ pub(crate) fn list() -> Vec<Value> {
         tool(
             "set_layer",
             "Change a layer",
-            "Rename a layer, show or hide it, change its opacity, or delete it.",
+            "Rename a layer, show or hide it, change its opacity or blend mode, or delete it.",
             json!({
                 "path": path,
                 "layer": { "type": "integer", "minimum": 0 },
                 "name": { "type": "string" },
                 "visible": { "type": "boolean" },
                 "opacity": { "type": "integer", "minimum": 0, "maximum": 255 },
+                "blend": { "type": "string", "enum": BlendMode::ALL.map(BlendMode::name), "description": "How the layer mixes with the layers below." },
                 "delete": { "type": "boolean", "description": "Delete the layer. The last layer cannot be deleted." },
             }),
             &["path", "layer"],
@@ -384,7 +385,7 @@ fn info_json(doc: &Document) -> Value {
         .iter()
         .enumerate()
         .map(|(i, layer)| {
-            json!({ "index": i, "name": layer.name, "visible": layer.visible, "opacity": layer.opacity })
+            json!({ "index": i, "name": layer.name, "visible": layer.visible, "opacity": layer.opacity, "blend": layer.blend.name() })
         })
         .collect();
     let frames: Vec<Value> = (0..doc.frame_count())
@@ -631,6 +632,11 @@ fn set_layer(args: &Args, paths: &Paths) -> ToolResult {
     }
     if let Some(opacity) = opt_int(args, "opacity", 0, 255)? {
         editor.set_layer_opacity(opacity as u8);
+    }
+    if let Some(name) = opt_string(args, "blend")? {
+        let mode =
+            BlendMode::from_name(name).ok_or_else(|| format!("unknown blend mode {name}"))?;
+        editor.set_layer_blend(mode);
     }
     save(&path, editor.document())?;
     Ok(Output::text(format!("Updated layer {layer} and saved.")))
