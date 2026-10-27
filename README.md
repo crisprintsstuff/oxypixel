@@ -91,7 +91,7 @@ sudo apt remove oxypixel
 
 On Ubuntu 24.04, `apt install` and `apt remove` were checked for a package built from this tree. Releases before the `.deb` was added published the tar.gz only.
 
-The window needs an X11 display. It draws with Vulkan through wgpu when a Vulkan driver is installed (`libvulkan1` and, for example, `mesa-vulkan-drivers`), and otherwise falls back to OpenGL. It needs these libraries: `libGL.so.1`, `libX11.so.6`, `libxkbcommon.so.0`, and `libxkbcommon-x11.so.0`. Wayland copy and paste also loads `libwayland-client.so.0` when the compositor offers the data-control clipboard. The `.deb` depends on the packages that provide them (`libgl1`, `libx11-6`, `libxkbcommon0`, `libxkbcommon-x11-0`, `libxcb1`). Export commands do not need a display:
+The window needs an X11 display. It draws with Vulkan through wgpu when a Vulkan driver is installed (`libvulkan1` and, for example, `mesa-vulkan-drivers`), and otherwise falls back to OpenGL. It needs these libraries: `libGL.so.1`, `libX11.so.6`, `libxkbcommon.so.0`, and `libxkbcommon-x11.so.0`. Wayland copy and paste also loads `libwayland-client.so.0` when the compositor offers the data-control clipboard. The `.deb` depends on the packages that provide them (`libgl1`, `libx11-6`, `libxkbcommon0`, `libxkbcommon-x11-0`, `libxcb1`). Export commands do not need a display, and they read `.aseprite` files as well as `.oxypix`:
 
 ```bash
 oxypixel export-png drawing.oxypix frame.png
@@ -150,6 +150,7 @@ These match the current editor. Planned work is listed in [docs/ROADMAP.md](docs
 ### Import and export
 
 - `.oxypix` documents, plus PNG, BMP, and GIF import and export
+- Open Aseprite `.aseprite` and `.ase` files to edit, from File, then Open…, drag-and-drop, or the command line. Layers, groups, visibility, opacity, blend modes, frame durations, tags, and the palette come along. Save writes a new `.oxypix` beside the file, which is never changed. A cel's opacity is multiplied into its pixels, tilemap layers become plain layers, and reference layers are left out; the status line lists anything like that. The editor's limits apply: 1024×1024, 256 frames, and 32 layers
 - PNG and spritesheet export at 1×, 2×, or 4× nearest-neighbor. A spritesheet can be a row or a grid, with padding and a JSON description for game engines
 - GIF animation export
 - Game engine files beside a spritesheet: a Godot 4 SpriteFrames resource (`.tres`) with one animation per tag, and Unity import settings (`.png.meta`) that slice the sheet into one sprite per frame

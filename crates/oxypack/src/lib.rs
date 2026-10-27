@@ -10,7 +10,9 @@ pub mod blend;
 mod files;
 pub mod pack;
 
-pub use files::{collect, load, pack_files, packable, write_atlas, Loaded, Packed};
+pub use files::{
+    collect, is_aseprite, load, open_document, pack_files, packable, write_atlas, Loaded, Packed,
+};
 pub use pack::{Atlas, FrameTag, PackOptions, Packer, Placement, Sprite};
 
 /// `n` and the noun, singular for exactly one: "1 file", "2 files".

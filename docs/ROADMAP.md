@@ -283,6 +283,12 @@ Export spritesheet can write a Godot 4 `SpriteFrames` resource (`<name>.tres`): 
 
 Not yet: Unity animation clips (`.anim`), and opening the exported files in Godot and Unity themselves; the tests check the text against the engines' published formats.
 
+### OX-P30
+
+**Open Aseprite files in the editor.** Status: done. Area: `crates/oxypack/src/aseprite.rs` (`read_aseprite_document`), `crates/oxypack/src/files.rs` (`open_document`), `crates/oxypixel-core/src/document.rs` (`Document::from_layers`), `crates/oxypixel/src/app.rs`, `crates/oxypixel/src/cli.rs`.
+
+The OxyPack reader now parses a file into its layers and each frame's cels, then either flattens them (packing, as before) or builds a `Document`: one layer per Aseprite layer with its group depth, visibility, opacity, and blend mode (a group's opacity and mode only when the header says they are valid), each cel drawn into place on a full-canvas cel, frame durations clamped to 20 to 10,000 ms, the palette (the first 256 colors), and the tags (blank names become `Tag N`). Cel opacity is multiplied into the pixels, tilemap layers become image layers, reference layers are left out, and a cel z-index is not kept; each case adds a note shown in the status line. Files past the editor's limits are refused with the reason. The editor opens such a file without a save path, so Save asks for `<name>.oxypix`; the Aseprite file is never written. The MCP tools still take `.oxypix` only, because their edits save in place. Tested in `aseprite.rs` (every frame composites the same as the flattened read) and `crates/oxypixel/tests/cli.rs`.
+
 ## Human only
 
 ### OX-H1

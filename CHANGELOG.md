@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Brush from selection, under the brush size, makes the pencil stamp the selected pixels (up to 64×64) in their own colors and the eraser clear their shape. The canvas previews it under the pointer, and Square goes back to the normal brush.
 - Export spritesheet can also write a Godot 4 SpriteFrames resource (`.tres`) with one animation per tag, using each frame's duration, and Unity import settings (`.png.meta`) that cut the sheet into one point-filtered sprite per frame. Exporting again keeps the Unity file's `guid`, so references in a Unity project survive.
 - One sheet per tag and One GIF per tag write `<name>_<tag>.png` or `.gif` for each tag. A tag's GIF plays its frames in the tag's direction and as many times as it repeats.
+- File, then Open… opens Aseprite `.aseprite` and `.ase` files for editing, as does drag-and-drop and the command line. Layers, groups, visibility, opacity, blend modes, frame durations, tags, and the palette are kept; Save writes a new `.oxypix` and never changes the Aseprite file. Cel opacity is multiplied into the pixels, tilemap layers open as plain layers, reference layers are left out, and the status line says when any of that happened. The export commands read `.aseprite` files too.
 - `export-sheet` takes `--godot`, `--unity`, and `--per-tag`, `export-gif` takes `--per-tag`, and the MCP `export` tool takes `godot`, `unity`, and `per_tag`.
 
 ### Changed

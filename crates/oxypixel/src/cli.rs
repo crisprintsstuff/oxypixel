@@ -44,7 +44,7 @@ fn export_frame(args: &[String], write: fn(&Document, usize, &Path) -> Result<()
             Err(_) => return usage("the frame index must be a number"),
         },
     };
-    match oxypixel_core::load_oxypix(Path::new(input)) {
+    match open(input) {
         Ok(doc) => match write(&doc, frame, Path::new(output)) {
             Ok(()) => 0,
             Err(err) => fail(&err.to_string()),
@@ -60,7 +60,7 @@ fn export_doc(args: &[String], write: fn(&Document, &Path) -> Result<(), Error>)
     let Some(output) = args.get(2) else {
         return usage("export needs an output path");
     };
-    match oxypixel_core::load_oxypix(Path::new(input)) {
+    match open(input) {
         Ok(doc) => match write(&doc, Path::new(output)) {
             Ok(()) => 0,
             Err(err) => fail(&err.to_string()),
@@ -90,7 +90,7 @@ fn export_sheet_cmd(args: &[String]) -> u8 {
         Ok(options) => options,
         Err(message) => return usage(&message),
     };
-    match oxypixel_core::load_oxypix(Path::new(input)) {
+    match open(input) {
         Ok(doc) => match export_sheet_files(&doc, layout, Path::new(output), files, per_tag) {
             Ok(_) => 0,
             Err(err) => fail(&err.to_string()),
@@ -133,7 +133,7 @@ fn export_palette_cmd(args: &[String]) -> u8 {
     let Some(output) = args.get(2) else {
         return usage("export-palette needs an output .gpl, .hex, or .pal path");
     };
-    match oxypixel_core::load_oxypix(Path::new(input)) {
+    match open(input) {
         Ok(doc) => match export_palette(doc.palette(), Path::new(output)) {
             Ok(()) => 0,
             Err(err) => fail(&err.to_string()),
@@ -154,7 +154,7 @@ fn import_palette_cmd(args: &[String]) -> u8 {
     let Some(output) = args.get(3) else {
         return usage("import-palette needs an output .oxypix");
     };
-    let mut doc = match oxypixel_core::load_oxypix(Path::new(input)) {
+    let mut doc = match open(input) {
         Ok(doc) => doc,
         Err(err) => return fail(&err.to_string()),
     };
@@ -169,6 +169,16 @@ fn import_palette_cmd(args: &[String]) -> u8 {
         Ok(()) => 0,
         Err(err) => fail(&err.to_string()),
     }
+}
+
+/// An `.oxypix` document, or an `.aseprite` file read as one. Notes on what
+/// an Aseprite file had that could not be kept go to stderr.
+fn open(input: &str) -> Result<Document, String> {
+    let (doc, notes) = oxypack::open_document(Path::new(input))?;
+    for note in notes {
+        eprintln!("oxypixel: note: {note}");
+    }
+    Ok(doc)
 }
 
 fn usage(message: &str) -> u8 {
@@ -208,6 +218,7 @@ Usage:
 
 With no command, OxyPixel opens the editor. A file argument opens that .oxypix document.
 Export commands do not open a window. FRAME is the zero-based frame index and defaults to 0.
+An INPUT.oxypix may also be an .aseprite or .ase file, read with its layers, tags, and palette.
 export-palette writes the document palette as GIMP .gpl, hex .hex, or JASC .pal.
 import-palette replaces that palette and writes a new .oxypix. A .txt palette is read as hex.
 export-sheet puts frames in one row unless --columns is set. --padding leaves clear pixels between

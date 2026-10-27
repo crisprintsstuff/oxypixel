@@ -7,7 +7,7 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use oxypixel_core::{import_image, load_oxypix};
+use oxypixel_core::{import_image, load_oxypix, Document};
 
 use crate::aseprite;
 use crate::pack::{
@@ -98,6 +98,26 @@ pub fn load(path: &Path) -> Result<Loaded, String> {
         tags: doc.tags().to_vec(),
         notes: Vec::new(),
     })
+}
+
+/// Whether `path` names an Aseprite file, by its extension.
+pub fn is_aseprite(path: &Path) -> bool {
+    path.extension()
+        .map(|ext| ext.to_string_lossy().to_ascii_lowercase())
+        .is_some_and(|ext| ext == "aseprite" || ext == "ase")
+}
+
+/// Open an `.oxypix` document, or an `.aseprite` file as a document to edit,
+/// with notes on anything the Aseprite file had that could not be kept.
+pub fn open_document(path: &Path) -> Result<(Document, Vec<String>), String> {
+    if is_aseprite(path) {
+        let bytes = read_limited(path)?;
+        return aseprite::read_aseprite_document(&bytes)
+            .map_err(|err| format!("{}: {err}", path.display()));
+    }
+    load_oxypix(path)
+        .map(|doc| (doc, Vec::new()))
+        .map_err(|err| format!("{}: {err}", path.display()))
 }
 
 /// Read a file no larger than the core's file cap.
