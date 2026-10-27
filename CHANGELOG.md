@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-10-28
+
 ### Added
 
 - Layer blend modes. Pick one under a layer's opacity slider: Multiply, Screen, Overlay, Darken, Lighten, Color dodge, Color burn, Hard light, Soft light, Difference, Exclusion, Hue, Saturation, Color, Luminosity, Addition, Subtract, or Divide. The canvas, preview, thumbnails, merge down, PNG, GIF, BMP, and spritesheet exports, OxyPack, and the MCP server (`set_layer` takes `blend`) all use them.

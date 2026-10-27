@@ -34,7 +34,7 @@ The pictures above are screenshots of OxyPixel 0.9.0. The drawing is a sample fi
 
 ## Status
 
-OxyPixel 0.9.2 is an early release. The Windows downloads are unsigned. Linux publishes a tar.gz and a `.deb`. A canvas side is at most 1024 pixels. What works today, and the open task list, is in [docs/ROADMAP.md](docs/ROADMAP.md).
+OxyPixel 0.9.5 is an early release. The Windows downloads are unsigned. Linux publishes a tar.gz and a `.deb`. A canvas side is at most 1024 pixels. What works today, and the open task list, is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Download
 
@@ -74,18 +74,18 @@ The tagged Windows build embeds the application icon and a version resource when
 
 Each release publishes two Linux files.
 
-`oxypixel-<version>-linux-x86_64.tar.gz` holds the x86_64 `oxypixel` and `oxypack` executables, `LICENSE`, and `README.txt`. Unpack it and run the program from that directory. For 0.9.2:
+`oxypixel-<version>-linux-x86_64.tar.gz` holds the x86_64 `oxypixel` and `oxypack` executables, `LICENSE`, and `README.txt`. Unpack it and run the program from that directory. For 0.9.5:
 
 ```bash
-tar -xzf oxypixel-0.9.2-linux-x86_64.tar.gz
-cd oxypixel-0.9.2-linux-x86_64
+tar -xzf oxypixel-0.9.5-linux-x86_64.tar.gz
+cd oxypixel-0.9.5-linux-x86_64
 ./oxypixel
 ```
 
-`oxypixel-<version>-linux-x86_64.deb` installs `/usr/bin/oxypixel`, `/usr/bin/oxypack`, a desktop entry, a 32×32 icon, and the `.oxypix` mime type. For 0.9.2 the Debian package version is `0.9.2-1`:
+`oxypixel-<version>-linux-x86_64.deb` installs `/usr/bin/oxypixel`, `/usr/bin/oxypack`, a desktop entry, a 32×32 icon, and the `.oxypix` mime type. For 0.9.5 the Debian package version is `0.9.5-1`:
 
 ```bash
-sudo apt install ./oxypixel-0.9.2-linux-x86_64.deb
+sudo apt install ./oxypixel-0.9.5-linux-x86_64.deb
 sudo apt remove oxypixel
 ```
 
@@ -331,7 +331,7 @@ oxypixel import-palette sprite.oxypix palette.gpl recolored.oxypix
 
 ## File formats
 
-`.oxypix` is the editor's own little-endian document. Version 1 stores the canvas, shared layer stack, frame durations, pixels, and palette. Version 2 adds animation tags, frame names, layer blend modes, and layer groups and is written only when a document has one of them; OxyPixel 0.8.5 and earlier open version 1 only, and a file with blend modes or groups needs OxyPixel newer than 0.9.2. The byte layout is [docs/FORMAT.md](docs/FORMAT.md).
+`.oxypix` is the editor's own little-endian document. Version 1 stores the canvas, shared layer stack, frame durations, pixels, and palette. Version 2 adds animation tags, frame names, layer blend modes, layer groups, and tilemaps and is written only when a document has one of them; OxyPixel 0.8.5 and earlier open version 1 only, and a file with blend modes, groups, or tilemaps needs OxyPixel 0.9.5 or newer. The byte layout is [docs/FORMAT.md](docs/FORMAT.md).
 
 PNG, BMP, and GIF can be imported as a new document or as a layer. A GIF import becomes one composited layer named Imported. Export writes the composited frame, a GIF animation, a BMP, or a PNG spritesheet in a row or a grid, optionally with a JSON description.
 
