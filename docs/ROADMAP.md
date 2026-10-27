@@ -275,6 +275,14 @@ Done: the `oxypack` library and command described in the scorecard, and the edit
 
 Blend modes and group blending (`blend.rs`) and tilemap layers are done. Tilesets kept in another file are skipped with a note. Tags for `.oxypix` files are done: they are stored in version 2 and OxyPack writes them.
 
+### OX-P29
+
+**Engine exports.** Status: done. Area: `crates/oxypixel-core/src/io/engine.rs`, `crates/oxypixel/src/cli.rs`, `crates/oxypixel/src/app.rs`, `crates/oxypixel/src/mcp/tools.rs`.
+
+Export spritesheet can write a Godot 4 `SpriteFrames` resource (`<name>.tres`): one `AtlasTexture` per cell and one animation per tag (or `default` with every frame), frames in the tag's play order, `loop` off when the tag repeats, and durations as multiples of the largest step that divides them all, with `speed` in steps per second. Its texture path is the sheet's file name, relative to the `.tres`. Unity import settings (`<name>.png.meta`) set Sprite, Multiple, point filtering, no compression, and one sprite per cell named `<stem>_<i>`, measured from the bottom left; an existing `.meta`'s `guid` is kept. One sheet per tag and One GIF per tag write `<name>_<tag>` files; the GIF follows the tag's direction and repeat count. Every file is built before any is written. Tested in `engine.rs`, `crates/oxypixel/tests/cli.rs`, and `crates/oxypixel/src/mcp/tests.rs`.
+
+Not yet: Unity animation clips (`.anim`), and opening the exported files in Godot and Unity themselves; the tests check the text against the engines' published formats.
+
 ## Human only
 
 ### OX-H1

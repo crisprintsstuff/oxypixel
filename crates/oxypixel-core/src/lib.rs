@@ -29,13 +29,14 @@ pub use editor::{CustomBrush, Editor, MouseButton, Tool};
 pub use error::Error;
 pub use io::Fit;
 pub use io::{
-    decode_first_rgba, export_bmp, export_bmp_bytes, export_gif, export_gif_bytes, export_palette,
-    export_palette_string, export_png, export_png_bytes, export_png_bytes_scaled,
-    export_png_scaled, export_spritesheet, export_spritesheet_bytes, export_spritesheet_layout,
-    export_spritesheet_layout_bytes, export_spritesheet_scaled, fit_into, frame_tags_json,
-    import_image, import_image_bytes, import_palette, import_palette_bytes, load_oxypix,
-    load_oxypix_bytes, save_oxypix, save_oxypix_bytes, spritesheet_grid, spritesheet_json,
-    PaletteFormat, SheetGrid, SheetLayout,
+    decode_first_rgba, export_bmp, export_bmp_bytes, export_gif, export_gif_bytes,
+    export_gif_per_tag, export_palette, export_palette_string, export_png, export_png_bytes,
+    export_png_bytes_scaled, export_png_scaled, export_sheet_files, export_spritesheet,
+    export_spritesheet_bytes, export_spritesheet_layout, export_spritesheet_layout_bytes,
+    export_spritesheet_scaled, fit_into, frame_tags_json, import_image, import_image_bytes,
+    import_palette, import_palette_bytes, load_oxypix, load_oxypix_bytes, save_oxypix,
+    save_oxypix_bytes, spritesheet_grid, spritesheet_json, tag_paths, PaletteFormat, SheetFiles,
+    SheetGrid, SheetLayout,
 };
 pub use limits::{
     DEFAULT_FRAME_MS, FORMAT_VERSION, MAX_BRUSH, MAX_CEL_PIXELS, MAX_CUSTOM_BRUSH, MAX_DIMENSION,

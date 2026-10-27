@@ -1,9 +1,11 @@
 //! `.oxypix` documents, palette files, and PNG, BMP, and GIF import/export.
 
+mod engine;
 mod oxypix;
 mod palette;
 mod raster;
 
+pub use engine::{export_gif_per_tag, export_sheet_files, tag_paths, SheetFiles};
 pub use oxypix::{load_oxypix, load_oxypix_bytes, save_oxypix, save_oxypix_bytes};
 pub use palette::{
     export_palette, export_palette_string, import_palette, import_palette_bytes, PaletteFormat,

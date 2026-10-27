@@ -152,6 +152,8 @@ These match the current editor. Planned work is listed in [docs/ROADMAP.md](docs
 - `.oxypix` documents, plus PNG, BMP, and GIF import and export
 - PNG and spritesheet export at 1×, 2×, or 4× nearest-neighbor. A spritesheet can be a row or a grid, with padding and a JSON description for game engines
 - GIF animation export
+- Game engine files beside a spritesheet: a Godot 4 SpriteFrames resource (`.tres`) with one animation per tag, and Unity import settings (`.png.meta`) that slice the sheet into one sprite per frame
+- One GIF or one spritesheet per animation tag, named `<name>_<tag>`. A tag's GIF plays in its direction and as many times as it repeats
 - Pack sprites (File menu): pack frames from image, `.oxypix`, and `.aseprite` files into an atlas PNG and JSON. See [OxyPack](#oxypack)
 - Headless `export-png`, `export-bmp`, `export-gif`, `export-sheet`, `export-palette`, and `import-palette` commands that never open a window
 
@@ -266,7 +268,7 @@ Outside tests: a tester ran the `oxypack` command from the 0.7.5 Linux build. Wi
 | `add_layer`, `set_layer` | Add, rename, hide, fade, or delete layers |
 | `add_frame`, `set_frame` | Add or copy frames, and rename, time, or delete them |
 | `set_tags`, `set_palette` | Replace the animation tags or the palette |
-| `export` | PNG, BMP, GIF, or a spritesheet with JSON |
+| `export` | PNG, BMP, GIF, or a spritesheet with JSON, Godot, or Unity files, and one GIF or sheet per tag |
 | `pack_sprites` | The OxyPack atlas packer |
 
 Editing tools save the document in place. `create_document`, `export`, and `pack_sprites` will not replace an existing file unless the call says `overwrite: true`. Add `--root DIR` to keep every path the tools read or write inside one folder.
@@ -309,6 +311,9 @@ oxypixel export-bmp sprite.oxypix frame.bmp
 oxypixel export-gif sprite.oxypix animation.gif
 oxypixel export-sheet sprite.oxypix sheet.png
 oxypixel export-sheet sprite.oxypix sheet.png --columns 4 --padding 1 --json
+oxypixel export-sheet sprite.oxypix sheet.png --godot --unity
+oxypixel export-sheet sprite.oxypix sheet.png --per-tag
+oxypixel export-gif sprite.oxypix animation.gif --per-tag
 oxypixel export-palette sprite.oxypix palette.gpl
 oxypixel import-palette sprite.oxypix palette.gpl recolored.oxypix
 ```

@@ -7,9 +7,10 @@ use std::path::{Path, PathBuf};
 
 use oxypack::{counted, pack_files, write_atlas, PackOptions, Packer};
 use oxypixel_core::{
-    export_bmp, export_gif, export_png_scaled, export_spritesheet_layout, load_oxypix, save_oxypix,
-    BlendMode, Document, Editor, FrameTag, LoopDirection, MouseButton, Rgba, SheetLayout, Tool,
-    MAX_BRUSH, MAX_DIMENSION, MAX_FRAME_MS, MAX_PALETTE, MIN_FRAME_MS,
+    export_bmp, export_gif, export_gif_per_tag, export_png_scaled, export_sheet_files, load_oxypix,
+    save_oxypix, tag_paths, BlendMode, Document, Editor, FrameTag, LoopDirection, MouseButton,
+    Rgba, SheetFiles, SheetLayout, Tool, MAX_BRUSH, MAX_DIMENSION, MAX_FRAME_MS, MAX_PALETTE,
+    MIN_FRAME_MS,
 };
 use serde_json::{json, Map, Value};
 
@@ -210,7 +211,7 @@ pub(crate) fn list() -> Vec<Value> {
         tool(
             "export",
             "Export",
-            "Export a document: png or bmp (one frame), gif (all frames), or sheet (a spritesheet PNG, optionally with a JSON description beside it).",
+            "Export a document: png or bmp (one frame), gif (all frames), or sheet (a spritesheet PNG, optionally with a JSON description, a Godot 4 SpriteFrames .tres, or a Unity .png.meta beside it). per_tag writes OUTPUT_<tag>.gif or .png for each animation tag instead.",
             json!({
                 "path": path,
                 "output": { "type": "string", "description": "File to write." },
@@ -220,6 +221,9 @@ pub(crate) fn list() -> Vec<Value> {
                 "columns": { "type": "integer", "minimum": 0, "description": "sheet only. 0 is one row." },
                 "padding": { "type": "integer", "minimum": 0, "maximum": 256, "description": "sheet only." },
                 "json": { "type": "boolean", "description": "sheet only: also write OUTPUT.json." },
+                "godot": { "type": "boolean", "description": "sheet only: also write OUTPUT.tres, a Godot 4 SpriteFrames resource with one animation per tag." },
+                "unity": { "type": "boolean", "description": "sheet only: also write OUTPUT.png.meta, Unity import settings with one sprite per frame." },
+                "per_tag": { "type": "boolean", "description": "gif and sheet only: one file per tag, named OUTPUT_<tag>." },
                 "overwrite": overwrite,
             }),
             &["path", "output", "format"],
@@ -827,18 +831,40 @@ fn export(args: &Args, paths: &Paths) -> ToolResult {
     if ![1, 2, 4].contains(&scale) {
         return Err("scale must be 1, 2, or 4".into());
     }
-    let result = match format {
-        "png" => export_png_scaled(&doc, frame, &out, scale),
-        "bmp" => export_bmp(&doc, frame, &out),
-        "gif" => export_gif(&doc, &out),
+    let per_tag = opt_bool(args, "per_tag")?.unwrap_or(false);
+    if per_tag {
+        if !matches!(format, "gif" | "sheet") {
+            return Err("per_tag works with gif and sheet".into());
+        }
+        if doc.tags().is_empty() {
+            return Err("the document has no tags".into());
+        }
+        if !opt_bool(args, "overwrite")?.unwrap_or(false) {
+            if let Some(taken) = tag_paths(&out, doc.tags()).iter().find(|p| p.exists()) {
+                return Err(format!(
+                    "{} already exists; pass overwrite: true to replace it",
+                    taken.display()
+                ));
+            }
+        }
+    }
+    let written = match format {
+        "png" => export_png_scaled(&doc, frame, &out, scale).map(|()| vec![out.clone()]),
+        "bmp" => export_bmp(&doc, frame, &out).map(|()| vec![out.clone()]),
+        "gif" if per_tag => export_gif_per_tag(&doc, &out),
+        "gif" => export_gif(&doc, &out).map(|()| vec![out.clone()]),
         "sheet" => {
             let layout = SheetLayout {
                 scale,
                 columns: opt_int(args, "columns", 0, i64::from(u32::MAX))?.unwrap_or(0) as u32,
                 padding: opt_int(args, "padding", 0, 256)?.unwrap_or(0) as u32,
             };
-            let json = opt_bool(args, "json")?.unwrap_or(false);
-            export_spritesheet_layout(&doc, layout, &out, json)
+            let files = SheetFiles {
+                json: opt_bool(args, "json")?.unwrap_or(false),
+                godot: opt_bool(args, "godot")?.unwrap_or(false),
+                unity: opt_bool(args, "unity")?.unwrap_or(false),
+            };
+            export_sheet_files(&doc, layout, &out, files, per_tag)
         }
         other => {
             return Err(format!(
@@ -846,8 +872,9 @@ fn export(args: &Args, paths: &Paths) -> ToolResult {
             ))
         }
     };
-    result.map_err(|err| err.to_string())?;
-    Ok(Output::text(format!("Wrote {}.", out.display())))
+    let written = written.map_err(|err| err.to_string())?;
+    let names: Vec<String> = written.iter().map(|p| p.display().to_string()).collect();
+    Ok(Output::text(format!("Wrote {}.", names.join(", "))))
 }
 
 fn pack(args: &Args, paths: &Paths) -> ToolResult {
