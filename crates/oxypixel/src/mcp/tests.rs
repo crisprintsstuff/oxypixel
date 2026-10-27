@@ -463,6 +463,53 @@ fn export_and_pack_write_new_files_only() {
     );
     assert!(err && text.contains("unknown format"), "{text}");
 
+    // Engine files and one file per tag.
+    let (err, text, _) = call(
+        &mut server,
+        "export",
+        json!({ "path": "coin.oxypix", "output": "coin_sheet.png", "format": "sheet", "per_tag": true }),
+    );
+    assert!(err && text.contains("no tags"), "{text}");
+    call(
+        &mut server,
+        "set_tags",
+        json!({ "path": "coin.oxypix", "tags": [{ "name": "spin", "from": 0, "to": 1 }] }),
+    );
+    let (err, text, _) = call(
+        &mut server,
+        "export",
+        json!({ "path": "coin.oxypix", "output": "coin_sheet.png", "format": "sheet", "per_tag": true, "godot": true, "unity": true }),
+    );
+    assert!(!err, "{text}");
+    for name in [
+        "coin_sheet_spin.png",
+        "coin_sheet_spin.tres",
+        "coin_sheet_spin.png.meta",
+    ] {
+        assert!(dir.0.join(name).is_file(), "{name}: {text}");
+    }
+    let (err, text, _) = call(
+        &mut server,
+        "export",
+        json!({ "path": "coin.oxypix", "output": "coin_sheet.png", "format": "sheet", "per_tag": true }),
+    );
+    assert!(
+        err && text.contains("coin_sheet_spin.png already exists"),
+        "{text}"
+    );
+    let (err, text, _) = call(
+        &mut server,
+        "export",
+        json!({ "path": "coin.oxypix", "output": "coin.gif", "format": "gif", "per_tag": true, "overwrite": true }),
+    );
+    assert!(!err && dir.0.join("coin_spin.gif").is_file(), "{text}");
+    let (err, text, _) = call(
+        &mut server,
+        "export",
+        json!({ "path": "coin.oxypix", "output": "one.png", "format": "png", "per_tag": true }),
+    );
+    assert!(err && text.contains("per_tag"), "{text}");
+
     let (err, text, _) = call(
         &mut server,
         "pack_sprites",

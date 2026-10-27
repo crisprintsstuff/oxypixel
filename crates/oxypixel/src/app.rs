@@ -6,10 +6,10 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, RichText, ViewportCommand};
 use oxypixel_core::{
-    advance, decode_first_rgba, export_bmp, export_gif, export_palette, export_png_scaled,
-    export_spritesheet_layout, fit_into, import_image, import_palette, load_oxypix, save_oxypix,
-    BlendMode, Editor, Error, Fit, PaletteFormat, References, Rgba, SheetLayout, Tool, Transform,
-    MAX_DIMENSION, MAX_FRAMES, MAX_SHEET_PADDING,
+    advance, decode_first_rgba, export_bmp, export_gif, export_gif_per_tag, export_palette,
+    export_png_scaled, export_sheet_files, fit_into, import_image, import_palette, load_oxypix,
+    save_oxypix, BlendMode, Editor, Error, Fit, PaletteFormat, References, Rgba, SheetFiles,
+    SheetLayout, Tool, Transform, MAX_DIMENSION, MAX_FRAMES, MAX_SHEET_PADDING,
 };
 
 use crate::cache::FrameComposites;
@@ -114,6 +114,12 @@ pub struct OxyApp {
     sheet_columns: u32,
     sheet_padding: u32,
     sheet_json: bool,
+    /// Also write a Godot SpriteFrames `.tres` and a Unity `.png.meta`.
+    sheet_godot: bool,
+    sheet_unity: bool,
+    /// Export one spritesheet, or one GIF, per tag.
+    sheet_per_tag: bool,
+    gif_per_tag: bool,
     palette_format: PaletteFormat,
     recent: Vec<PathBuf>,
     last_dir: Option<PathBuf>,
@@ -215,6 +221,10 @@ impl OxyApp {
             sheet_columns: 0,
             sheet_padding: 0,
             sheet_json: false,
+            sheet_godot: false,
+            sheet_unity: false,
+            sheet_per_tag: false,
+            gif_per_tag: false,
             palette_format: PaletteFormat::Gpl,
             recent: recent_files,
             last_dir,
@@ -1168,6 +1178,11 @@ impl OxyApp {
             PathKind::LoadReference => self.load_reference(&path),
             PathKind::ExportPng => self.export_scaled(&path, true),
             PathKind::ExportBmp => self.export_frame(&path, export_bmp),
+            PathKind::ExportGif
+                if self.gif_per_tag && !self.editor.document().tags().is_empty() =>
+            {
+                self.export_per_tag_gifs(&path)
+            }
             PathKind::ExportGif => self.export_doc(&path, export_gif),
             PathKind::ExportSheet => self.export_scaled(&path, false),
             PathKind::ImportPalette => self.import_palette_file(&path),
@@ -1298,6 +1313,25 @@ impl OxyApp {
         }
     }
 
+    fn export_per_tag_gifs(&mut self, path: &Path) -> bool {
+        match export_gif_per_tag(self.editor.document(), path) {
+            Ok(written) => {
+                self.note_dir(path);
+                let names: Vec<String> = written
+                    .iter()
+                    .filter_map(|p| p.file_name())
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .collect();
+                self.note_ok(format!("Exported {}.", names.join(", ")));
+                true
+            }
+            Err(err) => {
+                self.dialog_error = Some(err.to_string());
+                false
+            }
+        }
+    }
+
     fn export_scaled(&mut self, path: &Path, png_frame: bool) -> bool {
         let scale = match self.export_scale {
             2 => 2,
@@ -1306,22 +1340,38 @@ impl OxyApp {
         };
         let result = if png_frame {
             let frame = self.editor.document().active_frame();
-            export_png_scaled(self.editor.document(), frame, path, scale)
+            export_png_scaled(self.editor.document(), frame, path, scale).map(|()| 1)
         } else {
             let layout = SheetLayout {
                 scale,
                 columns: self.sheet_columns,
                 padding: self.sheet_padding,
             };
-            export_spritesheet_layout(self.editor.document(), layout, path, self.sheet_json)
+            let files = SheetFiles {
+                json: self.sheet_json,
+                godot: self.sheet_godot,
+                unity: self.sheet_unity,
+            };
+            let per_tag = self.sheet_per_tag && !self.editor.document().tags().is_empty();
+            export_sheet_files(self.editor.document(), layout, path, files, per_tag)
+                .map(|written| written.len())
         };
         match result {
-            Ok(()) => {
+            Ok(count) => {
                 self.note_dir(path);
-                if scale == 1 {
-                    self.note_ok(format!("Exported {}.", path.display()));
+                let what = if count > 1 {
+                    let folder = path
+                        .parent()
+                        .filter(|dir| !dir.as_os_str().is_empty())
+                        .map_or(".".into(), |dir| dir.display().to_string());
+                    format!("{count} files to {folder}")
                 } else {
-                    self.note_ok(format!("Exported {} at {scale}×.", path.display()));
+                    path.display().to_string()
+                };
+                if scale == 1 {
+                    self.note_ok(format!("Exported {what}."));
+                } else {
+                    self.note_ok(format!("Exported {what} at {scale}×."));
                 }
                 true
             }
@@ -2992,6 +3042,20 @@ impl OxyApp {
                     });
                     ui.checkbox(&mut self.sheet_json, "Also write .json")
                         .on_hover_text("A file beside the PNG with each frame's rectangle and duration, for game engines.");
+                    ui.checkbox(&mut self.sheet_godot, "Godot SpriteFrames (.tres)")
+                        .on_hover_text("A Godot 4 resource with one animation per tag, for an AnimatedSprite2D. Keep it beside the PNG in the project.");
+                    ui.checkbox(&mut self.sheet_unity, "Unity sprite slices (.png.meta)")
+                        .on_hover_text("Unity import settings that cut the sheet into one sprite per frame, point filtered and uncompressed. Exporting again keeps Unity's references.");
+                    let tagged = !self.editor.document().tags().is_empty();
+                    ui.add_enabled(tagged, egui::Checkbox::new(&mut self.sheet_per_tag, "One sheet per tag"))
+                        .on_hover_text("Write <name>_<tag>.png for each tag, with the files above for each.")
+                        .on_disabled_hover_text("This document has no tags.");
+                }
+                if self.path_kind == PathKind::ExportGif {
+                    let tagged = !self.editor.document().tags().is_empty();
+                    ui.add_enabled(tagged, egui::Checkbox::new(&mut self.gif_per_tag, "One GIF per tag"))
+                        .on_hover_text("Write <name>_<tag>.gif for each tag, in its direction and repeat count.")
+                        .on_disabled_hover_text("This document has no tags.");
                 }
                 if self.path_kind == PathKind::ExportPalette {
                     ui.horizontal(|ui| {

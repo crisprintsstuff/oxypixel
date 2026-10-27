@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Edit, then Replace color… changes every pixel of the primary color to the second color on the active layer, or on every layer, every frame, or both, inside the selection when there is one. One undo step. The MCP `draw` tool has a matching `replace` operation.
 - Dither, under the tool options, makes the pencil paint a checkerboard of the primary and second colors that stays fixed to the canvas.
 - Brush from selection, under the brush size, makes the pencil stamp the selected pixels (up to 64×64) in their own colors and the eraser clear their shape. The canvas previews it under the pointer, and Square goes back to the normal brush.
+- Export spritesheet can also write a Godot 4 SpriteFrames resource (`.tres`) with one animation per tag, using each frame's duration, and Unity import settings (`.png.meta`) that cut the sheet into one point-filtered sprite per frame. Exporting again keeps the Unity file's `guid`, so references in a Unity project survive.
+- One sheet per tag and One GIF per tag write `<name>_<tag>.png` or `.gif` for each tag. A tag's GIF plays its frames in the tag's direction and as many times as it repeats.
+- `export-sheet` takes `--godot`, `--unity`, and `--per-tag`, `export-gif` takes `--per-tag`, and the MCP `export` tool takes `godot`, `unity`, and `per_tag`.
 
 ### Changed
 

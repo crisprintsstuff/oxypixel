@@ -130,10 +130,25 @@ pub fn export_gif(doc: &Document, path: &Path) -> Result<()> {
 }
 
 pub fn export_gif_bytes(doc: &Document) -> Result<Vec<u8>> {
+    let frames: Vec<usize> = (0..doc.frame_count()).collect();
+    gif_bytes(doc, &frames, 0)
+}
+
+/// An animated GIF of `frames` in that order. `plays` is how many times it
+/// plays: 0 loops forever, 1 plays once.
+pub(crate) fn gif_bytes(doc: &Document, frames: &[usize], plays: u16) -> Result<Vec<u8>> {
     let mut cursor = Cursor::new(Vec::new());
     let mut encoder = GifEncoder::new_with_speed(&mut cursor, 10);
-    encoder.set_repeat(Repeat::Infinite).map_err(Error::image)?;
-    for index in 0..doc.frame_count() {
+    // The loop count is how many times a GIF repeats after the first play,
+    // and 0 means forever, so a GIF that plays once has no loop count.
+    match plays {
+        0 => encoder.set_repeat(Repeat::Infinite).map_err(Error::image)?,
+        1 => {}
+        n => encoder
+            .set_repeat(Repeat::Finite(n - 1))
+            .map_err(Error::image)?,
+    }
+    for &index in frames {
         let pixels = pack(&doc.composite(index)?);
         let image =
             RgbaImage::from_raw(doc.width(), doc.height(), pixels).ok_or(Error::Truncated)?;
@@ -201,6 +216,11 @@ pub struct SheetGrid {
 
 /// Lay out the frames row by row, left to right. Sizes past the caps are an error.
 pub fn spritesheet_grid(doc: &Document, layout: SheetLayout) -> Result<SheetGrid> {
+    sheet_grid(doc, doc.frame_count(), layout)
+}
+
+/// The grid for `count` frames of `doc`'s size.
+pub(crate) fn sheet_grid(doc: &Document, count: usize, layout: SheetLayout) -> Result<SheetGrid> {
     if layout.padding > MAX_SHEET_PADDING {
         return Err(Error::Limit {
             what: "spritesheet padding",
@@ -208,7 +228,7 @@ pub fn spritesheet_grid(doc: &Document, layout: SheetLayout) -> Result<SheetGrid
             max: u64::from(MAX_SHEET_PADDING),
         });
     }
-    let frames = doc.frame_count() as u64;
+    let frames = count as u64;
     let cell_w = u64::from(checked_scale(doc.width(), layout.scale)?);
     let cell_h = u64::from(checked_scale(doc.height(), layout.scale)?);
     let columns = match u64::from(layout.columns) {
@@ -254,11 +274,17 @@ pub fn spritesheet_grid(doc: &Document, layout: SheetLayout) -> Result<SheetGrid
 
 /// A spritesheet PNG with frames placed by `layout`.
 pub fn export_spritesheet_layout_bytes(doc: &Document, layout: SheetLayout) -> Result<Vec<u8>> {
-    let grid = spritesheet_grid(doc, layout)?;
+    let frames: Vec<usize> = (0..doc.frame_count()).collect();
+    sheet_png(doc, &frames, layout)
+}
+
+/// A spritesheet PNG of `frames`, cell `i` holding `frames[i]`.
+pub(crate) fn sheet_png(doc: &Document, frames: &[usize], layout: SheetLayout) -> Result<Vec<u8>> {
+    let grid = sheet_grid(doc, frames.len(), layout)?;
     let sheet_w = grid.width as usize;
     let cell_w = grid.cell_width as usize;
     let mut out = vec![Rgba::CLEAR; sheet_w * grid.height as usize];
-    for (index, &(x0, y0)) in grid.cells.iter().enumerate() {
+    for (&index, &(x0, y0)) in frames.iter().zip(&grid.cells) {
         let (_, _, frame) = composite_scaled(doc, index, layout.scale)?;
         for (row, line) in frame.chunks_exact(cell_w).enumerate() {
             let start = (y0 as usize + row) * sheet_w + x0 as usize;
@@ -271,10 +297,23 @@ pub fn export_spritesheet_layout_bytes(doc: &Document, layout: SheetLayout) -> R
 /// The spritesheet description that game engines read as a JSON array
 /// sheet: one entry per frame with its rectangle and duration, then `meta`.
 pub fn spritesheet_json(doc: &Document, layout: SheetLayout, image: &str) -> Result<String> {
-    let grid = spritesheet_grid(doc, layout)?;
+    let frames: Vec<usize> = (0..doc.frame_count()).collect();
+    sheet_json(doc, &frames, doc.tags(), layout, image)
+}
+
+/// The JSON sheet for a sheet of `frames`. `tags` count frames from 0 at the
+/// first cell.
+pub(crate) fn sheet_json(
+    doc: &Document,
+    frames: &[usize],
+    tags: &[crate::tags::FrameTag],
+    layout: SheetLayout,
+    image: &str,
+) -> Result<String> {
+    let grid = sheet_grid(doc, frames.len(), layout)?;
     let (w, h) = (grid.cell_width, grid.cell_height);
     let mut out = String::from("{\n  \"frames\": [\n");
-    for (index, (x, y)) in grid.cells.iter().enumerate() {
+    for (cell, (&index, (x, y))) in frames.iter().zip(&grid.cells).enumerate() {
         let duration = doc.frame_duration(index).unwrap_or(DEFAULT_FRAME_MS);
         let filename = match doc.frame_name(index) {
             Some(name) => json_string(name),
@@ -283,7 +322,7 @@ pub fn spritesheet_json(doc: &Document, layout: SheetLayout, image: &str) -> Res
         out.push_str(&format!(
             "    {{\"filename\": {filename}, \"frame\": {{\"x\": {x}, \"y\": {y}, \"w\": {w}, \"h\": {h}}}, \"rotated\": false, \"trimmed\": false, \"spriteSourceSize\": {{\"x\": 0, \"y\": 0, \"w\": {w}, \"h\": {h}}}, \"sourceSize\": {{\"w\": {w}, \"h\": {h}}}, \"duration\": {duration}}}"
         ));
-        out.push_str(if index + 1 < grid.cells.len() {
+        out.push_str(if cell + 1 < grid.cells.len() {
             ",\n"
         } else {
             "\n"
@@ -296,7 +335,7 @@ pub fn spritesheet_json(doc: &Document, layout: SheetLayout, image: &str) -> Res
         grid.width,
         grid.height,
         layout.scale,
-        frame_tags_json(doc.tags()),
+        frame_tags_json(tags),
     ));
     Ok(out)
 }
@@ -347,7 +386,7 @@ pub fn frame_tags_json(tags: &[crate::tags::FrameTag]) -> String {
         .join(", ")
 }
 
-fn json_string(text: &str) -> String {
+pub(crate) fn json_string(text: &str) -> String {
     let mut out = String::from("\"");
     for ch in text.chars() {
         match ch {

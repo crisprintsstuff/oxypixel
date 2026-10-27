@@ -3,8 +3,8 @@
 use std::path::Path;
 
 use oxypixel_core::{
-    export_bmp, export_gif, export_palette, export_png, export_spritesheet_layout, import_palette,
-    Document, Error, SheetLayout,
+    export_bmp, export_gif, export_gif_per_tag, export_palette, export_png, export_sheet_files,
+    import_palette, Document, Error, SheetFiles, SheetLayout,
 };
 
 pub fn dispatch(args: &[String]) -> Option<i32> {
@@ -20,7 +20,7 @@ pub fn dispatch(args: &[String]) -> Option<i32> {
         }
         "export-png" => export_frame(args, export_png),
         "export-bmp" => export_frame(args, export_bmp),
-        "export-gif" => export_doc(args, export_gif),
+        "export-gif" => export_gif_cmd(args),
         "export-sheet" => export_sheet_cmd(args),
         "export-palette" => export_palette_cmd(args),
         "import-palette" => import_palette_cmd(args),
@@ -69,6 +69,16 @@ fn export_doc(args: &[String], write: fn(&Document, &Path) -> Result<(), Error>)
     }
 }
 
+fn export_gif_cmd(args: &[String]) -> u8 {
+    match args.get(3).map(String::as_str) {
+        None => export_doc(args, export_gif),
+        Some("--per-tag") if args.len() == 4 => {
+            export_doc(args, |doc, path| export_gif_per_tag(doc, path).map(|_| ()))
+        }
+        Some(other) => usage(&format!("unknown export-gif option {other}")),
+    }
+}
+
 fn export_sheet_cmd(args: &[String]) -> u8 {
     let Some(input) = args.get(1) else {
         return usage("export-sheet needs an input .oxypix and an output .png");
@@ -76,23 +86,25 @@ fn export_sheet_cmd(args: &[String]) -> u8 {
     let Some(output) = args.get(2) else {
         return usage("export-sheet needs an output .png");
     };
-    let (layout, json) = match parse_sheet_options(&args[3..]) {
+    let (layout, files, per_tag) = match parse_sheet_options(&args[3..]) {
         Ok(options) => options,
         Err(message) => return usage(&message),
     };
     match oxypixel_core::load_oxypix(Path::new(input)) {
-        Ok(doc) => match export_spritesheet_layout(&doc, layout, Path::new(output), json) {
-            Ok(()) => 0,
+        Ok(doc) => match export_sheet_files(&doc, layout, Path::new(output), files, per_tag) {
+            Ok(_) => 0,
             Err(err) => fail(&err.to_string()),
         },
         Err(err) => fail(&err.to_string()),
     }
 }
 
-/// `--columns N`, `--padding N`, `--scale 1|2|4`, and `--json`, in any order.
-fn parse_sheet_options(args: &[String]) -> Result<(SheetLayout, bool), String> {
+/// `--columns N`, `--padding N`, `--scale 1|2|4`, `--json`, `--godot`,
+/// `--unity`, and `--per-tag`, in any order.
+fn parse_sheet_options(args: &[String]) -> Result<(SheetLayout, SheetFiles, bool), String> {
     let mut layout = SheetLayout::default();
-    let mut json = false;
+    let mut files = SheetFiles::default();
+    let mut per_tag = false;
     let mut rest = args.iter();
     while let Some(flag) = rest.next() {
         let mut number = |name: &str| -> Result<u32, String> {
@@ -104,11 +116,14 @@ fn parse_sheet_options(args: &[String]) -> Result<(SheetLayout, bool), String> {
             "--columns" => layout.columns = number("--columns")?,
             "--padding" => layout.padding = number("--padding")?,
             "--scale" => layout.scale = number("--scale")?,
-            "--json" => json = true,
+            "--json" => files.json = true,
+            "--godot" => files.godot = true,
+            "--unity" => files.unity = true,
+            "--per-tag" => per_tag = true,
             other => return Err(format!("unknown export-sheet option {other}")),
         }
     }
-    Ok((layout, json))
+    Ok((layout, files, per_tag))
 }
 
 fn export_palette_cmd(args: &[String]) -> u8 {
@@ -182,8 +197,9 @@ Usage:
   oxypixel [FILE]
   oxypixel export-png INPUT.oxypix OUTPUT.png [FRAME]
   oxypixel export-bmp INPUT.oxypix OUTPUT.bmp [FRAME]
-  oxypixel export-gif INPUT.oxypix OUTPUT.gif
-  oxypixel export-sheet INPUT.oxypix OUTPUT.png [--columns N] [--padding N] [--scale 1|2|4] [--json]
+  oxypixel export-gif INPUT.oxypix OUTPUT.gif [--per-tag]
+  oxypixel export-sheet INPUT.oxypix OUTPUT.png [--columns N] [--padding N] [--scale 1|2|4]
+                        [--json] [--godot] [--unity] [--per-tag]
   oxypixel export-palette INPUT.oxypix OUTPUT.gpl
   oxypixel import-palette INPUT.oxypix PALETTE.gpl OUTPUT.oxypix
   oxypixel mcp [--root DIR]
@@ -195,7 +211,10 @@ Export commands do not open a window. FRAME is the zero-based frame index and de
 export-palette writes the document palette as GIMP .gpl, hex .hex, or JASC .pal.
 import-palette replaces that palette and writes a new .oxypix. A .txt palette is read as hex.
 export-sheet puts frames in one row unless --columns is set. --padding leaves clear pixels between
-cells, and --json writes OUTPUT.json with each frame's rectangle and duration.
+cells, and --json writes OUTPUT.json with each frame's rectangle and duration. --godot writes
+OUTPUT.tres, a Godot 4 SpriteFrames resource with one animation per tag, and --unity writes
+OUTPUT.png.meta, which Unity reads as one sprite per frame. --per-tag writes OUTPUT_<tag>.png
+(or .gif for export-gif) for each tag instead of one file.
 mcp runs a Model Context Protocol server on stdin and stdout for AI assistants; with --root,
 its tools may only read and write inside DIR.
 "

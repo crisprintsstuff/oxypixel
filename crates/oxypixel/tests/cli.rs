@@ -73,6 +73,81 @@ fn export_sheet_takes_columns_padding_and_writes_json() {
 }
 
 #[test]
+fn engine_files_and_per_tag_exports() {
+    let dir = std::env::temp_dir().join(format!("oxypixel-cli-engine-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let src = dir.join("hero.oxypix");
+    let mut doc = oxypixel_core::Document::new(2, 2).unwrap();
+    doc.add_frame().unwrap();
+    doc.add_frame().unwrap();
+    doc.add_tag(oxypixel_core::FrameTag {
+        name: "idle".into(),
+        from: 0,
+        to: 1,
+        direction: oxypixel_core::LoopDirection::Forward,
+        repeat: 0,
+    })
+    .unwrap();
+    save_oxypix(&doc, &src).unwrap();
+    let png = dir.join("hero.png");
+    let output = bin()
+        .args(["export-sheet", src.to_str().unwrap(), png.to_str().unwrap()])
+        .args(["--godot", "--unity"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let tres = std::fs::read_to_string(dir.join("hero.tres")).unwrap();
+    assert!(tres.contains("\"name\": &\"idle\""));
+    assert!(std::fs::read_to_string(dir.join("hero.png.meta"))
+        .unwrap()
+        .contains("name: hero_2"));
+    let output = bin()
+        .args([
+            "export-sheet",
+            src.to_str().unwrap(),
+            png.to_str().unwrap(),
+            "--per-tag",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let image = image::ImageReader::open(dir.join("hero_idle.png"))
+        .unwrap()
+        .decode()
+        .unwrap();
+    assert_eq!(image.width(), 4, "the idle tag has two frames");
+    let gif = dir.join("hero.gif");
+    let output = bin()
+        .args([
+            "export-gif",
+            src.to_str().unwrap(),
+            gif.to_str().unwrap(),
+            "--per-tag",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(dir.join("hero_idle.gif").exists());
+    assert!(!gif.exists());
+    let bad = bin()
+        .args([
+            "export-gif",
+            src.to_str().unwrap(),
+            gif.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(bad.status.code(), Some(2));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn export_png_writes_the_painted_pixel() {
     let dir = std::env::temp_dir().join(format!(
         "oxypixel-cli-{}-{}",
