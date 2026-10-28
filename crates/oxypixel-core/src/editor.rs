@@ -1602,6 +1602,28 @@ impl Editor {
         self.bump();
     }
 
+    /// Take an edited copy of the document, as from an AI assistant over the
+    /// live bridge, as one undo step. The active frame and layer stay where
+    /// they were when they still exist, and a selection that no longer fits
+    /// is dropped.
+    pub fn apply_external(&mut self, mut doc: Document) {
+        self.cancel_gesture();
+        self.end_coalesce();
+        self.push_undo();
+        if doc.frame_count() == self.doc.frame_count()
+            && doc.layer_count() == self.doc.layer_count()
+        {
+            let _ = doc.set_active_frame(self.doc.active_frame());
+            let _ = doc.set_active_layer(self.doc.active_layer());
+        }
+        if (doc.width(), doc.height()) != (self.doc.width(), self.doc.height()) {
+            self.set_selection(None, None);
+        }
+        self.doc = doc;
+        self.dirty = true;
+        self.bump();
+    }
+
     pub fn add_layer(&mut self) -> Result<()> {
         let n = self.doc.layer_count() + 1;
         self.structural(|doc| doc.add_layer(&format!("Layer {n}")))
@@ -3470,6 +3492,24 @@ mod tests {
             big.brush_from_selection(),
             Err(Error::Limit { .. })
         ));
+    }
+
+    #[test]
+    fn an_external_edit_is_one_undo_step_and_keeps_the_view() {
+        let mut ed = Editor::new(4, 4).unwrap();
+        ed.add_frame().unwrap();
+        ed.set_active_frame(1).unwrap();
+        let mut edited = ed.document().clone();
+        edited.set_active_frame(0).unwrap();
+        edited
+            .set_pixel(0, 0, 1, 1, Rgba::new(9, 9, 9, 255))
+            .unwrap();
+        ed.apply_external(edited);
+        assert!(ed.is_dirty());
+        assert_eq!(ed.document().active_frame(), 1, "the view stays on frame 1");
+        assert_eq!(ed.document().cel(0, 0).unwrap()[5], Rgba::new(9, 9, 9, 255));
+        assert!(ed.undo());
+        assert_eq!(ed.document().cel(0, 0).unwrap()[5], Rgba::CLEAR);
     }
 
     /// A 4×4 canvas with a tilemap layer of 2×2 tiles on top, active.

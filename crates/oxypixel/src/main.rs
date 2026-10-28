@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 mod app;
+mod bridge;
 mod cache;
 mod canvas;
 mod cli;

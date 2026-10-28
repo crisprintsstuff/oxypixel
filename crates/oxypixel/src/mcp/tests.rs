@@ -525,7 +525,10 @@ fn root_keeps_tools_inside_their_folder() {
     let dir = TempDir::new("root");
     let inner = dir.0.join("work");
     std::fs::create_dir_all(&inner).unwrap();
-    let paths = Paths { root: Some(&inner) };
+    let paths = Paths {
+        root: Some(&inner),
+        bridge: None,
+    };
     assert_eq!(paths.resolve("a.oxypix").unwrap(), inner.join("a.oxypix"));
     assert!(paths
         .resolve("../a.oxypix")
@@ -540,7 +543,10 @@ fn root_keeps_tools_inside_their_folder() {
         .unwrap_err()
         .contains("does not exist"));
     assert!(paths.resolve("  ").is_err());
-    let open = Paths { root: None };
+    let open = Paths {
+        root: None,
+        bridge: None,
+    };
     assert_eq!(
         open.resolve(dir.0.join("a.oxypix").to_str().unwrap())
             .unwrap(),
@@ -634,4 +640,65 @@ fn tilemap_layers_are_listed_and_drawing_edits_their_tiles() {
     // Both cells hold tile 1, so the pixel shows in both.
     assert_eq!(pixel(&path, 0, 0, 0), Rgba::new(255, 0, 0, 255));
     assert_eq!(pixel(&path, 0, 2, 0), Rgba::new(255, 0, 0, 255));
+}
+
+#[test]
+fn tools_without_a_path_edit_the_open_document_over_the_bridge() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    let dir = TempDir::new("bridge");
+    let info = dir.0.join("bridge.txt");
+    // Without the editor, a call with no path explains how to turn the bridge on.
+    let mut server = Server::new(Some(dir.0.clone())).with_bridge(info.clone());
+    let (err, text, _) = call(&mut server, "document_info", json!({}));
+    assert!(err && text.contains("Live MCP bridge"), "{text}");
+
+    // A stand-in for the window: it owns the editor and answers the bridge.
+    let bridge = crate::bridge::BridgeServer::start_at(info.clone(), || {}).unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let flag = stop.clone();
+    let window = std::thread::spawn(move || {
+        let mut editor = oxypixel_core::Editor::new(8, 4).unwrap();
+        let mut lent = crate::bridge::Lent::default();
+        let mut applied = 0;
+        while !flag.load(Ordering::Relaxed) {
+            while let Some(request) = bridge.poll() {
+                applied += usize::from(lent.answer(request, &mut editor));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        (editor, applied)
+    });
+    let (err, text, _) = call(&mut server, "document_info", json!({}));
+    assert!(!err, "{text}");
+    let info_json: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(info_json["width"], 8);
+    let (err, text, _) = call(
+        &mut server,
+        "draw",
+        json!({ "color": "#FF0000", "operations": [{ "op": "pixels", "points": [[2, 1]] }] }),
+    );
+    assert!(
+        !err && text.contains("the document open in OxyPixel"),
+        "{text}"
+    );
+    // Exports still write files, from the open document.
+    let (err, text, _) = call(
+        &mut server,
+        "export",
+        json!({ "output": "live.png", "format": "png" }),
+    );
+    assert!(!err, "{text}");
+    assert!(dir.0.join("live.png").is_file());
+    stop.store(true, Ordering::Relaxed);
+    let (mut editor, applied) = window.join().unwrap();
+    assert_eq!(applied, 1, "only the draw changed the document");
+    assert_eq!(
+        editor.document().cel(0, 0).unwrap()[8 + 2],
+        Rgba::new(255, 0, 0, 255)
+    );
+    assert!(editor.undo(), "the assistant's change is one undo step");
+    assert_eq!(editor.document().cel(0, 0).unwrap()[8 + 2], Rgba::CLEAR);
+    assert!(!info.exists() || std::fs::metadata(&info).is_ok());
 }

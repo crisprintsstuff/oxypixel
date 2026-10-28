@@ -157,6 +157,14 @@ impl SettingsWindow {
                         });
                         ui.end_row();
                     });
+                    section(ui, "AI assistants", |ui| {
+                        ui.label("Live MCP bridge");
+                        ui.checkbox(&mut draft.live_bridge, "Let oxypixel mcp edit the open document")
+                            .on_hover_text(
+                                "An AI assistant using oxypixel mcp can read and change the document in this window. Each change is one undo step. Only programs run by you on this computer can connect.",
+                            );
+                        ui.end_row();
+                    });
                     section(ui, "Updates", |ui| {
                         ui.label("Automatic updates");
                         ui.checkbox(&mut draft.auto_update, "Check once a day at launch")

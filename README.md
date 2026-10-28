@@ -296,6 +296,12 @@ Claude Desktop, in `claude_desktop_config.json`. On Windows, set `command` to th
 
 Then ask, for example: "Make a 16×16 coin in coin.oxypix with a four-frame spin, tag it spin, and export a spritesheet with JSON."
 
+### Working on the open document
+
+Turn on Edit, then Settings…, AI assistants, Live MCP bridge. While it is on, a tool called without `path` works on the document open in the OxyPixel window instead of a file: the assistant can look at it with `render`, draw on it, change layers, frames, tags, and the palette, and export it. Each change it makes is one step in the window's undo history, and the status line says when it happens. If you edit the document between the assistant reading it and writing it back, the change is refused and the assistant reads it again, so your edit is never lost.
+
+The bridge listens only on 127.0.0.1, on a port picked at launch, and writes that port and a random token to `bridge.txt` in the OxyPixel data folder (on Linux, readable only by you). `oxypixel mcp` reads that file to connect, so only programs you run on the same computer can use it, and only while the window is open with the setting on.
+
 ## Build from source
 
 Rust 1.99.0 is pinned in `rust-toolchain.toml`.

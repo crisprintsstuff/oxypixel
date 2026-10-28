@@ -3,14 +3,14 @@
 //! saves it again. Files named as outputs are never replaced unless the call
 //! says `overwrite: true`.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use oxypack::{counted, pack_files, write_atlas, PackOptions, Packer};
 use oxypixel_core::{
     export_bmp, export_gif, export_gif_per_tag, export_png_scaled, export_sheet_files, load_oxypix,
-    save_oxypix, tag_paths, BlendMode, Document, Editor, FrameTag, LoopDirection, MouseButton,
-    Rgba, SheetFiles, SheetLayout, Tool, MAX_BRUSH, MAX_DIMENSION, MAX_FRAME_MS, MAX_PALETTE,
-    MIN_FRAME_MS,
+    load_oxypix_bytes, save_oxypix, save_oxypix_bytes, tag_paths, BlendMode, Document, Editor,
+    FrameTag, LoopDirection, MouseButton, Rgba, SheetFiles, SheetLayout, Tool, MAX_BRUSH,
+    MAX_DIMENSION, MAX_FRAME_MS, MAX_PALETTE, MIN_FRAME_MS,
 };
 use serde_json::{json, Map, Value};
 
@@ -43,7 +43,7 @@ const RENDER_TARGET: u32 = 512;
 
 /// The tool list for `tools/list`.
 pub(crate) fn list() -> Vec<Value> {
-    let path = json!({ "type": "string", "description": "Path to a .oxypix document." });
+    let path = json!({ "type": "string", "description": "Path to a .oxypix document. Leave it out to use the document open in the OxyPixel window (its Live MCP bridge setting must be on)." });
     let frame = json!({ "type": "integer", "minimum": 0, "description": "Frame index, from 0. Defaults to 0." });
     let overwrite = json!({ "type": "boolean", "description": "Replace the output file if it exists. Defaults to false." });
     let point =
@@ -55,7 +55,7 @@ pub(crate) fn list() -> Vec<Value> {
             "Document info",
             "Describe a .oxypix document: size, layers (bottom first), frames with durations and names, tags, and palette.",
             json!({ "path": path }),
-            &["path"],
+            &[],
             true,
         ),
         tool(
@@ -67,7 +67,7 @@ pub(crate) fn list() -> Vec<Value> {
                 "frame": frame,
                 "scale": { "type": "integer", "minimum": 1, "maximum": 64, "description": "Whole-number scale. Defaults to fitting about 512 pixels." },
             }),
-            &["path"],
+            &[],
             true,
         ),
         tool(
@@ -116,7 +116,7 @@ pub(crate) fn list() -> Vec<Value> {
                     },
                 },
             }),
-            &["path", "operations"],
+            &["operations"],
             false,
         ),
         tool(
@@ -128,7 +128,7 @@ pub(crate) fn list() -> Vec<Value> {
                 "name": { "type": "string" },
                 "group": { "type": "boolean", "description": "Add a group instead of a layer. A group holds the layers moved into it and is drawn as one picture with its own opacity and blend mode." },
             }),
-            &["path"],
+            &[],
             false,
         ),
         tool(
@@ -146,7 +146,7 @@ pub(crate) fn list() -> Vec<Value> {
                 "group_into": { "type": "boolean", "description": "Move the layer (or group) into the group just below it, as its top layer." },
                 "group_out": { "type": "boolean", "description": "Move the layer (or group) out of its group, just above it." },
             }),
-            &["path", "layer"],
+            &["layer"],
             false,
         ),
         tool(
@@ -159,7 +159,7 @@ pub(crate) fn list() -> Vec<Value> {
                 "duration_ms": { "type": "integer", "minimum": MIN_FRAME_MS, "maximum": MAX_FRAME_MS },
                 "name": { "type": "string" },
             }),
-            &["path"],
+            &[],
             false,
         ),
         tool(
@@ -173,7 +173,7 @@ pub(crate) fn list() -> Vec<Value> {
                 "duration_ms": { "type": "integer", "minimum": MIN_FRAME_MS, "maximum": MAX_FRAME_MS },
                 "delete": { "type": "boolean", "description": "Delete the frame. The last frame cannot be deleted." },
             }),
-            &["path", "frame"],
+            &["frame"],
             false,
         ),
         tool(
@@ -197,7 +197,7 @@ pub(crate) fn list() -> Vec<Value> {
                     },
                 },
             }),
-            &["path", "tags"],
+            &["tags"],
             false,
         ),
         tool(
@@ -205,7 +205,7 @@ pub(crate) fn list() -> Vec<Value> {
             "Set the palette",
             "Replace the document palette with a list of colors.",
             json!({ "path": path, "colors": { "type": "array", "items": color, "minItems": 1, "maxItems": MAX_PALETTE } }),
-            &["path", "colors"],
+            &["colors"],
             false,
         ),
         tool(
@@ -226,7 +226,7 @@ pub(crate) fn list() -> Vec<Value> {
                 "per_tag": { "type": "boolean", "description": "gif and sheet only: one file per tag, named OUTPUT_<tag>." },
                 "overwrite": overwrite,
             }),
-            &["path", "output", "format"],
+            &["output", "format"],
             false,
         ),
         tool(
@@ -352,14 +352,49 @@ fn point(value: Option<&Value>, key: &str) -> Result<(i32, i32), String> {
     Ok((coords.0 as i32, coords.1 as i32))
 }
 
-fn load(paths: &Paths, args: &Args) -> Result<(PathBuf, Document), String> {
-    let path = paths.resolve(string(args, "path")?)?;
-    let doc = load_oxypix(&path).map_err(|err| format!("{}: {err}", path.display()))?;
-    Ok((path, doc))
+/// Where a tool's document came from: a file, or the editor window over the
+/// live bridge (with the id of the copy it lent).
+enum Source {
+    File(PathBuf),
+    Live(u64),
 }
 
-fn save(path: &Path, doc: &Document) -> Result<(), String> {
-    save_oxypix(doc, path).map_err(|err| format!("{}: {err}", path.display()))
+impl std::fmt::Display for Source {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::File(path) => write!(f, "{}", path.display()),
+            Self::Live(_) => f.write_str("the document open in OxyPixel"),
+        }
+    }
+}
+
+/// The document at `path`, or the one open in the editor when there is no path.
+fn load(paths: &Paths, args: &Args) -> Result<(Source, Document), String> {
+    match opt_string(args, "path")? {
+        Some(text) => {
+            let path = paths.resolve(text)?;
+            let doc = load_oxypix(&path).map_err(|err| format!("{}: {err}", path.display()))?;
+            Ok((Source::File(path), doc))
+        }
+        None => {
+            let (id, bytes) = crate::bridge::fetch(paths.bridge())?;
+            let doc =
+                load_oxypix_bytes(&bytes).map_err(|err| format!("the open document: {err}"))?;
+            Ok((Source::Live(id), doc))
+        }
+    }
+}
+
+fn save(source: &Source, doc: &Document, paths: &Paths) -> Result<(), String> {
+    match source {
+        Source::File(path) => {
+            save_oxypix(doc, path).map_err(|err| format!("{}: {err}", path.display()))
+        }
+        Source::Live(id) => {
+            let bytes = save_oxypix_bytes(doc).map_err(|err| err.to_string())?;
+            crate::bridge::push(paths.bridge(), *id, &bytes)
+        }
+    }
 }
 
 fn frame_index(args: &Args, doc: &Document) -> Result<usize, String> {
@@ -513,10 +548,11 @@ fn create_document(args: &Args, paths: &Paths) -> ToolResult {
         editor.pointer_down(0, 0, MouseButton::Primary, false);
         editor.pointer_up(0, 0, false);
     }
-    save(&path, editor.document())?;
+    let path = Source::File(path);
+    save(&path, editor.document(), paths)?;
     Ok(Output::text(format!(
         "Created {} ({width}×{height}, 1 layer, 1 frame).",
-        path.display()
+        path
     )))
 }
 
@@ -551,11 +587,11 @@ fn draw(args: &Args, paths: &Paths) -> ToolResult {
         apply(&mut editor, op, base, brush, &mut points_used)
             .map_err(|err| format!("operation {n}: {err}"))?;
     }
-    save(&path, editor.document())?;
+    save(&path, editor.document(), paths)?;
     Ok(Output::text(format!(
         "Drew {} on layer {layer} of frame {frame} and saved {}.",
         counted(operations.len(), "operation", "operations"),
-        path.display()
+        path
     )))
 }
 
@@ -669,7 +705,7 @@ fn add_layer(args: &Args, paths: &Paths) -> ToolResult {
         editor.rename_layer(name);
     }
     let index = editor.document().active_layer();
-    save(&path, editor.document())?;
+    save(&path, editor.document(), paths)?;
     Ok(Output::text(format!("Added layer {index} and saved.")))
 }
 
@@ -682,7 +718,7 @@ fn set_layer(args: &Args, paths: &Paths) -> ToolResult {
         .map_err(|err| err.to_string())?;
     if opt_bool(args, "delete")?.unwrap_or(false) {
         editor.delete_layer().map_err(|err| err.to_string())?;
-        save(&path, editor.document())?;
+        save(&path, editor.document(), paths)?;
         return Ok(Output::text(format!("Deleted layer {layer} and saved.")));
     }
     if let Some(name) = opt_string(args, "name")? {
@@ -705,7 +741,7 @@ fn set_layer(args: &Args, paths: &Paths) -> ToolResult {
             BlendMode::from_name(name).ok_or_else(|| format!("unknown blend mode {name}"))?;
         editor.set_layer_blend(mode);
     }
-    save(&path, editor.document())?;
+    save(&path, editor.document(), paths)?;
     Ok(Output::text(format!("Updated layer {layer} and saved.")))
 }
 
@@ -736,7 +772,7 @@ fn add_frame(args: &Args, paths: &Paths) -> ToolResult {
     if let Some(name) = opt_string(args, "name")? {
         editor.rename_frame(name);
     }
-    save(&path, editor.document())?;
+    save(&path, editor.document(), paths)?;
     Ok(Output::text(format!("Added frame {index} and saved.")))
 }
 
@@ -749,7 +785,7 @@ fn set_frame(args: &Args, paths: &Paths) -> ToolResult {
         .map_err(|err| err.to_string())?;
     if opt_bool(args, "delete")?.unwrap_or(false) {
         editor.delete_frame().map_err(|err| err.to_string())?;
-        save(&path, editor.document())?;
+        save(&path, editor.document(), paths)?;
         return Ok(Output::text(format!("Deleted frame {frame} and saved.")));
     }
     if let Some(ms) = opt_int(
@@ -763,7 +799,7 @@ fn set_frame(args: &Args, paths: &Paths) -> ToolResult {
     if let Some(name) = opt_string(args, "name")? {
         editor.rename_frame(name);
     }
-    save(&path, editor.document())?;
+    save(&path, editor.document(), paths)?;
     Ok(Output::text(format!("Updated frame {frame} and saved.")))
 }
 
@@ -801,7 +837,7 @@ fn set_tags(args: &Args, paths: &Paths) -> ToolResult {
             .add_tag(tag)
             .map_err(|err| format!("tag {n}: {err}"))?;
     }
-    save(&path, editor.document())?;
+    save(&path, editor.document(), paths)?;
     Ok(Output::text(format!(
         "Saved {}.",
         counted(editor.document().tags().len(), "tag", "tags")
@@ -824,7 +860,7 @@ fn set_palette(args: &Args, paths: &Paths) -> ToolResult {
         .collect::<Result<Vec<_>, _>>()?;
     let mut editor = Editor::from_document(doc);
     editor.set_palette(colors).map_err(|err| err.to_string())?;
-    save(&path, editor.document())?;
+    save(&path, editor.document(), paths)?;
     Ok(Output::text(format!(
         "Saved a palette of {}.",
         counted(editor.document().palette().len(), "color", "colors")

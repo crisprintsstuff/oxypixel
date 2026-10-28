@@ -12,6 +12,7 @@ use oxypixel_core::{
     Transform, MAX_DIMENSION, MAX_FRAMES, MAX_SHEET_PADDING,
 };
 
+use crate::bridge;
 use crate::cache::FrameComposites;
 use crate::canvas::{self, ViewState, ONION_FRAME_CAP};
 use crate::clipboard::{self, ClipboardRead};
@@ -151,6 +152,11 @@ pub struct OxyApp {
     /// downloads a newer release without opening the window.
     update_auto: bool,
     prefs: session::Prefs,
+    /// The live MCP bridge, while Settings has it on.
+    bridge: Option<bridge::BridgeServer>,
+    lent: bridge::Lent,
+    /// The bridge could not start; it is not tried again until turned off and on.
+    bridge_failed: bool,
     /// Points per pixel last frame, to refit the canvas when it changes.
     last_scale: f32,
     /// The last copy did not reach the system clipboard, so paste must keep
@@ -259,6 +265,9 @@ impl OxyApp {
             update_rx: None,
             update_auto: false,
             prefs,
+            bridge: None,
+            lent: bridge::Lent::default(),
+            bridge_failed: false,
             last_scale: 0.0,
             clipboard_local_only: false,
             clipboard_chord: shortcuts::ClipboardChord::default(),
@@ -453,6 +462,7 @@ impl eframe::App for OxyApp {
             self.pending = Some(Pending::Quit);
             self.dialog = Some(DialogKind::Unsaved);
         }
+        self.serve_bridge(ctx);
         self.tick_playback(ctx);
         self.preview_panel.tick(ctx, &self.editor);
         self.handle_drops(ctx);
@@ -822,6 +832,31 @@ impl OxyApp {
 
     /// Bring the view in line with the settings. `old` is what they were, so
     /// only what changed is touched; `None` applies everything (at launch).
+    /// Start or stop the live MCP bridge to match Settings, and answer what
+    /// it has queued.
+    fn serve_bridge(&mut self, ctx: &egui::Context) {
+        if !self.prefs.live_bridge {
+            self.bridge = None;
+            self.bridge_failed = false;
+            return;
+        }
+        if self.bridge.is_none() && !self.bridge_failed {
+            let wake = ctx.clone();
+            match bridge::BridgeServer::start(move || wake.request_repaint()) {
+                Ok(server) => self.bridge = Some(server),
+                Err(err) => {
+                    self.bridge_failed = true;
+                    self.note_err(format!("The live MCP bridge could not start: {err}"));
+                }
+            }
+        }
+        while let Some(request) = self.bridge.as_ref().and_then(bridge::BridgeServer::poll) {
+            if self.lent.answer(request, &mut self.editor) {
+                self.note_ok("An AI assistant changed the document. Undo takes it back.");
+            }
+        }
+    }
+
     fn apply_view_prefs(&mut self, ctx: &egui::Context, old: Option<session::Prefs>) {
         let prefs = self.prefs;
         let changed =

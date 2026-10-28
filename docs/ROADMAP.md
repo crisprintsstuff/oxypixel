@@ -297,6 +297,12 @@ A tilemap layer names a tileset (`LayerInfo::tileset`) and each of its cels keep
 
 Not yet: removing unused tiles, reordering tiles, and opening Aseprite tilemap layers as tilemaps (they open as plain layers).
 
+### OX-P32
+
+**Live MCP bridge.** Status: done. Area: `crates/oxypixel/src/bridge.rs`, `crates/oxypixel/src/mcp/`, `crates/oxypixel/src/app.rs`, `crates/oxypixel-core/src/editor.rs` (`apply_external`).
+
+Settings has Live MCP bridge, off by default. When it is on, the window listens on a random 127.0.0.1 port and writes `bridge.txt` (port and a random token, mode 600 on Unix) in its data folder; turning it off or quitting removes the file. An MCP tool called without `path` fetches the open document as `.oxypix` bytes, runs exactly as it does on a file (so `--root`, overwrite checks, and exports are unchanged), and puts the result back. The window keeps the copies it lent and refuses a put when its document changed since that copy (frame and layer selection aside); an accepted put is one undo step and keeps the view's frame and layer. Requests are answered on the UI thread, woken by a repaint request. Tested in `bridge.rs` (stale and conflicting puts, a wrong token, the file mode) and `mcp/tests.rs` (tools without a path against a running bridge, one undo step).
+
 ## Human only
 
 ### OX-H1
