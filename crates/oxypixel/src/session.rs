@@ -44,6 +44,9 @@ pub struct Prefs {
     pub onion_tint: bool,
     /// The PNG and spritesheet export scale it starts with, one of [`EXPORT_SCALES`].
     pub export_scale: u32,
+    /// Lend the open document to `oxypixel mcp` over the live bridge. Off
+    /// unless the user turns it on.
+    pub live_bridge: bool,
 }
 
 impl Default for Prefs {
@@ -62,6 +65,7 @@ impl Default for Prefs {
             onion_opacity: 80,
             onion_tint: true,
             export_scale: 1,
+            live_bridge: false,
         }
     }
 }
@@ -130,6 +134,7 @@ pub(crate) fn parse(text: &str) -> Prefs {
                     .unwrap_or(d.onion_opacity)
             }
             "onion_tint" => prefs.onion_tint = flag.unwrap_or(d.onion_tint),
+            "live_bridge" => prefs.live_bridge = flag.unwrap_or(d.live_bridge),
             "export_scale" => {
                 prefs.export_scale = number
                     .and_then(|n| u32::try_from(n).ok())
@@ -170,6 +175,7 @@ pub(crate) fn format(prefs: &Prefs) -> String {
         format!("onion_opacity={}", prefs.onion_opacity),
         format!("onion_tint={}", flag(prefs.onion_tint)),
         format!("export_scale={}", prefs.export_scale),
+        format!("live_bridge={}", flag(prefs.live_bridge)),
     ]
     .iter()
     .map(|line| format!("{line}\n"))
@@ -246,8 +252,10 @@ mod tests {
             onion_opacity: 200,
             onion_tint: false,
             export_scale: 4,
+            live_bridge: true,
         };
         assert_eq!(parse(&format(&prefs)), prefs);
+        assert!(!parse("").live_bridge, "the bridge starts off");
         assert_eq!(parse("last_update_check=-5\n").last_update_check, 0);
 
         let root = std::env::temp_dir().join("oxypixel-view-pref-test");

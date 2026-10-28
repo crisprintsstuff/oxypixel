@@ -109,11 +109,22 @@ pub(crate) fn serve(
 
 pub(crate) struct Server {
     root: Option<PathBuf>,
+    /// The bridge file a running editor writes, for tools called without a path.
+    bridge: Option<PathBuf>,
 }
 
 impl Server {
     pub(crate) fn new(root: Option<PathBuf>) -> Self {
-        Self { root }
+        Self {
+            root,
+            bridge: crate::bridge::info_path(),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_bridge(mut self, info: PathBuf) -> Self {
+        self.bridge = Some(info);
+        self
     }
 
     /// One message in, at most one reply out. Notifications get no reply.
@@ -159,6 +170,7 @@ impl Server {
             args,
             &Paths {
                 root: self.root.as_deref(),
+                bridge: self.bridge.as_deref(),
             },
         ) else {
             return error_reply(id, INVALID_PARAMS, &format!("unknown tool {name}"));
@@ -199,16 +211,21 @@ fn initialize(params: &Value) -> Value {
             "title": "OxyPixel",
             "version": env!("CARGO_PKG_VERSION"),
         },
-        "instructions": "Tools for OxyPixel pixel-art documents (.oxypix). Coordinates are pixels from the top left, frames and layers count from 0, and layer 0 is the bottom. Colors are #RRGGBB or #RRGGBBAA. Use render to look at a frame after drawing. Editing tools save the document in place; create_document, export, and pack_sprites refuse to replace an existing file unless overwrite is true.",
+        "instructions": "Tools for OxyPixel pixel-art documents (.oxypix). Coordinates are pixels from the top left, frames and layers count from 0, and layer 0 is the bottom. Colors are #RRGGBB or #RRGGBBAA. Use render to look at a frame after drawing. Editing tools save the document in place. Leave out path to work on the document open in the OxyPixel window, when its Live MCP bridge setting is on; each such call is one undo step there. create_document, export, and pack_sprites refuse to replace an existing file unless overwrite is true.",
     })
 }
 
 /// Where tools may read and write.
 pub(crate) struct Paths<'a> {
     root: Option<&'a Path>,
+    bridge: Option<&'a Path>,
 }
 
 impl Paths<'_> {
+    pub(crate) fn bridge(&self) -> Option<&Path> {
+        self.bridge
+    }
+
     /// A path a tool was given, made absolute and checked against `--root`.
     /// The file itself need not exist yet, but its folder must.
     pub(crate) fn resolve(&self, text: &str) -> Result<PathBuf, String> {
