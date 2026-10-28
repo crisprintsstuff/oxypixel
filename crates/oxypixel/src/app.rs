@@ -83,8 +83,8 @@ enum Pending {
 }
 
 pub struct OxyApp {
-    editor: Editor,
-    view: ViewState,
+    pub(crate) editor: Editor,
+    pub(crate) view: ViewState,
     composites: FrameComposites,
     preview_panel: PreviewPanel,
     pack_window: crate::packview::PackWindow,
@@ -151,7 +151,7 @@ pub struct OxyApp {
     /// The running check started by itself at launch, not from the menu. It
     /// downloads a newer release without opening the window.
     update_auto: bool,
-    prefs: session::Prefs,
+    pub(crate) prefs: session::Prefs,
     /// The live MCP bridge, while Settings has it on.
     bridge: Option<bridge::BridgeServer>,
     lent: bridge::Lent,
@@ -190,7 +190,12 @@ enum UpdateMessage {
 
 impl OxyApp {
     pub fn new(cc: &eframe::CreationContext<'_>, open: Option<PathBuf>) -> Self {
-        crate::theme::apply(&cc.egui_ctx);
+        Self::with_context(&cc.egui_ctx, open)
+    }
+
+    /// The app on an egui context, without a window. Window tests use this.
+    pub(crate) fn with_context(ctx: &egui::Context, open: Option<PathBuf>) -> Self {
+        crate::theme::apply(ctx);
         let recent_files = recent::load();
         let last_dir = recent_files
             .first()
@@ -291,7 +296,7 @@ impl OxyApp {
             app.open_path(path);
         }
         app.scan_recoveries();
-        app.apply_view_prefs(&cc.egui_ctx, None);
+        app.apply_view_prefs(ctx, None);
         let now = session::now_secs();
         if session::update_check_due(&app.prefs, now) {
             app.prefs.last_update_check = now;
@@ -446,6 +451,17 @@ impl OxyApp {
 
 impl eframe::App for OxyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.frame(ctx);
+    }
+
+    fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {
+        self.exit(gl);
+    }
+}
+
+impl OxyApp {
+    /// One frame of the whole window: input, panels, dialogs.
+    pub(crate) fn frame(&mut self, ctx: &egui::Context) {
         ctx.send_viewport_cmd(ViewportCommand::Title(self.title()));
         // A new interface scale takes effect a frame after it is set, and the
         // canvas fit from before it no longer matches the panel.
@@ -507,7 +523,7 @@ impl eframe::App for OxyApp {
         self.consider_autosave(ctx);
     }
 
-    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+    fn exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         let pending_current = self
             .pending_recoveries
             .iter()

@@ -89,7 +89,19 @@ fn store_path() -> Option<PathBuf> {
     data_dir().map(|dir| dir.join("recent.txt"))
 }
 
+#[cfg(test)]
+thread_local! {
+    /// A data folder for window tests on this thread, so they never touch
+    /// the user's settings or recent files.
+    pub(crate) static TEST_DATA_DIR: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 pub fn data_dir() -> Option<PathBuf> {
+    #[cfg(test)]
+    if let Some(dir) = TEST_DATA_DIR.with(|dir| dir.borrow().clone()) {
+        return Some(dir);
+    }
     #[cfg(windows)]
     {
         std::env::var_os("APPDATA").map(|p| PathBuf::from(p).join("OxyPixel"))

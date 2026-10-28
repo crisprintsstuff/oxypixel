@@ -4,7 +4,9 @@ OxyPixel is a pixel-art editor for Windows and Linux. Drawing, layers, frames, u
 
 This file is the guide for people and coding agents working in this repository. Read it before editing. The task list is [docs/ROADMAP.md](docs/ROADMAP.md). The document model is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-OxyPixel is not a Photoshop-style command shell. There is no command registry, control socket, or MCP server. The editing seam is `oxypixel_core::Editor`. The window calls those methods. `cli::dispatch` handles export and exits. Do not add a second implementation of a tool in the GUI.
+OxyPixel is not a Photoshop-style command shell. There is no command registry. The editing seam is `oxypixel_core::Editor`. The window calls those methods, and so does the MCP server (`oxypixel mcp`), on a file or, through the opt-in live bridge (`bridge.rs`), on the open document. `cli::dispatch` handles export and exits. Do not add a second implementation of a tool in the GUI or the MCP server.
+
+Window behavior is tested headlessly with `crates/oxypixel/src/harness.rs`: the whole app runs on an egui context with no window or GPU, input is sent as egui events, and widgets are found by the text they draw. Add a harness test for a change a user would see in the window.
 
 ## Orientation
 

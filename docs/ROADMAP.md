@@ -55,7 +55,7 @@ In the 0.9.5 tree and covered by tests or by the release workflow.
 | File dialogs | Windows system dialog. Linux XDG portal, then the path field | No macOS build |
 | Linux packages | The release archive and a `.deb` (desktop entry, 32×32 icon, `.oxypix` mime type) are built and uploaded. See [OX-P2](#ox-p2) | RPM, AppImage, and Flatpak are only described in [LINUX-PACKAGING.md](LINUX-PACKAGING.md) |
 | Code signing | `docs/BUILD-WINDOWS.md` tells a human how to run `signtool` | No certificate in the repo or in CI. See [OX-H1](#ox-h1) |
-| GUI checks | Canvas math, shortcuts, the CLI, and a headless hash of the built-in example's composite against `crates/oxypixel-core/tests/golden/` | Nothing clicks the window. Refresh that golden with the command in [OX-P3](#ox-p3) |
+| GUI checks | Canvas math, shortcuts, the CLI, a headless hash of the built-in example's composite against `crates/oxypixel-core/tests/golden/`, and window tests that click, drag, and type into the whole app headlessly ([OX-P33](#ox-p33)) | Nothing checks the pixels the GPU draws. Refresh that golden with the command in [OX-P3](#ox-p3) |
 
 ### Missing
 
@@ -302,6 +302,12 @@ Not yet: removing unused tiles, reordering tiles, and opening Aseprite tilemap l
 **Live MCP bridge.** Status: done. Area: `crates/oxypixel/src/bridge.rs`, `crates/oxypixel/src/mcp/`, `crates/oxypixel/src/app.rs`, `crates/oxypixel-core/src/editor.rs` (`apply_external`).
 
 Settings has Live MCP bridge, off by default. When it is on, the window listens on a random 127.0.0.1 port and writes `bridge.txt` (port and a random token, mode 600 on Unix) in its data folder; turning it off or quitting removes the file. An MCP tool called without `path` fetches the open document as `.oxypix` bytes, runs exactly as it does on a file (so `--root`, overwrite checks, and exports are unchanged), and puts the result back. The window keeps the copies it lent and refuses a put when its document changed since that copy (frame and layer selection aside); an accepted put is one undo step and keeps the view's frame and layer. Requests are answered on the UI thread, woken by a repaint request. Tested in `bridge.rs` (stale and conflicting puts, a wrong token, the file mode) and `mcp/tests.rs` (tools without a path against a running bridge, one undo step).
+
+### OX-P33
+
+**Window test harness.** Status: done. Area: `crates/oxypixel/src/harness.rs`, `app.rs` (`OxyApp::with_context`, `OxyApp::frame`), `recent.rs`.
+
+`Harness` runs the whole app on a headless `egui::Context` at 1280×800 and sends it egui input events: clicks, drags that move in 2-point steps like a mouse, and keys. It finds widgets by the text they paint (the frame's text shapes), waiting for a newly opened window to stop moving, and maps canvas pixels to screen points from the view's zoom and pan. Each harness uses a fresh temporary data folder through a per-thread override of `recent::data_dir`, so tests never touch the user's settings, recent files, recovery copies, or bridge file. No window, GPU, display, or new dependency is needed, so it runs in CI on Linux and Windows. Tests cover the panels at launch, drawing and undo, Edit → Replace color…, Tilemap… and tile mode on the canvas, tool shortcuts, the Settings window (and the saved `view.txt`), and the live bridge answering from the frame loop. Its first run found that a stroke at low zoom skipped the pixels before egui's drag threshold; strokes now start where the button went down.
 
 ## Human only
 
