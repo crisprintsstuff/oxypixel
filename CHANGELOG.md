@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- An AppImage, `OxyPixel-<version>-x86_64.AppImage`, is built and published with each release, with its checksum in `SHA256SUMS.txt`. Check for updates replaces it in place. A link to it named `oxypack` runs OxyPack.
+- A Flatpak manifest, `packaging/flatpak/io.github.crisprintsstuff.OxyPixel.yml`, with AppStream metainfo and a 256×256 icon. It builds a local Flatpak from the release archive. A Flatpak copy leaves updates to Flatpak.
 - Window tests: the whole app runs headlessly in the test suite, and tests click, drag, and press keys in it the way a person would.
 
 - A live MCP bridge. With Edit, then Settings…, AI assistants, Live MCP bridge turned on, the MCP tools work on the document open in the window when they are called without a `path`. Each change is one undo step in the window, and a change is refused if the document was edited by hand after the assistant read it. The bridge listens only on 127.0.0.1 and needs a random token from a file only the user can read. It is off unless turned on.

@@ -2,8 +2,9 @@
 """Generate the original OxyPixel icon (16 and 32 px) as ICO and raw RGBA.
 
 The 32px image inside installer/oxypixel.ico is also written as the hicolor
-PNG the Linux .deb installs. `python3 scripts/gen_icon.py --check` compares
-that PNG to the ICO and does not write anything.
+PNG the Linux .deb installs, and the 16px art scaled 16 times as the 256px
+PNG the AppImage and Flatpak use. `python3 scripts/gen_icon.py --check`
+compares both PNGs to the art and does not write anything.
 """
 
 import struct
@@ -208,6 +209,40 @@ def read_png_rows(path):
     return rows
 
 
+def scale(rows, factor):
+    out = []
+    for row in rows:
+        wide = [px for px in row for _ in range(factor)]
+        out.extend(list(wide) for _ in range(factor))
+    return out
+
+
+def large_png():
+    return ROOT / "docs" / "linux" / "oxypixel-256.png"
+
+
+def check_large():
+    data = large_png().read_bytes()
+    width, height = struct.unpack(">II", data[16:24])
+    if (width, height) != (256, 256):
+        raise SystemExit(f"{large_png()} is {width}x{height}, expected 256x256")
+    pos = 8
+    idat = bytearray()
+    while pos + 8 <= len(data):
+        length = int.from_bytes(data[pos : pos + 4], "big")
+        tag = data[pos + 4 : pos + 8]
+        if tag == b"IDAT":
+            idat.extend(data[pos + 8 : pos + 8 + length])
+        pos += 12 + length
+    raw = zlib.decompress(bytes(idat))
+    expected = scale(pixels16(), 16)
+    stride = 256 * 4 + 1
+    for y, row in enumerate(expected):
+        line = raw[y * stride : (y + 1) * stride]
+        if line[0] != 0 or bytes(line[1:]) != rgba_bytes([row]):
+            raise SystemExit(f"{large_png()} does not match the icon art")
+
+
 def hicolor_png():
     return ROOT / "docs" / "linux" / "oxypixel.png"
 
@@ -244,13 +279,16 @@ def main():
         path.write_bytes(icon)
     (ROOT / "crates" / "oxypixel" / "assets" / "icon32.rgba").write_bytes(rgba_bytes(large))
     export_hicolor()
+    write_png(large_png(), scale(small, 16))
     check_hicolor()
+    check_large()
     print(f"wrote {len(icon)} byte icon")
 
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--check":
         check_hicolor()
-        print("hicolor icon matches installer/oxypixel.ico")
+        check_large()
+        print("hicolor icons match the icon art")
     else:
         main()

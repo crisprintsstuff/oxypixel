@@ -3147,8 +3147,20 @@ impl OxyApp {
                     update::replace_and_restart(&current, &program, reopen.as_deref())
                 })
             }
+            PackageKind::AppImage => match update::appimage_path() {
+                Some(current) => std::fs::read(&path)
+                    .map_err(|err| err.to_string())
+                    .and_then(|bytes| {
+                        update::replace_and_restart(&current, &bytes, reopen.as_deref())
+                    }),
+                None => Err("cannot find the AppImage file this copy runs from".to_string()),
+            },
             PackageKind::LinuxDeb => Err(
                 "This copy is the Debian package in /usr/bin. Install the downloaded package with your package manager."
+                    .to_string(),
+            ),
+            PackageKind::Flatpak => Err(
+                "This copy is a Flatpak. Update it with your software center or flatpak update."
                     .to_string(),
             ),
         };
@@ -3526,15 +3538,19 @@ impl OxyApp {
                             egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
                                 ui.label(report.release.notes.clone());
                             });
-                            if report.asset.is_none() || report.checksums.is_none() {
+                            if report.package == PackageKind::Flatpak {
+                                ui.label("This copy is a Flatpak. Update it with your software center or flatpak update.");
+                            } else if report.asset.is_none() || report.checksums.is_none() {
                                 ui.label("This release does not include a checksummed file for this system.");
                             } else if let Some(path) = &self.update_file {
                                 ui.label(format!("Checksum matched. Saved to {}.", path.display()));
                                 let action = match report.package {
                                     PackageKind::WindowsInstaller => Some("Open installer"),
                                     PackageKind::WindowsPortable => Some("Restart and update"),
-                                    PackageKind::LinuxArchive => Some("Replace this copy and restart"),
-                                    PackageKind::LinuxDeb => None,
+                                    PackageKind::LinuxArchive | PackageKind::AppImage => {
+                                        Some("Replace this copy and restart")
+                                    }
+                                    PackageKind::LinuxDeb | PackageKind::Flatpak => None,
                                 };
                                 if let Some(action) = action {
                                     if ui.button(action).clicked() {

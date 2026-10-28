@@ -34,7 +34,7 @@ The pictures above are screenshots of OxyPixel 0.9.0. The drawing is a sample fi
 
 ## Status
 
-OxyPixel 0.9.5 is an early release. The Windows downloads are unsigned. Linux publishes a tar.gz and a `.deb`. A canvas side is at most 1024 pixels. What works today, and the open task list, is in [docs/ROADMAP.md](docs/ROADMAP.md).
+OxyPixel 0.9.5 is an early release. The Windows downloads are unsigned. Linux publishes a tar.gz, a `.deb`, and an AppImage. A canvas side is at most 1024 pixels. What works today, and the open task list, is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Download
 
@@ -46,6 +46,7 @@ The files for the current release are on the [latest release](https://github.com
 | `oxypixel-<version>-windows-x86_64.exe` | Portable Windows executable |
 | `oxypixel-<version>-linux-x86_64.tar.gz` | Linux x86_64 archive |
 | `oxypixel-<version>-linux-x86_64.deb` | Linux Debian package |
+| `OxyPixel-<version>-x86_64.AppImage` | Linux AppImage: one file that runs on most distributions with glibc 2.39 or newer |
 | `oxypack-<version>-windows-x86_64.exe` | [OxyPack](#oxypack) sprite packer for Windows. The Linux archive and `.deb` include `oxypack` |
 | [`SHA256SUMS.txt`](https://github.com/crisprintsstuff/oxypixel/releases/latest/download/SHA256SUMS.txt) | Checksums for the editor downloads, used by Check for updates |
 | `SHA256SUMS-windows.txt`, `SHA256SUMS-linux.txt` | Checksums for each platform's files, including `oxypack-<version>-windows-x86_64.exe` |
@@ -90,6 +91,16 @@ sudo apt remove oxypixel
 ```
 
 On Ubuntu 24.04, `apt install` and `apt remove` were checked for a package built from this tree. Releases before the `.deb` was added published the tar.gz only.
+
+`OxyPixel-<version>-x86_64.AppImage` is one file. Make it executable and run it; it holds `oxypixel` and `oxypack`, a desktop file, and a 256×256 icon. It needs the same system libraries as the tar.gz, and FUSE 2 or 3 to mount itself (without FUSE, run it with `--appimage-extract-and-run`). A link to it named `oxypack` starts OxyPack:
+
+```bash
+chmod +x OxyPixel-0.9.5-x86_64.AppImage
+./OxyPixel-0.9.5-x86_64.AppImage
+ln -s OxyPixel-0.9.5-x86_64.AppImage oxypack && ./oxypack --help
+```
+
+A Flatpak manifest is in [packaging/flatpak/](packaging/flatpak/). It builds a local Flatpak from the release archive; OxyPixel is not on Flathub yet. See [docs/LINUX-PACKAGING.md](docs/LINUX-PACKAGING.md).
 
 The window needs an X11 display. It draws with Vulkan through wgpu when a Vulkan driver is installed (`libvulkan1` and, for example, `mesa-vulkan-drivers`), and otherwise falls back to OpenGL. It needs these libraries: `libGL.so.1`, `libX11.so.6`, `libxkbcommon.so.0`, and `libxkbcommon-x11.so.0`. Wayland copy and paste also loads `libwayland-client.so.0` when the compositor offers the data-control clipboard. The `.deb` depends on the packages that provide them (`libgl1`, `libx11-6`, `libxkbcommon0`, `libxkbcommon-x11-0`, `libxcb1`). Export commands do not need a display, and they read `.aseprite` files as well as `.oxypix`:
 
@@ -180,6 +191,8 @@ Help, then Check for updates, looks at the public releases on GitHub. If a newer
 - **Portable Windows copy:** replaces itself and restarts.
 - **Unpacked Linux copy:** replaces `oxypixel` from the new tar.gz and restarts.
 - **`.deb` copy** (`/usr/bin/oxypixel`): downloads the new `.deb` and leaves it for you to install with your package manager.
+- **AppImage:** replaces the AppImage file with the new one and restarts.
+- **Flatpak:** downloads nothing; Flatpak updates it.
 
 You have to save or discard the open drawing first.
 
@@ -332,6 +345,7 @@ oxypixel import-palette sprite.oxypix palette.gpl recolored.oxypix
 | [scripts/build-installer.sh](scripts/build-installer.sh) | `OxyPixel-<version>-Setup.exe` |
 | [scripts/package-linux.sh](scripts/package-linux.sh) | `oxypixel-<version>-linux-x86_64.tar.gz` |
 | [scripts/package-deb.sh](scripts/package-deb.sh) | `oxypixel-<version>-linux-x86_64.deb` |
+| [scripts/package-appimage.sh](scripts/package-appimage.sh) | `OxyPixel-<version>-x86_64.AppImage` (needs `squashfs-tools`) |
 
 `make test` runs the test suite. `make check` runs rustfmt, clippy, and the tests.
 

@@ -1,0 +1,44 @@
+# Flatpak manifest for OxyPixel. It repackages the published Linux release
+# archive (pinned by SHA-256) with the desktop file, icon, metainfo, and
+# MIME type from this checkout. Build and install it locally with:
+#
+#   flatpak-builder --user --install --force-clean build-flatpak \
+#     packaging/flatpak/io.github.crisprintsstuff.OxyPixel.yml
+#
+# See docs/LINUX-PACKAGING.md before submitting it to Flathub.
+app-id: io.github.crisprintsstuff.OxyPixel
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+command: oxypixel
+finish-args:
+  # The window is X11 only (egui's x11 feature), so it needs the X11 socket
+  # even in a Wayland session, where Xwayland provides it.
+  - --share=ipc
+  - --socket=x11
+  - --device=dri
+  # Documents are opened by path, from the command line and recent files,
+  # not only through the portal's file dialog.
+  - --filesystem=home
+modules:
+  - name: oxypixel
+    buildsystem: simple
+    sources:
+      - type: archive
+        url: https://github.com/crisprintsstuff/oxypixel/releases/download/v0.9.5/oxypixel-0.9.5-linux-x86_64.tar.gz
+        sha256: 0b7c6af57ec9cca1349f26f8304d16140d4994794cc6da201dbada970137039c
+        dest: release
+      - type: dir
+        path: ../..
+        dest: repo
+    build-commands:
+      - install -Dm755 release/oxypixel /app/bin/oxypixel
+      - install -Dm755 release/oxypack /app/bin/oxypack
+      - install -Dm644 repo/docs/linux/oxypixel-256.png /app/share/icons/hicolor/256x256/apps/io.github.crisprintsstuff.OxyPixel.png
+      - install -Dm644 repo/docs/linux/oxypixel.png /app/share/icons/hicolor/32x32/apps/io.github.crisprintsstuff.OxyPixel.png
+      - install -Dm644 repo/docs/linux/oxypixel.desktop /app/share/applications/io.github.crisprintsstuff.OxyPixel.desktop
+      # Flatpak exports only icons named after the app id.
+      - sed -i 's/^Icon=.*/Icon=io.github.crisprintsstuff.OxyPixel/' /app/share/applications/io.github.crisprintsstuff.OxyPixel.desktop
+      - install -Dm644 repo/docs/linux/io.github.crisprintsstuff.OxyPixel.metainfo.xml /app/share/metainfo/io.github.crisprintsstuff.OxyPixel.metainfo.xml
+      - install -Dm644 repo/docs/linux/oxypixel-mime.xml /app/share/mime/packages/io.github.crisprintsstuff.OxyPixel.xml
+      - install -Dm644 release/LICENSE /app/share/licenses/io.github.crisprintsstuff.OxyPixel/LICENSE

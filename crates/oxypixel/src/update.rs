@@ -53,6 +53,11 @@ pub enum PackageKind {
     LinuxArchive,
     /// The `.deb` copy installed at `/usr/bin/oxypixel`.
     LinuxDeb,
+    /// An AppImage. Its runtime sets `APPIMAGE` to the file's path, and an
+    /// update replaces that file.
+    AppImage,
+    /// A Flatpak install. Flatpak updates it; nothing is downloaded here.
+    Flatpak,
 }
 
 impl PackageKind {
@@ -64,6 +69,14 @@ impl PackageKind {
                 Self::WindowsPortable
             }
         } else {
+            let flatpak = std::env::var_os("FLATPAK_ID").is_some_and(|id| !id.is_empty())
+                || Path::new("/.flatpak-info").exists();
+            if flatpak {
+                return Self::Flatpak;
+            }
+            if appimage_path().is_some() {
+                return Self::AppImage;
+            }
             match std::env::current_exe() {
                 Ok(path) => Self::for_linux_exe(&path),
                 Err(_) => Self::LinuxArchive,
@@ -86,6 +99,9 @@ impl PackageKind {
             Self::WindowsInstaller => format!("OxyPixel-{version}-Setup.exe"),
             Self::LinuxArchive => format!("oxypixel-{version}-linux-x86_64.tar.gz"),
             Self::LinuxDeb => format!("oxypixel-{version}-linux-x86_64.deb"),
+            Self::AppImage => format!("OxyPixel-{version}-x86_64.AppImage"),
+            // Never published: a Flatpak is updated by Flatpak.
+            Self::Flatpak => String::new(),
         }
     }
 }
@@ -101,7 +117,17 @@ fn is_deb_install(path: &Path) -> bool {
     }
 }
 
+/// The AppImage file this copy runs from, as its runtime reports it.
+pub fn appimage_path() -> Option<std::path::PathBuf> {
+    std::env::var_os("APPIMAGE")
+        .map(std::path::PathBuf::from)
+        .filter(|path| path.is_absolute())
+}
+
 fn asset_for(release: &ReleaseInfo, kind: PackageKind) -> Option<ReleaseAsset> {
+    if kind == PackageKind::Flatpak {
+        return None;
+    }
     let name = kind.asset_name(release.version);
     release
         .assets
@@ -622,6 +648,8 @@ mod tests {
             PackageKind::WindowsInstaller => "OxyPixel-0.2.1-Setup.exe",
             PackageKind::LinuxArchive => "oxypixel-0.2.1-linux-x86_64.tar.gz",
             PackageKind::LinuxDeb => "oxypixel-0.2.1-linux-x86_64.deb",
+            PackageKind::AppImage => "OxyPixel-0.2.1-x86_64.AppImage",
+            PackageKind::Flatpak => return,
         };
         assert_eq!(report.asset.unwrap().name, expected);
     }
@@ -753,6 +781,10 @@ mod tests {
             PackageKind::LinuxDeb.asset_name(version),
             "oxypixel-0.3.2-linux-x86_64.deb"
         );
+        assert_eq!(
+            PackageKind::AppImage.asset_name(version),
+            "OxyPixel-0.3.2-x86_64.AppImage"
+        );
 
         let sums = "\
             aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  oxypixel-0.3.2-windows-x86_64.exe\n\
@@ -809,6 +841,11 @@ mod tests {
             asset_for(&release, PackageKind::LinuxDeb).unwrap().name,
             "oxypixel-0.3.2-linux-x86_64.deb"
         );
+        assert!(
+            asset_for(&release, PackageKind::Flatpak).is_none(),
+            "a Flatpak never downloads a release file"
+        );
+        assert!(asset_for(&release, PackageKind::AppImage).is_none());
         assert!(release
             .assets
             .iter()
