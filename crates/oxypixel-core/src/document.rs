@@ -11,6 +11,7 @@ use crate::limits::{
     MAX_TAGS,
 };
 use crate::tags::{self, FrameTag};
+use crate::tilemap::{Cel, Tileset};
 
 /// Name, visibility, opacity, and blend mode shared by every frame.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -27,6 +28,8 @@ pub struct LayerInfo {
     pub group: bool,
     /// How many groups this layer is inside. 0 is the top level.
     pub depth: u8,
+    /// On a tilemap layer, the tileset its grid refers to.
+    pub tileset: Option<u16>,
 }
 
 impl LayerInfo {
@@ -39,6 +42,7 @@ impl LayerInfo {
             blend: BlendMode::Normal,
             group: false,
             depth: 0,
+            tileset: None,
         }
     }
 }
@@ -71,8 +75,8 @@ pub(crate) struct Frame {
     pub duration_ms: u32,
     /// Empty when the frame has no name. Saved in `.oxypix` version 2.
     pub name: String,
-    /// One buffer per layer, row-major, length `width * height`.
-    pub cels: Vec<Vec<Rgba>>,
+    /// One cel per layer, row-major pixels of length `width * height`.
+    pub cels: Vec<Cel>,
 }
 
 /// A pixel-art document. Fields stay private so the layer/frame invariant holds.
@@ -87,6 +91,8 @@ pub struct Document {
     palette: Vec<Rgba>,
     /// Animation tags. A document with any is saved as `.oxypix` version 2.
     tags: Vec<FrameTag>,
+    /// The tilesets tilemap layers draw from.
+    tilesets: Vec<Tileset>,
 }
 
 impl Document {
@@ -99,12 +105,13 @@ impl Document {
             frames: vec![Frame {
                 duration_ms: DEFAULT_FRAME_MS,
                 name: String::new(),
-                cels: vec![vec![Rgba::CLEAR; (width * height) as usize]],
+                cels: vec![vec![Rgba::CLEAR; (width * height) as usize].into()],
             }],
             active_frame: 0,
             active_layer: 0,
             palette: default_palette(),
             tags: Vec::new(),
+            tilesets: Vec::new(),
         })
     }
 
@@ -112,7 +119,7 @@ impl Document {
     pub fn demo() -> Result<Self> {
         let mut doc = Self::new(32, 32)?;
         doc.layers[0].name = "Paper".to_string();
-        for px in &mut doc.frames[0].cels[0] {
+        for px in doc.frames[0].cels[0].iter_mut() {
             *px = Rgba::new(20, 22, 30, 255);
         }
         doc.add_layer("Mark")?;
@@ -265,7 +272,20 @@ impl Document {
     }
 
     pub fn pixel_bytes(&self) -> usize {
-        self.frames.len() * self.layers.len() * (self.width as usize) * (self.height as usize) * 4
+        let cels =
+            self.frames.len() * self.layers.len() * (self.width as usize) * (self.height as usize);
+        let tiles: usize = self
+            .tilesets
+            .iter()
+            .map(|set| set.len() * set.tile_pixels())
+            .sum();
+        let grids: usize = self
+            .frames
+            .iter()
+            .flat_map(|frame| &frame.cels)
+            .filter_map(|cel| cel.tiles.as_ref().map(Vec::len))
+            .sum();
+        (cels + tiles + grids) * 4
     }
 
     #[cfg(test)]
@@ -290,7 +310,7 @@ impl Document {
         self.frames
             .get(frame)
             .and_then(|f| f.cels.get(layer))
-            .map(Vec::as_slice)
+            .map(|cel| cel.pixels.as_slice())
             .ok_or(Error::Index { what: "cel" })
     }
 
@@ -304,7 +324,7 @@ impl Document {
         self.frames
             .get_mut(frame)
             .and_then(|f| f.cels.get_mut(layer))
-            .map(Vec::as_mut_slice)
+            .map(|cel| cel.pixels.as_mut_slice())
             .ok_or(Error::Index { what: "cel" })
     }
 
@@ -340,7 +360,7 @@ impl Document {
         self.layers.push(LayerInfo::new(name));
         let len = (self.width * self.height) as usize;
         for frame in &mut self.frames {
-            frame.cels.push(vec![Rgba::CLEAR; len]);
+            frame.cels.push(vec![Rgba::CLEAR; len].into());
         }
         self.active_layer = self.layers.len() - 1;
         Ok(())
@@ -397,7 +417,7 @@ impl Document {
         self.layers.insert(index, group);
         let len = (self.width * self.height) as usize;
         for frame in &mut self.frames {
-            frame.cels.insert(index, vec![Rgba::CLEAR; len]);
+            frame.cels.insert(index, vec![Rgba::CLEAR; len].into());
         }
         self.active_layer = index;
         Ok(())
@@ -484,7 +504,7 @@ impl Document {
     fn reorder(&mut self, order: &[usize]) {
         self.layers = order.iter().map(|&old| self.layers[old].clone()).collect();
         for frame in &mut self.frames {
-            let mut old: Vec<Option<Vec<Rgba>>> = std::mem::take(&mut frame.cels)
+            let mut old: Vec<Option<Cel>> = std::mem::take(&mut frame.cels)
                 .into_iter()
                 .map(Some)
                 .collect();
@@ -558,7 +578,7 @@ impl Document {
         block[0].name = clamp_name(&format!("{} copy", block[0].name));
         self.layers.splice(end..end, block);
         for frame in &mut self.frames {
-            let copy: Vec<Vec<Rgba>> = frame.cels[index..end].to_vec();
+            let copy: Vec<Cel> = frame.cels[index..end].to_vec();
             frame.cels.splice(end..end, copy);
         }
         self.active_layer = end;
@@ -636,6 +656,11 @@ impl Document {
                 "groups cannot be merged; merge the layers inside",
             ));
         }
+        if self.layers[below].tileset.is_some() {
+            return Err(Error::Tilemap(
+                "a layer cannot be merged into a tilemap layer",
+            ));
+        }
         // An image layer's block is itself, so the sibling below is index - 1.
         debug_assert_eq!(below, index - 1);
         let upper_opacity = self.layers[index].opacity;
@@ -662,8 +687,7 @@ impl Document {
             self.frames.len() + 1,
             self.layers.len(),
         )?;
-        let len = (self.width * self.height) as usize;
-        let cels = vec![vec![Rgba::CLEAR; len]; self.layers.len()];
+        let cels = self.blank_cels();
         self.frames.push(Frame {
             duration_ms: DEFAULT_FRAME_MS,
             name: String::new(),
@@ -798,11 +822,14 @@ impl Document {
                         next[dst] = cel[src];
                     }
                 }
-                *cel = next;
+                cel.pixels = next;
             }
         }
+        let old_width = self.width;
+        let old_height = self.height;
         self.width = width;
         self.height = height;
+        self.resize_grids(old_width, old_height, shift_x, shift_y);
         Ok(())
     }
 
@@ -899,7 +926,7 @@ impl Document {
                 Frame {
                     duration_ms,
                     name: String::new(),
-                    cels,
+                    cels: cels.into_iter().map(Cel::from).collect(),
                 }
             })
             .collect();
@@ -969,7 +996,355 @@ impl Document {
             active_layer,
             palette,
             tags: Vec::new(),
+            tilesets: Vec::new(),
         })
+    }
+}
+
+/// Tilemap layers.
+impl Document {
+    pub fn tilesets(&self) -> &[Tileset] {
+        &self.tilesets
+    }
+
+    pub fn tileset(&self, index: usize) -> Option<&Tileset> {
+        self.tilesets.get(index)
+    }
+
+    /// The tileset a layer's grid refers to, when it is a tilemap layer.
+    pub fn layer_tileset(&self, layer: usize) -> Option<usize> {
+        self.layers
+            .get(layer)
+            .and_then(|l| l.tileset)
+            .map(usize::from)
+    }
+
+    /// Add an empty tileset and return its index.
+    pub fn add_tileset(&mut self, name: &str, tile_width: u32, tile_height: u32) -> Result<usize> {
+        if self.tilesets.len() >= crate::tilemap::MAX_TILESETS {
+            return Err(Error::Limit {
+                what: "tilesets",
+                value: self.tilesets.len() as u64 + 1,
+                max: crate::tilemap::MAX_TILESETS as u64,
+            });
+        }
+        let name = if name.is_empty() {
+            format!("Tileset {}", self.tilesets.len() + 1)
+        } else {
+            clamp_name(name)
+        };
+        self.tilesets
+            .push(Tileset::new(name, tile_width, tile_height)?);
+        Ok(self.tilesets.len() - 1)
+    }
+
+    /// Add a tilemap layer on top of the stack, with an empty grid in every frame.
+    pub fn add_tilemap_layer(&mut self, name: &str, tileset: usize) -> Result<()> {
+        if tileset >= self.tilesets.len() {
+            return Err(Error::Index { what: "tileset" });
+        }
+        let maps = self.layers.iter().filter(|l| l.tileset.is_some()).count();
+        let name = if name.is_empty() {
+            format!("Tilemap {}", maps + 1)
+        } else {
+            name.to_string()
+        };
+        self.add_layer(&name)?;
+        let cells = self.grid_cells(tileset);
+        if let Some(layer) = self.layers.last_mut() {
+            layer.tileset = Some(tileset as u16);
+        }
+        for frame in &mut self.frames {
+            if let Some(cel) = frame.cels.last_mut() {
+                cel.tiles = Some(vec![0; cells]);
+            }
+        }
+        Ok(())
+    }
+
+    /// A tilemap layer's grid in one frame, row by row.
+    pub fn tile_grid(&self, frame: usize, layer: usize) -> Option<&[u32]> {
+        self.frames.get(frame)?.cels.get(layer)?.tiles.as_deref()
+    }
+
+    /// Put `value` (a tile number with flip bits, or 0 for empty) in a cell.
+    /// `Ok(false)` when the cell already held it.
+    pub fn set_tile(
+        &mut self,
+        frame: usize,
+        layer: usize,
+        col: u32,
+        row: u32,
+        value: u32,
+    ) -> Result<bool> {
+        let set = self
+            .layer_tileset(layer)
+            .ok_or(Error::Tilemap("this is not a tilemap layer"))?;
+        let tileset = &self.tilesets[set];
+        if !tileset.valid_entry(value) {
+            return Err(Error::Index { what: "tile" });
+        }
+        let (cols, rows) = tileset.grid_size(self.width, self.height);
+        if col >= cols || row >= rows {
+            return Err(Error::Index { what: "tile cell" });
+        }
+        let (width, height) = (self.width, self.height);
+        let cel = self
+            .frames
+            .get_mut(frame)
+            .and_then(|f| f.cels.get_mut(layer))
+            .ok_or(Error::Index { what: "cel" })?;
+        let Some(grid) = cel.tiles.as_mut() else {
+            return Err(Error::Tilemap("this is not a tilemap layer"));
+        };
+        let slot = &mut grid[(row * cols + col) as usize];
+        if *slot == value {
+            return Ok(false);
+        }
+        *slot = value;
+        let (tw, th) = (tileset.tile_width(), tileset.tile_height());
+        for y in row * th..((row + 1) * th).min(height) {
+            for x in col * tw..((col + 1) * tw).min(width) {
+                cel.pixels[(y * width + x) as usize] = tileset.pixel(value, x, y);
+            }
+        }
+        Ok(true)
+    }
+
+    /// Add a tile to a tileset and return its number.
+    pub fn add_tile(&mut self, tileset: usize, pixels: Vec<Rgba>) -> Result<u32> {
+        self.tilesets
+            .get_mut(tileset)
+            .ok_or(Error::Index { what: "tileset" })?
+            .push(pixels)
+    }
+
+    fn grid_cells(&self, tileset: usize) -> usize {
+        let (cols, rows) = self.tilesets[tileset].grid_size(self.width, self.height);
+        cols as usize * rows as usize
+    }
+
+    /// Clear cels for a new frame: empty grids on tilemap layers.
+    fn blank_cels(&self) -> Vec<Cel> {
+        let len = (self.width * self.height) as usize;
+        self.layers
+            .iter()
+            .map(|layer| Cel {
+                pixels: vec![Rgba::CLEAR; len],
+                tiles: layer
+                    .tileset
+                    .map(|set| vec![0; self.grid_cells(usize::from(set))]),
+            })
+            .collect()
+    }
+
+    /// Fit every grid to a new canvas size, moving cells by whole tiles of
+    /// the shift, then draw the tilemap cels again.
+    fn resize_grids(&mut self, old_width: u32, old_height: u32, shift_x: i32, shift_y: i32) {
+        for layer in 0..self.layers.len() {
+            let Some(set) = self.layer_tileset(layer) else {
+                continue;
+            };
+            let tileset = &self.tilesets[set];
+            let (old_cols, old_rows) = tileset.grid_size(old_width, old_height);
+            let (cols, rows) = tileset.grid_size(self.width, self.height);
+            let dx = shift_x.div_euclid(tileset.tile_width() as i32);
+            let dy = shift_y.div_euclid(tileset.tile_height() as i32);
+            for frame in &mut self.frames {
+                let cel = &mut frame.cels[layer];
+                let old = cel.tiles.take().unwrap_or_default();
+                let mut grid = vec![0; cols as usize * rows as usize];
+                for row in 0..old_rows as i32 {
+                    for col in 0..old_cols as i32 {
+                        let (nc, nr) = (col + dx, row + dy);
+                        if nc < 0 || nr < 0 || nc >= cols as i32 || nr >= rows as i32 {
+                            continue;
+                        }
+                        grid[(nr as u32 * cols + nc as u32) as usize] = old
+                            .get((row as u32 * old_cols + col as u32) as usize)
+                            .copied()
+                            .unwrap_or_default();
+                    }
+                }
+                cel.tiles = Some(grid);
+            }
+        }
+        for set in 0..self.tilesets.len() {
+            self.render_tileset(set);
+        }
+    }
+
+    /// Draw every cel that uses a tileset from its grid.
+    fn render_tileset(&mut self, set: usize) {
+        let (width, height) = (self.width, self.height);
+        let tileset = &self.tilesets[set];
+        for (layer, info) in self.layers.iter().enumerate() {
+            if info.tileset.map(usize::from) != Some(set) {
+                continue;
+            }
+            for frame in &mut self.frames {
+                let cel = &mut frame.cels[layer];
+                if let Some(grid) = &cel.tiles {
+                    tileset.render(grid, width, height, &mut cel.pixels);
+                }
+            }
+        }
+    }
+
+    /// Carry pixel edits on tilemap layers into their tiles, then draw those
+    /// layers again so every copy of a changed tile shows the change. A
+    /// pixel drawn on an empty cell makes a new tile of that cell. Returns
+    /// how many cells could not get a tile because the tileset was full;
+    /// their pixels go back to clear.
+    pub(crate) fn sync_tiles(&mut self) -> usize {
+        if self.layers.iter().all(|l| l.tileset.is_none()) {
+            return 0;
+        }
+        let (width, height) = (self.width, self.height);
+        // Find every change against the tiles as they are now, before any
+        // tile changes, so one edited copy does not undo another.
+        let mut changes: Vec<(usize, usize, Vec<usize>)> = Vec::new();
+        for (f, frame) in self.frames.iter().enumerate() {
+            for (l, info) in self.layers.iter().enumerate() {
+                let Some(set) = info.tileset.map(usize::from) else {
+                    continue;
+                };
+                let tileset = &self.tilesets[set];
+                let cel = &frame.cels[l];
+                let Some(grid) = &cel.tiles else {
+                    continue;
+                };
+                let (cols, _) = tileset.grid_size(width, height);
+                let changed: Vec<usize> = (0..cel.pixels.len())
+                    .filter(|&i| {
+                        let (x, y) = (i as u32 % width, i as u32 / width);
+                        let cell = (y / tileset.tile_height()) * cols + x / tileset.tile_width();
+                        let value = grid.get(cell as usize).copied().unwrap_or_default();
+                        cel.pixels[i] != tileset.pixel(value, x, y)
+                    })
+                    .collect();
+                if !changed.is_empty() {
+                    changes.push((f, l, changed));
+                }
+            }
+        }
+        if changes.is_empty() {
+            return 0;
+        }
+        let mut touched = vec![false; self.tilesets.len()];
+        let mut full = 0;
+        for (f, l, changed) in changes {
+            let set = usize::from(self.layers[l].tileset.unwrap_or_default());
+            touched[set] = true;
+            let tileset = &mut self.tilesets[set];
+            let (tw, th) = (tileset.tile_width(), tileset.tile_height());
+            let (cols, _) = tileset.grid_size(width, height);
+            let cel = &mut self.frames[f].cels[l];
+            let Some(grid) = cel.tiles.as_mut() else {
+                continue;
+            };
+            let mut made: Vec<u32> = Vec::new();
+            for i in changed {
+                let (x, y) = (i as u32 % width, i as u32 / width);
+                let (col, row) = (x / tw, y / th);
+                let cell = (row * cols + col) as usize;
+                let value = grid[cell];
+                let id = value & crate::tilemap::TILE_ID_MASK;
+                if id == 0 {
+                    if made.contains(&(cell as u32)) {
+                        continue;
+                    }
+                    made.push(cell as u32);
+                    // The new tile is the cell as it is drawn now.
+                    let mut tile = vec![Rgba::CLEAR; tileset.tile_pixels()];
+                    for dy in 0..th {
+                        for dx in 0..tw {
+                            let (px, py) = (col * tw + dx, row * th + dy);
+                            if px < width && py < height {
+                                tile[(dy * tw + dx) as usize] =
+                                    cel.pixels[(py * width + px) as usize];
+                            }
+                        }
+                    }
+                    if tile.iter().all(|p| p.a == 0) {
+                        continue;
+                    }
+                    match tileset.push(tile) {
+                        Ok(new) => grid[cell] = new,
+                        Err(_) => full += 1,
+                    }
+                } else {
+                    let (sx, sy) = tileset.source(value, x % tw, y % th);
+                    if let Some(tile) = tileset.tile_mut(id) {
+                        tile[(sy * tw + sx) as usize] = cel.pixels[i];
+                    }
+                }
+            }
+        }
+        for (set, touched) in touched.into_iter().enumerate() {
+            if touched {
+                self.render_tileset(set);
+            }
+        }
+        full
+    }
+
+    /// Give a loaded document its tilesets and grids. `layer_sets` has one
+    /// entry per layer; `grids[frame][layer]` is `Some` exactly on tilemap
+    /// layers, sized to cover the canvas. The tilemap cels are drawn from
+    /// the grids.
+    pub(crate) fn attach_tilemaps(
+        &mut self,
+        tilesets: Vec<Tileset>,
+        layer_sets: Vec<Option<u16>>,
+        grids: Vec<Vec<Option<Vec<u32>>>>,
+    ) -> Result<()> {
+        if tilesets.len() > crate::tilemap::MAX_TILESETS
+            || layer_sets.len() != self.layers.len()
+            || grids.len() != self.frames.len()
+        {
+            return Err(Error::BadFlag("tilemap"));
+        }
+        for (layer, set) in self.layers.iter().zip(&layer_sets) {
+            if let Some(set) = set {
+                if layer.group || usize::from(*set) >= tilesets.len() {
+                    return Err(Error::BadFlag("tilemap layer"));
+                }
+            }
+        }
+        for frame_grids in &grids {
+            if frame_grids.len() != self.layers.len() {
+                return Err(Error::BadFlag("tilemap"));
+            }
+            for (grid, set) in frame_grids.iter().zip(&layer_sets) {
+                match (grid, set) {
+                    (None, None) => {}
+                    (Some(grid), Some(set)) => {
+                        let tileset = &tilesets[usize::from(*set)];
+                        let (cols, rows) = tileset.grid_size(self.width, self.height);
+                        if grid.len() != cols as usize * rows as usize
+                            || !grid.iter().all(|&v| tileset.valid_entry(v))
+                        {
+                            return Err(Error::BadFlag("tile grid"));
+                        }
+                    }
+                    _ => return Err(Error::BadFlag("tile grid")),
+                }
+            }
+        }
+        self.tilesets = tilesets;
+        for (layer, set) in self.layers.iter_mut().zip(layer_sets) {
+            layer.tileset = set;
+        }
+        for (frame, frame_grids) in self.frames.iter_mut().zip(grids) {
+            for (cel, grid) in frame.cels.iter_mut().zip(frame_grids) {
+                cel.tiles = grid;
+            }
+        }
+        for set in 0..self.tilesets.len() {
+            self.render_tileset(set);
+        }
+        Ok(())
     }
 }
 

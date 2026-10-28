@@ -366,6 +366,7 @@ pub fn show_canvas(
     refsview::paint_overlays(&painter, refs, ref_textures, origin, view.zoom, false);
     refsview::paint_active_outline(&painter, refs, origin, view.zoom);
     draw_grid(&painter, view, origin, rect, width, height);
+    draw_tile_grid(&painter, editor, origin, view.zoom);
     let drag = editor.marquee_drag();
     // A plain marquee drag replaces the selection, so only the drag is drawn.
     // Shift and Alt drags show the selection they add to or cut from as well.
@@ -421,7 +422,24 @@ pub fn show_canvas(
     let custom = editor
         .custom_brush()
         .filter(|_| matches!(editor.tool(), Tool::Pencil | Tool::Eraser));
-    if let (Some((x, y)), Some(brush)) = (raw_hover.filter(|_| hover.is_some()), custom) {
+    let tile_size = editor
+        .document()
+        .layer_tileset(editor.document().active_layer())
+        .and_then(|set| editor.document().tileset(set))
+        .map(|set| (set.tile_width() as i32, set.tile_height() as i32))
+        .filter(|_| editor.placing_tiles());
+    if let (Some((x, y)), Some((tw, th))) = (hover, tile_size) {
+        // Tile mode marks the whole cell under the pointer.
+        let cell = Rect::from_min_size(
+            origin
+                + Vec2::new(
+                    (x / tw * tw) as f32 * view.zoom,
+                    (y / th * th) as f32 * view.zoom,
+                ),
+            Vec2::new(tw as f32 * view.zoom, th as f32 * view.zoom),
+        );
+        painter.rect_stroke(cell, 0.0, Stroke::new(2.0_f32, AMBER), StrokeKind::Inside);
+    } else if let (Some((x, y)), Some(brush)) = (raw_hover.filter(|_| hover.is_some()), custom) {
         // The brush's own pixels, faded, where the next stamp lands.
         let (bw, bh) = (brush.width as i32, brush.height as i32);
         let (left, top) = (x - bw / 2, y - bh / 2);
@@ -1071,6 +1089,42 @@ pub(crate) fn grid_draw(zoom: f32, span_x: i32, span_y: i32) -> Option<GridDraw>
     let cells = span_x.max(span_y);
     let alpha = if cells > 200 { 16 } else { 28 };
     Some(GridDraw { step, alpha })
+}
+
+/// Lines between the cells of the active tilemap layer.
+fn draw_tile_grid(painter: &Painter, editor: &Editor, origin: Pos2, zoom: f32) {
+    let doc = editor.document();
+    let Some(set) = doc
+        .layer_tileset(doc.active_layer())
+        .and_then(|set| doc.tileset(set))
+    else {
+        return;
+    };
+    let (w, h) = (doc.width() as f32 * zoom, doc.height() as f32 * zoom);
+    let (tw, th) = (
+        set.tile_width() as f32 * zoom,
+        set.tile_height() as f32 * zoom,
+    );
+    if tw < 4.0 || th < 4.0 {
+        return;
+    }
+    let stroke = Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(80, 200, 190, 220));
+    let mut x = tw;
+    while x < w {
+        painter.line_segment(
+            [origin + Vec2::new(x, 0.0), origin + Vec2::new(x, h)],
+            stroke,
+        );
+        x += tw;
+    }
+    let mut y = th;
+    while y < h {
+        painter.line_segment(
+            [origin + Vec2::new(0.0, y), origin + Vec2::new(w, y)],
+            stroke,
+        );
+        y += th;
+    }
 }
 
 fn draw_grid(

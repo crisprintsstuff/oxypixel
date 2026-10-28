@@ -136,6 +136,7 @@ These match the current editor. Planned work is listed in [docs/ROADMAP.md](docs
 
 - Visibility, opacity, rename, reorder, duplicate, and merge down
 - Layer groups: Group puts the selected layer in a new group, In and Out move layers into and out of the group below or around them, and Up, Down, Copy, and Delete move or copy a whole group. A group is drawn as one picture with its own visibility, opacity, and blend mode
+- Tilemap layers: Tilemap… adds a layer that is a grid of tiles from a tileset (new, with a tile size, or one the document already has). Drawing on it changes the tile under the pointer, and every copy of that tile changes with it; drawing on an empty cell makes a new tile. Tile mode turns the pencil into a tile stamp (with Flip H and Flip V), the eraser and right button into emptying a cell, fill into filling matching cells, and the eyedropper into picking a tile. The Tiles panel lists the tileset, and Duplicate starts a variant
 - Blend modes on each layer: Multiply, Screen, Overlay, Darken, Lighten, Color dodge and burn, Hard and Soft light, Difference, Exclusion, Hue, Saturation, Color, Luminosity, Addition, Subtract, and Divide. Exports, OxyPack, and the MCP server draw them too
 - Reference images (PNG or JPEG) on the canvas or in a floating panel, behind the art by default. Ctrl+drag moves one, and Fit to canvas scales it to the document. They are left out of export and saved beside the document, not inside it
 

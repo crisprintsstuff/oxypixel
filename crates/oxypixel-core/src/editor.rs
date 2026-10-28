@@ -39,6 +39,12 @@ pub enum MouseButton {
 #[derive(Clone, Debug)]
 enum Gesture {
     None,
+    /// Tile mode on a tilemap layer: put tiles in the cells the pointer
+    /// crosses, or empty them.
+    Tiles {
+        erase: bool,
+        last: (i32, i32),
+    },
     Pencil {
         button: MouseButton,
         last: (i32, i32),
@@ -108,6 +114,11 @@ pub struct Editor {
     shade: bool,
     dither: bool,
     custom_brush: Option<CustomBrush>,
+    /// On a tilemap layer, the pencil, eraser, fill, and eyedropper work on
+    /// whole tiles instead of pixels.
+    tile_mode: bool,
+    /// The tile the pencil puts down in tile mode, with its flip bits.
+    selected_tile: u32,
     /// Cel pixels from before the current pixel-perfect stroke.
     pencil_base: Option<Vec<Rgba>>,
     /// Bounding rectangle of the selection. Change it only through [`Self::set_selection`].
@@ -170,6 +181,8 @@ impl Editor {
             shade: false,
             dither: false,
             custom_brush: None,
+            tile_mode: false,
+            selected_tile: 1,
             pencil_base: None,
             selection: None,
             selection_mask: None,
@@ -357,6 +370,228 @@ impl Editor {
         self.custom_brush = None;
     }
 
+    /// Whether the tools place whole tiles on a tilemap layer.
+    pub fn tile_mode(&self) -> bool {
+        self.tile_mode
+    }
+
+    pub fn set_tile_mode(&mut self, enabled: bool) {
+        self.tile_mode = enabled;
+    }
+
+    /// The tile (number and flip bits) the pencil puts down in tile mode.
+    pub fn selected_tile(&self) -> u32 {
+        self.selected_tile
+    }
+
+    pub fn set_selected_tile(&mut self, value: u32) {
+        self.selected_tile = value;
+    }
+
+    /// Tile mode is on and the active layer is a tilemap layer.
+    pub fn placing_tiles(&self) -> bool {
+        self.tile_mode && self.doc.layer_tileset(self.doc.active_layer()).is_some()
+    }
+
+    /// Add a tilemap layer on top, drawing from `tileset`, or from a new
+    /// tileset of `tile_width` × `tile_height` tiles when it is `None`.
+    pub fn add_tilemap_layer(
+        &mut self,
+        tileset: Option<usize>,
+        tile_width: u32,
+        tile_height: u32,
+    ) -> Result<()> {
+        self.structural(|doc| {
+            let set = match tileset {
+                Some(set) => set,
+                None => doc.add_tileset("", tile_width, tile_height)?,
+            };
+            doc.add_tilemap_layer("", set)
+        })?;
+        self.selected_tile = 1;
+        Ok(())
+    }
+
+    /// Copy the selected tile into a new tile and select it, as a start for
+    /// a variant. One undo step.
+    pub fn duplicate_tile(&mut self) -> Result<u32> {
+        let set = self
+            .doc
+            .layer_tileset(self.doc.active_layer())
+            .ok_or(Error::Tilemap("pick a tilemap layer first"))?;
+        let id = self.selected_tile & crate::tilemap::TILE_ID_MASK;
+        let pixels = self
+            .doc
+            .tileset(set)
+            .and_then(|t| t.tile(id))
+            .ok_or(Error::Index { what: "tile" })?
+            .to_vec();
+        let mut new = 0;
+        self.structural(|doc| {
+            new = doc.add_tile(set, pixels)?;
+            Ok(())
+        })?;
+        self.selected_tile = new | (self.selected_tile & crate::tilemap::TILE_FLIPS);
+        Ok(new)
+    }
+
+    /// Put `value` in the cells under `points` on the active tilemap layer.
+    /// The first change of a gesture records the undo step.
+    fn place_tiles(&mut self, points: &[(i32, i32)], value: u32) {
+        let frame = self.doc.active_frame();
+        let layer = self.doc.active_layer();
+        let Some(set) = self
+            .doc
+            .layer_tileset(layer)
+            .and_then(|s| self.doc.tileset(s))
+        else {
+            return;
+        };
+        let (tw, th) = (set.tile_width() as i32, set.tile_height() as i32);
+        let (w, h) = (self.doc.width() as i32, self.doc.height() as i32);
+        let mut cells: Vec<(u32, u32)> = Vec::new();
+        for &(x, y) in points {
+            let (x, y) = if self.wrap {
+                self.wrap_point(x, y)
+            } else {
+                (x, y)
+            };
+            if x < 0 || y < 0 || x >= w || y >= h || !self.in_selection(x, y) {
+                continue;
+            }
+            let cell = ((x / tw) as u32, (y / th) as u32);
+            if !cells.contains(&cell) {
+                cells.push(cell);
+            }
+        }
+        let mut changed = false;
+        for (col, row) in cells {
+            let current = self
+                .doc
+                .tile_grid(frame, layer)
+                .zip(
+                    self.doc
+                        .tileset(self.doc.layer_tileset(layer).unwrap_or_default()),
+                )
+                .map(|(grid, set)| {
+                    let (cols, _) = set.grid_size(self.doc.width(), self.doc.height());
+                    grid[(row * cols + col) as usize]
+                });
+            if current == Some(value) {
+                continue;
+            }
+            if !self.gesture_saved {
+                self.push_undo();
+                self.gesture_saved = true;
+            }
+            if self.doc.set_tile(frame, layer, col, row, value).is_ok() {
+                changed = true;
+            }
+        }
+        if changed {
+            self.dirty = true;
+            self.bump();
+        }
+    }
+
+    /// Fill the connected cells that hold the same tile as `(x, y)`.
+    fn fill_tiles(&mut self, x: i32, y: i32, value: u32) {
+        let frame = self.doc.active_frame();
+        let layer = self.doc.active_layer();
+        let Some(set) = self
+            .doc
+            .layer_tileset(layer)
+            .and_then(|s| self.doc.tileset(s))
+        else {
+            return;
+        };
+        let (tw, th) = (set.tile_width() as i32, set.tile_height() as i32);
+        let (cols, rows) = set.grid_size(self.doc.width(), self.doc.height());
+        let Some(grid) = self.doc.tile_grid(frame, layer) else {
+            return;
+        };
+        if x < 0 || y < 0 || x >= self.doc.width() as i32 || y >= self.doc.height() as i32 {
+            return;
+        }
+        let start = ((x / tw) as u32, (y / th) as u32);
+        let target = grid[(start.1 * cols + start.0) as usize];
+        if target == value {
+            return;
+        }
+        let mut seen = vec![false; grid.len()];
+        let mut stack = vec![start];
+        let mut cells = Vec::new();
+        while let Some((c, r)) = stack.pop() {
+            let i = (r * cols + c) as usize;
+            if seen[i] || grid[i] != target {
+                continue;
+            }
+            seen[i] = true;
+            cells.push(((c as i32) * tw, (r as i32) * th));
+            if c > 0 {
+                stack.push((c - 1, r));
+            }
+            if r > 0 {
+                stack.push((c, r - 1));
+            }
+            if c + 1 < cols {
+                stack.push((c + 1, r));
+            }
+            if r + 1 < rows {
+                stack.push((c, r + 1));
+            }
+        }
+        self.gesture_saved = false;
+        self.place_tiles(&cells, value);
+        self.gesture_saved = false;
+    }
+
+    /// The tile under `(x, y)` on the active tilemap layer, with its flips.
+    pub fn tile_at(&self, x: i32, y: i32) -> Option<u32> {
+        let layer = self.doc.active_layer();
+        let set = self.doc.tileset(self.doc.layer_tileset(layer)?)?;
+        if x < 0 || y < 0 || x >= self.doc.width() as i32 || y >= self.doc.height() as i32 {
+            return None;
+        }
+        let (cols, _) = set.grid_size(self.doc.width(), self.doc.height());
+        let (col, row) = (x as u32 / set.tile_width(), y as u32 / set.tile_height());
+        self.doc
+            .tile_grid(self.doc.active_frame(), layer)?
+            .get((row * cols + col) as usize)
+            .copied()
+    }
+
+    /// Pencil, eraser, fill, and eyedropper in tile mode. `true` when the
+    /// pointer press was a tile action.
+    fn tile_pointer_down(&mut self, x: i32, y: i32, button: MouseButton) -> bool {
+        if !self.placing_tiles() {
+            return false;
+        }
+        let erase = self.tool == Tool::Eraser || button == MouseButton::Secondary;
+        let value = if erase { 0 } else { self.selected_tile };
+        match self.tool {
+            Tool::Pencil | Tool::Eraser => {
+                self.gesture = Gesture::Tiles {
+                    erase,
+                    last: (x, y),
+                };
+                self.place_tiles(&[(x, y)], value);
+                true
+            }
+            Tool::Bucket => {
+                self.fill_tiles(x, y, value);
+                true
+            }
+            Tool::Eyedropper => {
+                if let Some(tile) = self.tile_at(x, y).filter(|&t| t != 0) {
+                    self.selected_tile = tile;
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Pencil, fill, and shapes stamp the nearest palette color. Off until the user turns it on.
     pub fn snaps_to_palette(&self) -> bool {
         self.snap_palette
@@ -432,7 +667,7 @@ impl Editor {
         self.doc = snapshot.doc;
         self.set_selection(snapshot.selection, snapshot.selection_mask);
         self.dirty = true;
-        self.generation += 1;
+        self.bump();
     }
 
     fn push_undo(&mut self) {
@@ -623,6 +858,9 @@ impl Editor {
             return;
         }
         let (x, y) = self.clamp_pointer(x, y);
+        if self.tile_pointer_down(x, y, button) {
+            return;
+        }
         match self.tool {
             Tool::Pencil | Tool::Eraser => {
                 // Shading rewrites the stroke from the pre-stroke cel, the same way
@@ -688,6 +926,16 @@ impl Editor {
     pub fn pointer_move(&mut self, x: i32, y: i32, shift: bool) {
         let (x, y) = self.clamp_pointer(x, y);
         match self.gesture {
+            Gesture::Tiles { erase, last } => {
+                if (x, y) != last {
+                    let value = if erase { 0 } else { self.selected_tile };
+                    self.place_tiles(&line_points(last.0, last.1, x, y), value);
+                    self.gesture = Gesture::Tiles {
+                        erase,
+                        last: (x, y),
+                    };
+                }
+            }
             Gesture::Pencil { .. } => {
                 let Gesture::Pencil {
                     button,
@@ -771,6 +1019,10 @@ impl Editor {
     pub fn pointer_up(&mut self, x: i32, y: i32, shift: bool) {
         let (x, y) = self.clamp_pointer(x, y);
         match self.gesture {
+            Gesture::Tiles { .. } => {
+                self.gesture = Gesture::None;
+                self.gesture_saved = false;
+            }
             Gesture::Pencil { .. } => {
                 self.gesture = Gesture::None;
                 self.gesture_saved = false;
@@ -849,7 +1101,7 @@ impl Editor {
             clip.mask,
         );
         self.dirty = true;
-        self.generation += 1;
+        self.bump();
         Ok(())
     }
 
@@ -989,7 +1241,7 @@ impl Editor {
             self.set_selection(None, None);
         }
         self.dirty = true;
-        self.generation += 1;
+        self.bump();
         Ok(())
     }
 
@@ -1092,7 +1344,7 @@ impl Editor {
             _ => self.set_selection(Some(moved), mask.map(<[bool]>::to_vec)),
         }
         self.dirty = true;
-        self.generation += 1;
+        self.bump();
     }
 
     /// Write `pixels` at `dest`. Where `mask` is off the cel keeps its pixel.
@@ -1205,7 +1457,7 @@ impl Editor {
             self.set_selection(Some(kept), kept_mask);
         }
         self.dirty = true;
-        self.generation += 1;
+        self.bump();
         Ok(())
     }
 
@@ -1347,7 +1599,7 @@ impl Editor {
         self.cancel_gesture();
         self.end_coalesce();
         self.dirty = false;
-        self.generation += 1;
+        self.bump();
     }
 
     pub fn add_layer(&mut self) -> Result<()> {
@@ -1492,7 +1744,7 @@ impl Editor {
     pub fn set_active_layer(&mut self, index: usize) -> Result<()> {
         self.cancel_gesture();
         self.doc.set_active_layer(index)?;
-        self.generation += 1;
+        self.bump();
         Ok(())
     }
 
@@ -1513,7 +1765,7 @@ impl Editor {
     pub fn set_active_frame(&mut self, index: usize) -> Result<()> {
         self.cancel_gesture();
         self.doc.set_active_frame(index)?;
-        self.generation += 1;
+        self.bump();
         Ok(())
     }
 
@@ -1634,7 +1886,7 @@ impl Editor {
             Ok(()) => {
                 self.history.push(snapshot);
                 self.dirty = true;
-                self.generation += 1;
+                self.bump();
                 Ok(())
             }
             Err(err) => {
@@ -1643,6 +1895,13 @@ impl Editor {
                 Err(err)
             }
         }
+    }
+
+    /// The document changed. Pixel edits on tilemap layers go into their
+    /// tiles here, so every editing path keeps the tiles and pixels in step.
+    fn bump(&mut self) {
+        self.doc.sync_tiles();
+        self.generation += 1;
     }
 
     fn mutate(&mut self, coalesce: bool, f: impl FnOnce(&mut Document)) {
@@ -1656,7 +1915,7 @@ impl Editor {
         }
         f(&mut self.doc);
         self.dirty = true;
-        self.generation += 1;
+        self.bump();
     }
 
     fn clamp_pointer(&self, x: i32, y: i32) -> (i32, i32) {
@@ -1780,7 +2039,7 @@ impl Editor {
             }
         }
         self.dirty = true;
-        self.generation += 1;
+        self.bump();
     }
 
     /// One-pixel pencil only. The whole stroke is rewritten from the pre-stroke cel,
@@ -1830,7 +2089,7 @@ impl Editor {
                 }
             }
             self.dirty = true;
-            self.generation += 1;
+            self.bump();
             return;
         }
         let Some(base) = self.pencil_base.clone() else {
@@ -1850,7 +2109,7 @@ impl Editor {
             cel.copy_from_slice(&next);
         }
         self.dirty = true;
-        self.generation += 1;
+        self.bump();
     }
 
     /// Each stamped pixel becomes the next swatch after its pre-stroke color
@@ -2014,7 +2273,7 @@ impl Editor {
         }
         self.history.push(snapshot);
         self.dirty = true;
-        self.generation += 1;
+        self.bump();
     }
 
     /// Select what the fill tool would reach from `(x, y)` on the active cel,
@@ -3211,6 +3470,113 @@ mod tests {
             big.brush_from_selection(),
             Err(Error::Limit { .. })
         ));
+    }
+
+    /// A 4×4 canvas with a tilemap layer of 2×2 tiles on top, active.
+    fn tile_editor() -> Editor {
+        let mut ed = Editor::new(4, 4).unwrap();
+        ed.add_tilemap_layer(None, 2, 2).unwrap();
+        ed
+    }
+
+    #[test]
+    fn drawing_on_a_tilemap_edits_every_copy_of_the_tile() {
+        let mut ed = tile_editor();
+        let layer = ed.document().active_layer();
+        let ink = Rgba::new(200, 0, 0, 255);
+        ed.set_primary(ink);
+        // A pixel on an empty cell makes tile 1 there.
+        ed.pointer_down(0, 0, MouseButton::Primary, false);
+        ed.pointer_up(0, 0, false);
+        assert_eq!(ed.document().tile_grid(0, layer).unwrap(), &[1, 0, 0, 0]);
+        assert_eq!(ed.document().tilesets()[0].len(), 1);
+        // Place it in the right cell, mirrored, in tile mode.
+        ed.set_tile_mode(true);
+        ed.set_selected_tile(1 | crate::tilemap::TILE_FLIP_X);
+        ed.pointer_down(3, 0, MouseButton::Primary, false);
+        ed.pointer_up(3, 0, false);
+        let cel = ed.document().cel(0, layer).unwrap();
+        assert_eq!(
+            cel[3], ink,
+            "the mirrored copy shows the pixel at its right edge"
+        );
+        // Back in pixel mode, a pixel on the left copy shows in the mirrored one.
+        ed.set_tile_mode(false);
+        let blue = Rgba::new(0, 0, 200, 255);
+        ed.set_primary(blue);
+        ed.pointer_down(0, 1, MouseButton::Primary, false);
+        ed.pointer_up(0, 1, false);
+        let cel = ed.document().cel(0, layer).unwrap();
+        assert_eq!(cel[4], blue);
+        assert_eq!(cel[7], blue, "the mirrored copy changed too");
+        assert_eq!(ed.document().tilesets()[0].len(), 1, "no new tile");
+        assert!(ed.undo());
+        assert_eq!(ed.document().cel(0, layer).unwrap()[7], Rgba::CLEAR);
+        assert_eq!(ed.document().tilesets()[0].tile(1).unwrap()[2], Rgba::CLEAR);
+    }
+
+    #[test]
+    fn tile_mode_places_erases_fills_and_picks_whole_tiles() {
+        let mut ed = tile_editor();
+        let layer = ed.document().active_layer();
+        ed.set_primary(Rgba::new(9, 9, 9, 255));
+        ed.pointer_down(1, 1, MouseButton::Primary, false);
+        ed.pointer_up(1, 1, false);
+        ed.set_tile_mode(true);
+        assert!(ed.placing_tiles());
+        ed.set_tool(Tool::Bucket);
+        ed.pointer_down(3, 3, MouseButton::Primary, false);
+        ed.pointer_up(3, 3, false);
+        assert_eq!(ed.document().tile_grid(0, layer).unwrap(), &[1, 1, 1, 1]);
+        ed.set_tool(Tool::Eraser);
+        ed.pointer_down(2, 0, MouseButton::Primary, false);
+        ed.pointer_move(2, 3, false);
+        ed.pointer_up(2, 3, false);
+        assert_eq!(ed.document().tile_grid(0, layer).unwrap(), &[1, 0, 1, 0]);
+        assert!(ed.undo(), "the erase stroke is one step");
+        assert_eq!(ed.document().tile_grid(0, layer).unwrap(), &[1, 1, 1, 1]);
+        ed.set_selected_tile(0);
+        ed.set_tool(Tool::Eyedropper);
+        ed.pointer_down(0, 3, MouseButton::Primary, false);
+        assert_eq!(ed.selected_tile(), 1);
+        // A new tile is a copy of the selected one.
+        assert_eq!(ed.duplicate_tile().unwrap(), 2);
+        assert_eq!(ed.selected_tile(), 2);
+        // Tile mode does nothing on an ordinary layer.
+        ed.set_active_layer(0).unwrap();
+        assert!(!ed.placing_tiles());
+    }
+
+    #[test]
+    fn frames_resizes_and_merges_keep_tilemaps_whole() {
+        let mut ed = tile_editor();
+        let layer = ed.document().active_layer();
+        ed.set_primary(Rgba::new(5, 5, 5, 255));
+        ed.pointer_down(0, 0, MouseButton::Primary, false);
+        ed.pointer_up(0, 0, false);
+        ed.add_frame().unwrap();
+        assert_eq!(ed.document().tile_grid(1, layer).unwrap(), &[0, 0, 0, 0]);
+        ed.duplicate_frame().unwrap();
+        ed.set_active_frame(0).unwrap();
+        ed.duplicate_frame().unwrap();
+        assert_eq!(ed.document().tile_grid(1, layer).unwrap(), &[1, 0, 0, 0]);
+        // Growing the canvas by 2 on the left moves the cells one tile right.
+        ed.resize_canvas(6, 4, 2, 0).unwrap();
+        assert_eq!(
+            ed.document().tile_grid(0, layer).unwrap(),
+            &[0, 1, 0, 0, 0, 0]
+        );
+        assert_eq!(
+            ed.document().cel(0, layer).unwrap()[2],
+            Rgba::new(5, 5, 5, 255)
+        );
+        assert!(
+            matches!(ed.document().clone().merge_down(layer), Ok(())),
+            "a tilemap merges into the pixel layer below"
+        );
+        let mut doc = ed.document().clone();
+        doc.add_layer("top").unwrap();
+        assert!(matches!(doc.merge_down(layer + 1), Err(Error::Tilemap(_))));
     }
 
     #[test]

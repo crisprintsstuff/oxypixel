@@ -20,12 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Brush from selection, under the brush size, makes the pencil stamp the selected pixels (up to 64×64) in their own colors and the eraser clear their shape. The canvas previews it under the pointer, and Square goes back to the normal brush.
 - Export spritesheet can also write a Godot 4 SpriteFrames resource (`.tres`) with one animation per tag, using each frame's duration, and Unity import settings (`.png.meta`) that cut the sheet into one point-filtered sprite per frame. Exporting again keeps the Unity file's `guid`, so references in a Unity project survive.
 - One sheet per tag and One GIF per tag write `<name>_<tag>.png` or `.gif` for each tag. A tag's GIF plays its frames in the tag's direction and as many times as it repeats.
+- Tilemap layers. Tilemap… in the layer panel adds a layer that is a grid of tiles from a new or existing tileset. Drawing on it changes the tiles under the pointer, and every copy of a tile changes too; drawing on an empty cell makes a new tile. Tile mode places, flips, empties, fills, and picks whole tiles. The Tiles panel shows the tileset, and Duplicate copies the selected tile into a new one. The canvas marks the tile grid. Frames, canvas resizing (by whole tiles), undo, and every export work with them, and the MCP `document_info` lists tilesets and each layer's tileset.
 - File, then Open… opens Aseprite `.aseprite` and `.ase` files for editing, as does drag-and-drop and the command line. Layers, groups, visibility, opacity, blend modes, frame durations, tags, and the palette are kept; Save writes a new `.oxypix` and never changes the Aseprite file. Cel opacity is multiplied into the pixels, tilemap layers open as plain layers, reference layers are left out, and the status line says when any of that happened. The export commands read `.aseprite` files too.
 - `export-sheet` takes `--godot`, `--unity`, and `--per-tag`, `export-gif` takes `--per-tag`, and the MCP `export` tool takes `godot`, `unity`, and `per_tag`.
 
 ### Changed
 
 - A document with a group is saved with another required `.oxypix` section, with the same effect on older versions as blend modes.
+- Tilesets and tilemap layers are saved in two more required `.oxypix` sections, `0x8003` and `0x8004`. OxyPixel 0.9.2 and earlier refuse such a file.
 - A document with a layer that is not Normal is saved with a new required `.oxypix` section. OxyPixel 0.9.2 and earlier refuse such a file with "this file needs a newer OxyPixel" instead of drawing it wrong. Documents that only use Normal are saved exactly as before.
 
 ## [0.9.2] - 2026-10-27
