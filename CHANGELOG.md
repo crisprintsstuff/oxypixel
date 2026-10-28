@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The Flatpak manifest builds from the 0.9.6 release archive.
+
 ## [0.9.6] - 2026-10-28
 
 ### Fixed

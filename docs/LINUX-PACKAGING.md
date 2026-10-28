@@ -96,7 +96,7 @@ flatpak run io.github.crisprintsstuff.OxyPixel
 - Finish args: `--share=ipc`, `--socket=x11` (the window is X11 only; under Wayland, Xwayland provides it), `--device=dri`, and `--filesystem=home` (documents open by path from the command line and recent files, not only through the portal dialog).
 - No network: Check for updates and the live MCP bridge do not work inside the sandbox. A Flatpak copy (`FLATPAK_ID`, or `/.flatpak-info`) never downloads an update; it says Flatpak updates it.
 
-The manifest was checked by running its build commands against the 0.9.5 archive into a temporary prefix. `flatpak-builder` itself was not run in the environment that wrote it.
+The manifest was checked by running its build commands against the 0.9.6 archive into a temporary prefix. `flatpak-builder` itself was not run in the environment that wrote it.
 
 Each release: change the archive URL and SHA-256 in the manifest to the new tar.gz, and add a `<release version="…" date="…"/>` to the metainfo.
 
