@@ -610,7 +610,10 @@ fn handle_pointer(
         }
     }
     if response.drag_started() {
-        if let Some(pos) = response.interact_pointer_pos() {
+        if let Some(now) = response.interact_pointer_pos() {
+            // egui calls it a drag only after the pointer moves a few points;
+            // the stroke starts where the button went down, not where that is.
+            let pos = ui.input(|i| i.pointer.press_origin()).unwrap_or(now);
             let (x, y) = at(pos);
             if picking {
                 sample_with_references(editor, refs, x, y, button);
@@ -624,6 +627,9 @@ fn handle_pointer(
                 view.move_last = pos;
             } else {
                 editor.pointer_down(x, y, button, shift);
+                if at(now) != (x, y) {
+                    editor.pointer_move(at(now).0, at(now).1, shift);
+                }
             }
         }
     } else if response.dragged() {

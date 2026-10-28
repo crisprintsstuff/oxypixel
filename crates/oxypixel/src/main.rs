@@ -13,6 +13,8 @@ mod canvas;
 mod cli;
 mod clipboard;
 mod framestrip;
+#[cfg(test)]
+mod harness;
 mod icon;
 mod mcp;
 mod native;
