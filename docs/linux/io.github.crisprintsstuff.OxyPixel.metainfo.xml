@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata for the AppImage and the Flatpak. -->
+<component type="desktop-application">
+  <id>io.github.crisprintsstuff.OxyPixel</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>OxyPixel</name>
+  <summary>Draw pixel art and short animations</summary>
+  <developer id="io.github.crisprintsstuff">
+    <name>OxyPixel contributors</name>
+  </developer>
+  <description>
+    <p>
+      OxyPixel is a pixel-art editor for sprites and short animations. Draw on a
+      pixel canvas with layers, groups, blend modes, and tilemaps, step through
+      named frames and animation tags, and export PNG, GIF, or spritesheets with
+      JSON, Godot, or Unity files.
+    </p>
+    <p>
+      It opens Aseprite files, packs sprite atlases with OxyPack, and includes an
+      MCP server so AI assistants can draw and export with the editor's own tools.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.crisprintsstuff.OxyPixel.desktop</launchable>
+  <url type="homepage">https://github.com/crisprintsstuff/oxypixel</url>
+  <url type="bugtracker">https://github.com/crisprintsstuff/oxypixel/issues</url>
+  <categories>
+    <category>Graphics</category>
+    <category>2DGraphics</category>
+    <category>RasterGraphics</category>
+  </categories>
+  <provides>
+    <binary>oxypixel</binary>
+    <binary>oxypack</binary>
+    <mediatype>application/x-oxypix</mediatype>
+  </provides>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.9.5" date="2026-10-28"/>
+  </releases>
+</component>

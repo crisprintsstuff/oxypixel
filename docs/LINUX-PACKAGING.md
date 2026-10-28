@@ -1,6 +1,6 @@
 # Linux packaging
 
-A tagged release ships `oxypixel-<version>-linux-x86_64.tar.gz` (the x86_64 `oxypixel` and `oxypack` executables, `LICENSE`, and a short run note) and `oxypixel-<version>-linux-x86_64.deb`, built by [scripts/package-deb.sh](../scripts/package-deb.sh). The `.deb` version is the workspace package version plus Debian revision 1 (`<version>-1`). RPM, AppImage, and Flatpak are still only a plan.
+A tagged release ships `oxypixel-<version>-linux-x86_64.tar.gz` (the x86_64 `oxypixel` and `oxypack` executables, `LICENSE`, and a short run note) and `oxypixel-<version>-linux-x86_64.deb`, built by [scripts/package-deb.sh](../scripts/package-deb.sh). The `.deb` version is the workspace package version plus Debian revision 1 (`<version>-1`). It also ships `OxyPixel-<version>-x86_64.AppImage`, built by [scripts/package-appimage.sh](../scripts/package-appimage.sh), and the repository has a Flatpak manifest in [packaging/flatpak/](../packaging/flatpak/). RPM is not built.
 
 ## Why cargo-deb
 
@@ -63,18 +63,44 @@ sudo apt remove oxypixel
 
 Check for updates looks up a full asset name. The `.deb` line does not hide the tar.gz. An unpacked copy still downloads the tar.gz (`PackageKind::LinuxArchive`). A copy whose path is `/usr/bin/oxypixel` downloads the `.deb` (`PackageKind::LinuxDeb`) and does not replace that file itself.
 
-## Proposed AppImage
+## AppImage
 
-Package the release binary with `linuxdeploy` and the desktop file above. Bundle `libxkbcommon` only if the target distro is older than the build machine. Do not bundle `libGL`.
+`scripts/package-appimage.sh` writes `dist/OxyPixel-<version>-x86_64.AppImage`. It needs `squashfs-tools`, and it builds the release binaries first if they are missing.
 
-## Proposed Flatpak
+| AppDir path | Source |
+| --- | --- |
+| `AppRun` | A shell script that runs `usr/bin/oxypixel`, or `usr/bin/oxypack` when started through a link named `oxypack` |
+| `io.github.crisprintsstuff.OxyPixel.desktop`, `usr/share/applications/` | `docs/linux/oxypixel.desktop` |
+| `oxypixel.png`, `.DirIcon`, `usr/share/icons/hicolor/256x256/apps/oxypixel.png` | `docs/linux/oxypixel-256.png`, the 16×16 icon art scaled 16 times by `scripts/gen_icon.py` |
+| `usr/share/metainfo/io.github.crisprintsstuff.OxyPixel.metainfo.xml` | `docs/linux/io.github.crisprintsstuff.OxyPixel.metainfo.xml` |
+| `usr/share/mime/packages/oxypixel.xml` | `docs/linux/oxypixel-mime.xml` |
+| `usr/bin/oxypixel`, `usr/bin/oxypack` | `target/release/` |
 
-- App id: `com.oxypixel.OxyPixel` (not registered; pick this only if it is still free)
-- Runtime: `org.freedesktop.Platform` 24.08
-- Finish args: `--share=ipc`, `--socket=fallback-x11`, `--socket=wayland`, `--device=dri`, `--filesystem=home` (home is required so people can open documents)
-- Build: a Cargo build of `-p oxypixel --release` inside the SDK, with the `x11` feature
+No AppImage tool runs. The AppDir is packed with `mksquashfs` (zstd, root-owned, all times 0, so the same input gives the same file) and appended to the AppImage type2 runtime from the pinned release `20251108` of AppImage/type2-runtime, whose SHA-256 the script checks, as `package-deb.sh` does for cargo-deb. Then the script lists the payload with `unsquashfs -o <runtime size>` and checks the paths above, without running the runtime. The release job sets `OXYPIXEL_APPIMAGE_SMOKE=1`, which starts the AppImage once with `APPIMAGE_EXTRACT_AND_RUN=1` (no FUSE needed) and checks that it prints `oxypixel <version>`.
 
-Wayland is not enabled. A Flatpak would still want the X11 socket, plus Wayland later if the egui `wayland` feature is turned on and tested.
+Nothing else is bundled. Like the tar.gz, the AppImage loads `libGL`, `libX11`, and `libxkbcommon` from the system and needs glibc 2.39 or newer. Running it mounts it with FUSE; without FUSE, `--appimage-extract-and-run` works.
+
+The release uploads it and lists it in `SHA256SUMS-linux.txt` and, after the `.deb`, in `SHA256SUMS.txt`. Check for updates knows it is an AppImage from the `APPIMAGE` variable the runtime sets (`PackageKind::AppImage`), downloads `OxyPixel-<version>-x86_64.AppImage`, checks it, and replaces the file at that path.
+
+## Flatpak
+
+[packaging/flatpak/io.github.crisprintsstuff.OxyPixel.yml](../packaging/flatpak/io.github.crisprintsstuff.OxyPixel.yml) builds a Flatpak on the `org.freedesktop.Platform` 24.08 runtime (glibc 2.40). It repackages the published release tar.gz, pinned by URL and SHA-256, with the desktop file, icons, metainfo, and MIME type from this checkout, renamed to the app id so Flatpak exports them.
+
+```bash
+flatpak install flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08
+flatpak-builder --user --install --force-clean build-flatpak packaging/flatpak/io.github.crisprintsstuff.OxyPixel.yml
+flatpak run io.github.crisprintsstuff.OxyPixel
+```
+
+- App id: `io.github.crisprintsstuff.OxyPixel`. Flathub verifies an `io.github.<user>` id through that GitHub account.
+- Finish args: `--share=ipc`, `--socket=x11` (the window is X11 only; under Wayland, Xwayland provides it), `--device=dri`, and `--filesystem=home` (documents open by path from the command line and recent files, not only through the portal dialog).
+- No network: Check for updates and the live MCP bridge do not work inside the sandbox. A Flatpak copy (`FLATPAK_ID`, or `/.flatpak-info`) never downloads an update; it says Flatpak updates it.
+
+The manifest was checked by running its build commands against the 0.9.5 archive into a temporary prefix. `flatpak-builder` itself was not run in the environment that wrote it.
+
+Each release: change the archive URL and SHA-256 in the manifest to the new tar.gz, and add a `<release version="…" date="…"/>` to the metainfo.
+
+Flathub submission is a human step. Flathub may ask for a build from source instead of the release archive; that needs the crates vendored for an offline build (for example a `cargo-sources.json` made with `flatpak-cargo-generator`) and the Rust SDK extension.
 
 ## What has to be true before calling Linux supported
 

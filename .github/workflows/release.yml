@@ -100,19 +100,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.0
+      - name: Install AppImage packing tools
+        run: sudo apt-get update -q && sudo apt-get install -y --no-install-recommends squashfs-tools
       - name: Test and pack
         run: |
           cargo test --workspace
-          chmod +x scripts/package-linux.sh scripts/package-deb.sh
+          chmod +x scripts/package-linux.sh scripts/package-deb.sh scripts/package-appimage.sh
           ./scripts/package-linux.sh
           ./scripts/package-deb.sh
-          (cd dist && sha256sum oxypixel-*-linux-x86_64.tar.gz oxypixel-*-linux-x86_64.deb > SHA256SUMS-linux.txt)
+          # Start the AppImage once (extracted, no FUSE) to check it runs.
+          OXYPIXEL_APPIMAGE_SMOKE=1 ./scripts/package-appimage.sh
+          (cd dist && sha256sum oxypixel-*-linux-x86_64.tar.gz oxypixel-*-linux-x86_64.deb OxyPixel-*-x86_64.AppImage > SHA256SUMS-linux.txt)
       - uses: actions/upload-artifact@v4
         with:
           name: oxypixel-linux-x86_64
           path: |
             dist/oxypixel-*-linux-x86_64.tar.gz
             dist/oxypixel-*-linux-x86_64.deb
+            dist/OxyPixel-*-x86_64.AppImage
             dist/SHA256SUMS-linux.txt
 
   publish:
@@ -140,24 +145,26 @@ jobs:
           setup="OxyPixel-${version}-Setup.exe"
           linux="oxypixel-${version}-linux-x86_64.tar.gz"
           deb="oxypixel-${version}-linux-x86_64.deb"
+          appimage="OxyPixel-${version}-x86_64.AppImage"
           test -f "dist/${portable}"
           test -f "dist/${setup}"
           test -f "dist/${linux}"
           test -f "dist/${deb}"
+          test -f "dist/${appimage}"
           test -f "dist/oxypack-${version}-windows-x86_64.exe"
           # SHA256SUMS.txt lists the editor's four packages only; the updater
           # reads it. The oxypack exe is in SHA256SUMS-windows.txt.
           # The updater matches these basenames exactly. The first three stay
-          # in the 0.3.0 order. The .deb is last. PackageKind looks up a full
-          # name, so the extra line does not hide the tar.gz.
+          # in the 0.3.0 order. The .deb and the AppImage follow. PackageKind
+          # looks up a full name, so the extra lines do not hide the tar.gz.
           (
             cd dist
-            sha256sum "$portable" "$setup" "$linux" "$deb"
+            sha256sum "$portable" "$setup" "$linux" "$deb" "$appimage"
           ) > dist/SHA256SUMS.txt
-          awk -v p="$portable" -v s="$setup" -v l="$linux" -v d="$deb" '
+          awk -v p="$portable" -v s="$setup" -v l="$linux" -v d="$deb" -v a="$appimage" '
             NF != 2 || length($1) != 64 { exit 1 }
             { seen[$2] = 1 }
-            END { if (!seen[p] || !seen[s] || !seen[l] || !seen[d]) exit 1 }
+            END { if (!seen[p] || !seen[s] || !seen[l] || !seen[d] || !seen[a]) exit 1 }
           ' dist/SHA256SUMS.txt
           # Accept "## 0.8.6" and Keep a Changelog "## [0.8.6] - 2026-10-26".
           awk -v ver="$version" '
@@ -206,6 +213,7 @@ jobs:
             dist/OxyPixel-*-Setup.exe
             dist/oxypixel-*-linux-x86_64.tar.gz
             dist/oxypixel-*-linux-x86_64.deb
+            dist/OxyPixel-*-x86_64.AppImage
             dist/oxypack-*-windows-x86_64.exe
             dist/SHA256SUMS-windows.txt
             dist/SHA256SUMS-linux.txt
