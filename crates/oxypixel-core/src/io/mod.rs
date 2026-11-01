@@ -4,6 +4,7 @@ mod engine;
 mod oxypix;
 mod palette;
 mod raster;
+mod slice;
 
 pub use engine::{export_gif_per_tag, export_sheet_files, tag_paths, SheetFiles};
 pub use oxypix::{load_oxypix, load_oxypix_bytes, save_oxypix, save_oxypix_bytes};
@@ -18,3 +19,7 @@ pub use raster::{
     spritesheet_grid, spritesheet_json, Fit, SheetGrid, SheetLayout,
 };
 pub(crate) use raster::{decode_png_rgba, encode_rgba_png};
+pub use slice::{
+    cell_corners, decode_sheet, read_sheet, sheet_cells, slice_sheet, Sheet, SliceGrid, SliceInto,
+    MAX_SLICE_SHEET_PIXELS,
+};

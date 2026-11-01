@@ -4,7 +4,8 @@ use std::path::Path;
 
 use oxypixel_core::{
     export_bmp, export_gif, export_gif_per_tag, export_palette, export_png, export_sheet_files,
-    import_palette, Document, Error, SheetFiles, SheetLayout,
+    import_palette, read_sheet, slice_sheet, Document, Error, SheetFiles, SheetLayout, SliceGrid,
+    SliceInto, DEFAULT_FRAME_MS,
 };
 
 pub fn dispatch(args: &[String]) -> Option<i32> {
@@ -24,6 +25,7 @@ pub fn dispatch(args: &[String]) -> Option<i32> {
         "export-sheet" => export_sheet_cmd(args),
         "export-palette" => export_palette_cmd(args),
         "import-palette" => import_palette_cmd(args),
+        "import-sheet" => import_sheet_cmd(args),
         "mcp" => crate::mcp::run(&args[1..]),
         _ => return None,
     };
@@ -171,6 +173,64 @@ fn import_palette_cmd(args: &[String]) -> u8 {
     }
 }
 
+fn import_sheet_cmd(args: &[String]) -> u8 {
+    let Some(input) = args.get(1) else {
+        return usage("import-sheet needs an input image and an output .oxypix");
+    };
+    let Some(output) = args.get(2) else {
+        return usage("import-sheet needs an output .oxypix");
+    };
+    let sheet = match read_sheet(Path::new(input)) {
+        Ok(sheet) => sheet,
+        Err(err) => return fail(&err.to_string()),
+    };
+    let mut grid = SliceGrid::guess(sheet.width, sheet.height);
+    let (into, duration) = match parse_slice_options(&args[3..], &mut grid) {
+        Ok(options) => options,
+        Err(message) => return usage(&message),
+    };
+    let doc = match slice_sheet(&sheet, &grid, into, duration) {
+        Ok(doc) => doc,
+        Err(err) => return fail(&err.to_string()),
+    };
+    match oxypixel_core::save_oxypix(&doc, Path::new(output)) {
+        Ok(()) => 0,
+        Err(err) => fail(&err.to_string()),
+    }
+}
+
+/// `--cell WxH`, `--offset X,Y`, `--gap X,Y`, `--layers`, `--keep-empty`,
+/// and `--duration MS`, in any order. Returns what the cells become and how
+/// long each frame lasts.
+fn parse_slice_options(args: &[String], grid: &mut SliceGrid) -> Result<(SliceInto, u32), String> {
+    let mut into = SliceInto::Frames;
+    let mut duration = DEFAULT_FRAME_MS;
+    let mut rest = args.iter();
+    while let Some(flag) = rest.next() {
+        let mut pair = |name: &str, sep: char| -> Result<(u32, u32), String> {
+            rest.next()
+                .and_then(|value| value.split_once(sep))
+                .and_then(|(a, b)| Some((a.trim().parse().ok()?, b.trim().parse().ok()?)))
+                .ok_or_else(|| format!("{name} needs two whole numbers, like 16{sep}16"))
+        };
+        match flag.as_str() {
+            "--cell" => (grid.cell_width, grid.cell_height) = pair("--cell", 'x')?,
+            "--offset" => (grid.offset_x, grid.offset_y) = pair("--offset", ',')?,
+            "--gap" => (grid.gap_x, grid.gap_y) = pair("--gap", ',')?,
+            "--layers" => into = SliceInto::Layers,
+            "--keep-empty" => grid.keep_empty = true,
+            "--duration" => {
+                duration = rest
+                    .next()
+                    .and_then(|value| value.parse::<u32>().ok())
+                    .ok_or("--duration needs a whole number of milliseconds")?;
+            }
+            other => return Err(format!("unknown import-sheet option {other}")),
+        }
+    }
+    Ok((into, duration))
+}
+
 /// An `.oxypix` document, or an `.aseprite` file read as one. Notes on what
 /// an Aseprite file had that could not be kept go to stderr.
 fn open(input: &str) -> Result<Document, String> {
@@ -212,6 +272,8 @@ Usage:
                         [--json] [--godot] [--unity] [--per-tag]
   oxypixel export-palette INPUT.oxypix OUTPUT.gpl
   oxypixel import-palette INPUT.oxypix PALETTE.gpl OUTPUT.oxypix
+  oxypixel import-sheet SHEET.png OUTPUT.oxypix [--cell WxH] [--offset X,Y] [--gap X,Y]
+                        [--layers] [--keep-empty] [--duration MS]
   oxypixel mcp [--root DIR]
   oxypixel --help
   oxypixel --version
@@ -226,6 +288,10 @@ cells, and --json writes OUTPUT.json with each frame's rectangle and duration. -
 OUTPUT.tres, a Godot 4 SpriteFrames resource with one animation per tag, and --unity writes
 OUTPUT.png.meta, which Unity reads as one sprite per frame. --per-tag writes OUTPUT_<tag>.png
 (or .gif for export-gif) for each tag instead of one file.
+import-sheet cuts a PNG, BMP, or GIF spritesheet into cells, row by row, and writes one frame
+per cell (or one layer per cell with --layers). The cell size defaults to square cells for a
+one-row or one-column strip, or the whole image. --offset skips pixels at the top-left corner and
+--gap skips pixels between cells. Empty cells are dropped unless --keep-empty is given.
 mcp runs a Model Context Protocol server on stdin and stdout for AI assistants; with --root,
 its tools may only read and write inside DIR.
 "

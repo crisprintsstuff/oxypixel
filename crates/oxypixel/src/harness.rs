@@ -308,6 +308,42 @@ mod tests {
     }
 
     #[test]
+    fn a_spritesheet_is_cut_into_frames() {
+        let mut h = Harness::new();
+        // Three 16×16 cells in a row; the middle one is empty.
+        let sheet = h.data_dir().join("walk.png");
+        let mut image = image::RgbaImage::new(48, 16);
+        image.put_pixel(3, 4, image::Rgba([200, 10, 10, 255]));
+        image.put_pixel(32 + 5, 6, image::Rgba([10, 200, 10, 255]));
+        image.save(&sheet).unwrap();
+        h.click_text("File");
+        h.click_text("Import spritesheet…");
+        if h.find("Discard").is_some() {
+            h.click_text("Discard");
+        }
+        h.app.path_buf = sheet.display().to_string();
+        h.click_text("OK");
+        assert!(
+            h.find("1 cell kept of 3×1, each 16×16.").is_none(),
+            "{:?}",
+            h.texts()
+        );
+        assert!(
+            h.find("2 cells kept of 3×1, each 16×16.").is_some(),
+            "the strip guessed square cells; saw {:?}",
+            h.texts()
+        );
+        h.click_text("Keep empty cells");
+        assert!(h.find("3 cells kept of 3×1, each 16×16.").is_some());
+        h.click_text("Keep empty cells");
+        h.click_text("Import");
+        let doc = h.app.editor.document();
+        assert_eq!((doc.width(), doc.height(), doc.frame_count()), (16, 16, 2));
+        assert_eq!(doc.cel(1, 0).unwrap()[6 * 16 + 5].g, 200);
+        assert!(h.find("Import spritesheet").is_none(), "the dialog closed");
+    }
+
+    #[test]
     fn tiles_are_drawn_and_placed_on_the_canvas() {
         let mut h = Harness::new();
         h.click_text("Tilemap");

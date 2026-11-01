@@ -12,6 +12,10 @@ use oxypixel_core::{
     FrameTag, LoopDirection, MouseButton, Rgba, SheetFiles, SheetLayout, Tool, MAX_BRUSH,
     MAX_DIMENSION, MAX_FRAME_MS, MAX_PALETTE, MIN_FRAME_MS,
 };
+use oxypixel_core::{
+    read_sheet, slice_sheet, SliceGrid, SliceInto, DEFAULT_FRAME_MS, MAX_SHEET_PADDING,
+    MAX_SHEET_WIDTH,
+};
 use serde_json::{json, Map, Value};
 
 use super::Paths;
@@ -82,6 +86,25 @@ pub(crate) fn list() -> Vec<Value> {
                 "overwrite": overwrite,
             }),
             &["path", "width", "height"],
+            false,
+        ),
+        tool(
+            "import_sheet",
+            "Import a spritesheet",
+            "Cut a PNG, BMP, or GIF spritesheet into cells, row by row, and save a new .oxypix with one frame per cell (or one layer per cell). Cells with no visible pixel are dropped unless keep_empty is true. The cell size defaults to square cells for a one-row or one-column strip, or else the whole image.",
+            json!({
+                "path": { "type": "string", "description": "The .oxypix to write." },
+                "sheet": { "type": "string", "description": "The spritesheet image to read." },
+                "cell_width": { "type": "integer", "minimum": 1, "maximum": MAX_DIMENSION },
+                "cell_height": { "type": "integer", "minimum": 1, "maximum": MAX_DIMENSION },
+                "offset": { "type": "array", "items": { "type": "integer", "minimum": 0 }, "minItems": 2, "maxItems": 2, "description": "[x, y] pixels to skip before the first cell." },
+                "gap": { "type": "array", "items": { "type": "integer", "minimum": 0, "maximum": MAX_SHEET_PADDING }, "minItems": 2, "maxItems": 2, "description": "[x, y] pixels between cells." },
+                "into": { "type": "string", "enum": ["frames", "layers"], "description": "Defaults to frames." },
+                "keep_empty": { "type": "boolean" },
+                "duration_ms": { "type": "integer", "minimum": MIN_FRAME_MS, "maximum": MAX_FRAME_MS },
+                "overwrite": overwrite,
+            }),
+            &["path", "sheet"],
             false,
         ),
         tool(
@@ -281,6 +304,7 @@ pub(crate) fn call(name: &str, args: &Value, paths: &Paths) -> Option<ToolResult
         "document_info" => document_info(args, paths),
         "render" => render(args, paths),
         "create_document" => create_document(args, paths),
+        "import_sheet" => import_sheet(args, paths),
         "draw" => draw(args, paths),
         "add_layer" => add_layer(args, paths),
         "set_layer" => set_layer(args, paths),
@@ -552,6 +576,69 @@ fn create_document(args: &Args, paths: &Paths) -> ToolResult {
     save(&path, editor.document(), paths)?;
     Ok(Output::text(format!(
         "Created {} ({width}×{height}, 1 layer, 1 frame).",
+        path
+    )))
+}
+
+fn import_sheet(args: &Args, paths: &Paths) -> ToolResult {
+    let path = output(paths, args, "path")?;
+    let sheet =
+        read_sheet(&paths.resolve(string(args, "sheet")?)?).map_err(|err| err.to_string())?;
+    let mut grid = SliceGrid::guess(sheet.width, sheet.height);
+    let max = i64::from(MAX_DIMENSION);
+    if let Some(w) = opt_int(args, "cell_width", 1, max)? {
+        grid.cell_width = w as u32;
+    }
+    if let Some(h) = opt_int(args, "cell_height", 1, max)? {
+        grid.cell_height = h as u32;
+    }
+    let pair = |key: &str, max: i64| -> Result<Option<(u32, u32)>, String> {
+        let Some(value) = args.get(key) else {
+            return Ok(None);
+        };
+        let list = value.as_array().filter(|l| l.len() == 2);
+        let n = |v: &Value| {
+            v.as_i64()
+                .filter(|n| (0..=max).contains(n))
+                .map(|n| n as u32)
+        };
+        list.and_then(|l| Some((n(&l[0])?, n(&l[1])?)))
+            .map(Some)
+            .ok_or_else(|| format!("{key} must be [x, y] with whole numbers from 0 to {max}"))
+    };
+    if let Some((x, y)) = pair("offset", i64::from(MAX_SHEET_WIDTH))? {
+        (grid.offset_x, grid.offset_y) = (x, y);
+    }
+    if let Some((x, y)) = pair("gap", i64::from(MAX_SHEET_PADDING))? {
+        (grid.gap_x, grid.gap_y) = (x, y);
+    }
+    grid.keep_empty = opt_bool(args, "keep_empty")?.unwrap_or(false);
+    let into = match opt_string(args, "into")?.unwrap_or("frames") {
+        "frames" => SliceInto::Frames,
+        "layers" => SliceInto::Layers,
+        other => return Err(format!("unknown into {other}; use frames or layers")),
+    };
+    let duration = opt_int(
+        args,
+        "duration_ms",
+        i64::from(MIN_FRAME_MS),
+        i64::from(MAX_FRAME_MS),
+    )?
+    .map_or(DEFAULT_FRAME_MS, |n| n as u32);
+    let doc = slice_sheet(&sheet, &grid, into, duration).map_err(|err| err.to_string())?;
+    let (count, what) = match into {
+        SliceInto::Frames => (doc.frame_count(), "frame"),
+        SliceInto::Layers => (doc.layer_count(), "layer"),
+    };
+    let path = Source::File(path);
+    save(&path, &doc, paths)?;
+    Ok(Output::text(format!(
+        "Cut the {}×{} sheet into {} of {}×{} and saved {}.",
+        sheet.width,
+        sheet.height,
+        counted(count, what, &format!("{what}s")),
+        grid.cell_width,
+        grid.cell_height,
         path
     )))
 }

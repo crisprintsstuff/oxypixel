@@ -163,12 +163,13 @@ These match the current editor. Planned work is listed in [docs/ROADMAP.md](docs
 
 - `.oxypix` documents, plus PNG, BMP, and GIF import and export
 - Open Aseprite `.aseprite` and `.ase` files to edit, from File, then Open…, drag-and-drop, or the command line. Layers, groups, visibility, opacity, blend modes, frame durations, tags, and the palette come along. Save writes a new `.oxypix` beside the file, which is never changed. A cel's opacity is multiplied into its pixels, tilemap layers become plain layers, and reference layers are left out; the status line lists anything like that. The editor's limits apply: 1024×1024, 256 frames, and 32 layers
+- File, then Import spritesheet… cuts a PNG, BMP, or GIF sheet into one frame per cell, or one layer per cell. Set the cell size, the offset of the first cell, and the gap between cells, and the preview outlines each cell that will be kept. Empty cells are left out unless you keep them, and a sheet may be larger than a canvas (up to 16384 pixels on a side)
 - PNG and spritesheet export at 1×, 2×, or 4× nearest-neighbor. A spritesheet can be a row or a grid, with padding and a JSON description for game engines
 - GIF animation export
 - Game engine files beside a spritesheet: a Godot 4 SpriteFrames resource (`.tres`) with one animation per tag, and Unity import settings (`.png.meta`) that slice the sheet into one sprite per frame
 - One GIF or one spritesheet per animation tag, named `<name>_<tag>`. A tag's GIF plays in its direction and as many times as it repeats
 - Pack sprites (File menu): pack frames from image, `.oxypix`, and `.aseprite` files into an atlas PNG and JSON. See [OxyPack](#oxypack)
-- Headless `export-png`, `export-bmp`, `export-gif`, `export-sheet`, `export-palette`, and `import-palette` commands that never open a window
+- Headless `export-png`, `export-bmp`, `export-gif`, `export-sheet`, `export-palette`, `import-palette`, and `import-sheet` commands that never open a window
 
 ### Settings
 
@@ -279,6 +280,7 @@ Outside tests: a tester ran the `oxypack` command from the 0.7.5 Linux build. Wi
 | `document_info` | Size, layers, frames with durations and names, tags, and palette of a `.oxypix` |
 | `render` | One frame as a PNG image, scaled up, so the assistant can see its work |
 | `create_document` | A new document, clear or filled with a color |
+| `import_sheet` | A new document cut from a spritesheet, one frame or one layer per cell |
 | `draw` | Pixels, erasing, lines, rectangles, ellipses, and fills, with the editor's own tools |
 | `add_layer`, `set_layer` | Add, rename, hide, fade, or delete layers |
 | `add_frame`, `set_frame` | Add or copy frames, and rename, time, or delete them |
@@ -286,7 +288,7 @@ Outside tests: a tester ran the `oxypack` command from the 0.7.5 Linux build. Wi
 | `export` | PNG, BMP, GIF, or a spritesheet with JSON, Godot, or Unity files, and one GIF or sheet per tag |
 | `pack_sprites` | The OxyPack atlas packer |
 
-Editing tools save the document in place. `create_document`, `export`, and `pack_sprites` will not replace an existing file unless the call says `overwrite: true`. Add `--root DIR` to keep every path the tools read or write inside one folder.
+Editing tools save the document in place. `create_document`, `import_sheet`, `export`, and `pack_sprites` will not replace an existing file unless the call says `overwrite: true`. Add `--root DIR` to keep every path the tools read or write inside one folder.
 
 Claude Code:
 
@@ -337,6 +339,7 @@ oxypixel export-sheet sprite.oxypix sheet.png --per-tag
 oxypixel export-gif sprite.oxypix animation.gif --per-tag
 oxypixel export-palette sprite.oxypix palette.gpl
 oxypixel import-palette sprite.oxypix palette.gpl recolored.oxypix
+oxypixel import-sheet walk.png walk.oxypix --cell 16x16 --gap 1,1 --duration 80
 ```
 
 | Script | Result |

@@ -43,6 +43,7 @@ enum DialogKind {
     Scale,
     Replace,
     Tilemap,
+    Slice,
     Path,
     Unsaved,
     About,
@@ -63,6 +64,7 @@ enum PathKind {
     Save,
     ImportDocument,
     ImportLayer,
+    ImportSheet,
     LoadReference,
     ExportPng,
     ExportBmp,
@@ -78,6 +80,7 @@ enum Pending {
     Open,
     OpenAt,
     Import,
+    ImportSheet,
     Example,
     Quit,
 }
@@ -98,7 +101,7 @@ pub struct OxyApp {
     dialog: Option<DialogKind>,
     dialog_error: Option<String>,
     path_kind: PathKind,
-    path_buf: String,
+    pub(crate) path_buf: String,
     pending: Option<Pending>,
     new_width: String,
     new_height: String,
@@ -118,6 +121,8 @@ pub struct OxyApp {
     tilemap_set: Option<usize>,
     /// The active tileset's tiles in one texture: generation, tileset, texture, columns.
     tile_atlas: Option<(u64, usize, egui::TextureHandle, u32)>,
+    /// File, then Import spritesheet…: the sheet being cut up.
+    slice: Option<crate::sliceview::SliceDialog>,
     canvas_y: String,
     export_scale: u32,
     /// Spritesheet frames per row. 0 is one row.
@@ -241,6 +246,7 @@ impl OxyApp {
             tilemap_h: 16,
             tilemap_set: None,
             tile_atlas: None,
+            slice: None,
             canvas_y: "0".to_string(),
             export_scale: prefs.export_scale,
             sheet_columns: 0,
@@ -1352,6 +1358,15 @@ impl OxyApp {
         }
     }
 
+    fn request_import_sheet(&mut self) {
+        if self.has_unsaved_changes() {
+            self.pending = Some(Pending::ImportSheet);
+            self.dialog = Some(DialogKind::Unsaved);
+        } else {
+            self.open_path_dialog(PathKind::ImportSheet);
+        }
+    }
+
     fn request_example(&mut self) {
         if self.has_unsaved_changes() {
             self.pending = Some(Pending::Example);
@@ -1415,6 +1430,7 @@ impl OxyApp {
                 }
             }
             Pending::Import => self.open_path_dialog(PathKind::ImportDocument),
+            Pending::ImportSheet => self.open_path_dialog(PathKind::ImportSheet),
             Pending::Example => self.load_example(),
             Pending::Quit => {
                 self.allow_quit = true;
@@ -1435,6 +1451,7 @@ impl OxyApp {
             PathKind::Open
             | PathKind::ImportDocument
             | PathKind::ImportLayer
+            | PathKind::ImportSheet
             | PathKind::LoadReference
             | PathKind::ImportPalette => String::new(),
             PathKind::Save => self
@@ -1473,6 +1490,7 @@ impl OxyApp {
             PathKind::Save => self.save_to(path),
             PathKind::ImportDocument => self.import_document(&path),
             PathKind::ImportLayer => self.import_layer(&path),
+            PathKind::ImportSheet => self.open_slice(&path),
             PathKind::LoadReference => self.load_reference(&path),
             PathKind::ExportPng => self.export_scaled(&path, true),
             PathKind::ExportBmp => self.export_frame(&path, export_bmp),
@@ -1489,6 +1507,9 @@ impl OxyApp {
         if ok {
             self.dialog = None;
             self.dialog_error = None;
+            if kind == PathKind::ImportSheet {
+                self.dialog = Some(DialogKind::Slice);
+            }
             if matches!(kind, PathKind::Save) {
                 if let Some(pending) = pending {
                     self.finish(pending);
@@ -1506,21 +1527,69 @@ impl OxyApp {
     fn import_document(&mut self, path: &Path) -> bool {
         match import_image(path) {
             Ok(doc) => {
-                self.clear_references();
-                self.detach_recovery();
-                self.editor.replace_document(doc);
-                self.note_dir(path);
-                self.save_path = None;
-                self.save_suggestion = None;
-                self.bind_recovery_slot(None);
-                self.view.fit_next = true;
-                self.playing = false;
+                self.adopt_import(doc, path);
                 self.note_ok(format!("Imported {}.", path.display()));
                 true
             }
             Err(err) => {
                 self.dialog_error = Some(err.to_string());
                 false
+            }
+        }
+    }
+
+    /// Make an imported document the open one, untitled.
+    fn adopt_import(&mut self, doc: oxypixel_core::Document, path: &Path) {
+        self.clear_references();
+        self.detach_recovery();
+        self.editor.replace_document(doc);
+        self.note_dir(path);
+        self.save_path = None;
+        self.save_suggestion = None;
+        self.bind_recovery_slot(None);
+        self.view.fit_next = true;
+        self.playing = false;
+    }
+
+    fn open_slice(&mut self, path: &Path) -> bool {
+        match crate::sliceview::SliceDialog::open(path) {
+            Ok(slice) => {
+                self.slice = Some(slice);
+                true
+            }
+            Err(err) => {
+                self.dialog_error = Some(err);
+                false
+            }
+        }
+    }
+
+    fn dialog_slice(&mut self, ctx: &egui::Context) {
+        use crate::sliceview::SliceAction;
+        let Some(slice) = self.slice.as_mut() else {
+            self.dialog = None;
+            return;
+        };
+        match slice.show(ctx) {
+            SliceAction::Open => {}
+            SliceAction::Cancel => {
+                self.slice = None;
+                self.dialog = None;
+            }
+            SliceAction::Import(doc) => {
+                let path = slice.path.clone();
+                let (frames, layers) = (doc.frame_count(), doc.layer_count());
+                self.slice = None;
+                self.dialog = None;
+                self.adopt_import(doc, &path);
+                let what = if layers > 1 {
+                    format!("{layers} layers")
+                } else if frames == 1 {
+                    "1 frame".to_string()
+                } else {
+                    format!("{frames} frames")
+                };
+                self.note_ok(format!("Imported {} as {what}.", path.display()));
             }
         }
     }
@@ -1857,6 +1926,10 @@ impl OxyApp {
                     ui.separator();
                     if menu_item(ui, "Import image as document…", "") {
                         self.request_import();
+                        ui.close_menu();
+                    }
+                    if menu_item(ui, "Import spritesheet…", "") {
+                        self.request_import_sheet();
                         ui.close_menu();
                     }
                     if menu_item(ui, "Import image as layer…", "") {
@@ -3193,6 +3266,7 @@ impl OxyApp {
             DialogKind::Scale => self.dialog_scale(ctx),
             DialogKind::Replace => self.dialog_replace(ctx),
             DialogKind::Tilemap => self.dialog_tilemap(ctx),
+            DialogKind::Slice => self.dialog_slice(ctx),
             DialogKind::Path => self.dialog_path(ctx),
             DialogKind::Unsaved => self.dialog_unsaved(ctx),
             DialogKind::About => self.dialog_about(ctx),
@@ -3324,6 +3398,7 @@ impl OxyApp {
             PathKind::Save => "Save .oxypix",
             PathKind::ImportDocument => "Import image as a new document",
             PathKind::ImportLayer => "Import image as a layer",
+            PathKind::ImportSheet => "Import spritesheet",
             PathKind::LoadReference => "Load reference image",
             PathKind::ExportPng => "Export PNG",
             PathKind::ExportBmp => "Export BMP",
@@ -4242,7 +4317,7 @@ fn filter_name(kind: PathKind, format: PaletteFormat) -> &'static str {
     match kind {
         PathKind::Open => "OxyPixel or Aseprite document",
         PathKind::Save => "OxyPixel document",
-        PathKind::ImportDocument | PathKind::ImportLayer => "Image",
+        PathKind::ImportDocument | PathKind::ImportLayer | PathKind::ImportSheet => "Image",
         PathKind::LoadReference => "Reference image",
         PathKind::ExportPng | PathKind::ExportSheet => "PNG",
         PathKind::ExportBmp => "BMP",
@@ -4260,7 +4335,9 @@ fn filter_ext(kind: PathKind, format: PaletteFormat) -> &'static [&'static str] 
     match kind {
         PathKind::Open => &["oxypix", "aseprite", "ase"],
         PathKind::Save => &["oxypix"],
-        PathKind::ImportDocument | PathKind::ImportLayer => &["png", "bmp", "gif"],
+        PathKind::ImportDocument | PathKind::ImportLayer | PathKind::ImportSheet => {
+            &["png", "bmp", "gif"]
+        }
         PathKind::LoadReference => &["png", "jpg", "jpeg"],
         PathKind::ExportPng | PathKind::ExportSheet => &["png"],
         PathKind::ExportBmp => &["bmp"],

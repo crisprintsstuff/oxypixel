@@ -47,6 +47,8 @@ pub enum Error {
     PaletteFull(usize),
     #[error("{0}")]
     BadPalette(String),
+    #[error("{0}")]
+    BadSheet(String),
     #[error("nothing is selected")]
     NoSelection,
     #[error("the turned pixels fall outside the canvas")]
