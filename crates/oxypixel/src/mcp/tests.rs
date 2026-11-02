@@ -403,6 +403,34 @@ fn import_sheet_cuts_cells_into_frames_or_layers() {
 }
 
 #[test]
+fn export_writes_an_aseprite_copy() {
+    let dir = TempDir::new("asew");
+    let mut server = Server::new(Some(dir.0.clone()));
+    call(
+        &mut server,
+        "create_document",
+        json!({ "path": "a.oxypix", "width": 4, "height": 4, "background": "#102030" }),
+    );
+    let (err, text, _) = call(
+        &mut server,
+        "export",
+        json!({ "path": "a.oxypix", "output": "a.aseprite", "format": "aseprite" }),
+    );
+    assert!(!err, "{text}");
+    let (doc, _) = oxypack::open_document(&dir.0.join("a.aseprite")).unwrap();
+    assert_eq!(
+        doc.composite_pixel(0, 3, 3),
+        Some(Rgba::new(0x10, 0x20, 0x30, 255))
+    );
+    let (err, text, _) = call(
+        &mut server,
+        "export",
+        json!({ "path": "a.oxypix", "output": "a.aseprite", "format": "aseprite" }),
+    );
+    assert!(err && text.contains("already exists"), "{text}");
+}
+
+#[test]
 fn outline_and_shadow_ops_paint_around_the_art() {
     let dir = TempDir::new("fx");
     let mut server = Server::new(Some(dir.0.clone()));

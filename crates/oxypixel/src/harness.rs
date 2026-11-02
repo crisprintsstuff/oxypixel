@@ -344,6 +344,32 @@ mod tests {
     }
 
     #[test]
+    fn a_copy_is_saved_as_aseprite() {
+        let mut h = Harness::new();
+        let out = h.data_dir().join("copy.aseprite");
+        std::fs::write(&out, b"old").unwrap();
+        h.click_text("File");
+        h.click_text("Save a copy as Aseprite…");
+        h.app.path_buf = out.display().to_string();
+        h.step();
+        assert!(
+            h.texts().iter().any(|t| t.contains("will be replaced")),
+            "an existing file is called out; saw {:?}",
+            h.texts()
+        );
+        h.click_text("OK");
+        let (doc, notes) = oxypack::open_document(&out).unwrap();
+        assert!(notes.is_empty(), "{notes:?}");
+        let ours = h.app.editor.document();
+        assert_eq!(doc.layers(), ours.layers());
+        assert_eq!(doc.composite(0).unwrap(), ours.composite(0).unwrap());
+        assert!(
+            h.app.save_path.is_none(),
+            "the open document is not the copy"
+        );
+    }
+
+    #[test]
     fn tiles_are_drawn_and_placed_on_the_canvas() {
         let mut h = Harness::new();
         h.click_text("Tilemap");

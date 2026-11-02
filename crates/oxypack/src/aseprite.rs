@@ -23,10 +23,11 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::rc::Rc;
 
+use oxypixel_core::Tileset as CoreTileset;
 use oxypixel_core::{
     default_palette, Document, LayerInfo, Rgba, DEFAULT_FRAME_MS, MAX_DIMENSION, MAX_FILE_BYTES,
     MAX_FRAMES, MAX_FRAME_MS, MAX_GROUP_DEPTH, MAX_LAYERS, MAX_NAME_BYTES, MAX_PALETTE,
-    MAX_SHEET_PIXELS, MAX_TAGS, MIN_FRAME_MS,
+    MAX_SHEET_PIXELS, MAX_TAGS, MAX_TILESETS, MIN_FRAME_MS, TILE_FLIP_D, TILE_FLIP_X, TILE_FLIP_Y,
 };
 
 use crate::blend::{blend, BlendMode};
@@ -193,6 +194,7 @@ struct Layer {
 
 /// Tiles stacked top to bottom in one image, `tile_w` wide.
 struct Tileset {
+    name: String,
     tile_w: u32,
     tile_h: u32,
     count: u32,
@@ -204,6 +206,7 @@ struct Tileset {
 }
 
 /// A tilemap cel, drawn into an image once the frame's chunks are read.
+#[derive(Clone)]
 struct Tilemap {
     layer: usize,
     x: i32,
@@ -272,8 +275,10 @@ pub fn read_aseprite(bytes: &[u8]) -> Result<AseFile> {
 /// Returns the document and notes on what could not be kept exactly.
 ///
 /// OxyPixel has no cel opacity, so a cel's opacity is multiplied into its
-/// pixels. Tilemap layers become plain layers, reference layers are left
-/// out, and a cel's z-index is not kept.
+/// pixels. A tilemap layer stays a tilemap when its tileset is in the file
+/// and its cels sit on the tile grid at full opacity; otherwise it becomes
+/// a plain layer. Reference layers are left out, and a cel's z-index is
+/// not kept.
 pub fn read_aseprite_document(bytes: &[u8]) -> Result<(Document, Vec<String>)> {
     let parsed = parse(bytes)?;
     let (width, height) = (parsed.width, parsed.height);
@@ -315,12 +320,6 @@ pub fn read_aseprite_document(bytes: &[u8]) -> Result<(Document, Vec<String>)> {
         } else {
             (layer.opacity, layer.blend)
         };
-        if layer.kind == Kind::Tilemap {
-            notes.push(format!(
-                "tilemap layer {} is opened as a plain layer",
-                layer.name
-            ));
-        }
         kept[index] = Some(layers.len());
         let mut info = LayerInfo::new(clamp_layer_name(&layer.name));
         info.visible = layer.visible;
@@ -398,10 +397,147 @@ pub fn read_aseprite_document(bytes: &[u8]) -> Result<(Document, Vec<String>)> {
             tag.name = format!("Tag {}", i + 1);
         }
     }
-    let doc = Document::from_layers(width, height, layers, frames, palette, tags)
+    let layer_count = layers.len();
+    let mut doc = Document::from_layers(width, height, layers, frames, palette, tags)
         .map_err(|err| bad(err.to_string()))?;
+    let (sets, layer_sets, grids) = open_tilemaps(&parsed, &kept, layer_count, &mut notes);
+    if layer_sets.iter().any(Option::is_some) {
+        doc.attach_tilemaps(sets, layer_sets, grids)
+            .map_err(|err| bad(err.to_string()))?;
+    }
     notes.dedup();
     Ok((doc, notes))
+}
+
+/// Tilesets, each kept layer's tileset, and each frame's grids, for the
+/// tilemap layers that can stay tilemaps. The others stay plain layers,
+/// already drawn from their tiles, with a note saying why.
+#[allow(clippy::type_complexity)]
+fn open_tilemaps(
+    parsed: &Parsed,
+    kept: &[Option<usize>],
+    layer_count: usize,
+    notes: &mut Vec<String>,
+) -> (
+    Vec<CoreTileset>,
+    Vec<Option<u16>>,
+    Vec<Vec<Option<Vec<u32>>>>,
+) {
+    let frames = parsed.frames.len();
+    let mut sets: Vec<CoreTileset> = Vec::new();
+    let mut by_id: HashMap<u32, u16> = HashMap::new();
+    let mut layer_sets = vec![None; layer_count];
+    let mut grids = vec![vec![None; layer_count]; frames];
+    for (index, layer) in parsed.layers.iter().enumerate() {
+        let Some(target) = kept[index].filter(|_| layer.kind == Kind::Tilemap) else {
+            continue;
+        };
+        match tilemap_layer(parsed, index, &mut sets, &mut by_id) {
+            Ok((slot, layer_grids)) => {
+                layer_sets[target] = Some(slot);
+                for (frame, grid) in layer_grids.into_iter().enumerate() {
+                    grids[frame][target] = Some(grid);
+                }
+            }
+            Err(reason) => notes.push(format!(
+                "tilemap layer {} is opened as a plain layer: {reason}",
+                layer.name
+            )),
+        }
+    }
+    (sets, layer_sets, grids)
+}
+
+/// One Aseprite tilemap layer as an OxyPixel tileset slot and a grid per
+/// frame, or why it cannot be one. A tileset is added to `sets` only when
+/// the layer converts.
+fn tilemap_layer(
+    parsed: &Parsed,
+    index: usize,
+    sets: &mut Vec<CoreTileset>,
+    by_id: &mut HashMap<u32, u16>,
+) -> std::result::Result<(u16, Vec<Vec<u32>>), String> {
+    let layer = &parsed.layers[index];
+    let ts = parsed
+        .tilesets
+        .get(&layer.tileset)
+        .ok_or("its tileset is missing")?;
+    let pixels = ts
+        .pixels
+        .as_ref()
+        .ok_or("its tileset is kept in another file")?;
+    let (tw, th) = (ts.tile_w, ts.tile_h);
+    // Aseprite's empty tile is tile 0, or in old files the all-ones id.
+    let first = u32::from(ts.zero_empty);
+    let new_set = match by_id.get(&layer.tileset) {
+        Some(_) => None,
+        None => {
+            if sets.len() >= MAX_TILESETS {
+                return Err(format!("the editor keeps up to {MAX_TILESETS} tilesets"));
+            }
+            let per_tile = tw as usize * th as usize;
+            let tiles = (first..ts.count)
+                .map(|i| pixels[i as usize * per_tile..(i as usize + 1) * per_tile].to_vec())
+                .collect();
+            Some(
+                CoreTileset::with_tiles(ts.name.clone(), tw, th, tiles)
+                    .map_err(|e| e.to_string())?,
+            )
+        }
+    };
+    let set = by_id
+        .get(&layer.tileset)
+        .map(|&slot| &sets[usize::from(slot)])
+        .or(new_set.as_ref())
+        .ok_or("its tileset is missing")?;
+    let (cols, rows) = set.grid_size(parsed.width, parsed.height);
+    let mut grids = Vec::with_capacity(parsed.frames.len());
+    for maps in &parsed.tilemaps {
+        let mut grid = vec![0u32; cols as usize * rows as usize];
+        for map in maps.iter().filter(|m| m.layer == index) {
+            if map.opacity != 255 {
+                return Err("a cel has its own opacity".into());
+            }
+            if map.x < 0 || map.y < 0 || map.x as u32 % tw != 0 || map.y as u32 % th != 0 {
+                return Err("a cel is not on the tile grid".into());
+            }
+            let (col0, row0) = (map.x as u32 / tw, map.y as u32 / th);
+            let empty = if ts.zero_empty { 0 } else { map.id_mask };
+            for (i, &value) in map.tiles.iter().enumerate() {
+                let id = value & map.id_mask;
+                if id == empty || id >= ts.count {
+                    continue;
+                }
+                let (col, row) = (col0 + i as u32 % map.cols, row0 + i as u32 / map.cols);
+                if col >= cols || row >= rows {
+                    // Past the canvas, so never drawn.
+                    continue;
+                }
+                let mut entry = id + 1 - first;
+                if value & map.x_flip != 0 {
+                    entry |= TILE_FLIP_X;
+                }
+                if value & map.y_flip != 0 {
+                    entry |= TILE_FLIP_Y;
+                }
+                if value & map.d_flip != 0 && tw == th {
+                    entry |= TILE_FLIP_D;
+                }
+                grid[(row * cols + col) as usize] = entry;
+            }
+        }
+        grids.push(grid);
+    }
+    let slot = match new_set {
+        Some(set) => {
+            sets.push(set);
+            let slot = (sets.len() - 1) as u16;
+            by_id.insert(layer.tileset, slot);
+            slot
+        }
+        None => by_id[&layer.tileset],
+    };
+    Ok((slot, grids))
 }
 
 /// A layer name cut to the editor's limit on a character boundary.
@@ -426,6 +562,9 @@ struct Parsed {
     palette: Vec<Rgba>,
     /// The header says group opacity and blend mode are valid.
     group_blend: bool,
+    /// Each frame's tilemap cels.
+    tilemaps: Vec<Vec<Tilemap>>,
+    tilesets: HashMap<u32, Tileset>,
 }
 
 fn parse(bytes: &[u8]) -> Result<Parsed> {
@@ -490,6 +629,8 @@ fn parse(bytes: &[u8]) -> Result<Parsed> {
     let mut store: Vec<Vec<Option<Rc<Image>>>> = Vec::new();
     let mut stored_pixels = 0u64;
     let mut frames = Vec::with_capacity(frame_count);
+    // Each frame's tilemap cels, linked ones included, for opening them as tilemaps.
+    let mut frame_maps: Vec<Vec<Tilemap>> = Vec::with_capacity(frame_count);
 
     let mut pos = HEADER_LEN;
     for frame in 0..frame_count {
@@ -511,6 +652,7 @@ fn parse(bytes: &[u8]) -> Result<Parsed> {
             .ok_or_else(|| bad(format!("frame {frame} runs past the end of the file")))?;
         let mut cels: Vec<Cel> = Vec::new();
         let mut tilemaps: Vec<Tilemap> = Vec::new();
+        let mut linked_maps: Vec<Tilemap> = Vec::new();
         let mut at = pos + FRAME_HEADER_LEN;
         while at < frame_end {
             let mut ch = Cursor::new(&bytes[..frame_end]);
@@ -614,6 +756,19 @@ fn parse(bytes: &[u8]) -> Result<Parsed> {
                         }
                         1 => {
                             let linked = usize::from(c.u16()?);
+                            if let Some(map) = frame_maps
+                                .get(linked)
+                                .and_then(|maps| maps.iter().find(|m| m.layer == layer))
+                            {
+                                // A linked cel shares the tiles but keeps its own place.
+                                linked_maps.push(Tilemap {
+                                    x,
+                                    y,
+                                    opacity,
+                                    z,
+                                    ..map.clone()
+                                });
+                            }
                             let source = store[layer].get(linked).cloned().flatten();
                             Some(source.ok_or_else(|| {
                                 bad(format!(
@@ -735,7 +890,7 @@ fn parse(bytes: &[u8]) -> Result<Parsed> {
                     let tile_w = u32::from(c.u16()?);
                     let tile_h = u32::from(c.u16()?);
                     c.skip(2 + 14)?; // base index (for display only), reserved
-                    c.string()?;
+                    let name = c.string()?;
                     if set_flags & TILESET_EXTERNAL != 0 {
                         c.skip(4 + 4)?; // external file and its tileset id
                     }
@@ -760,6 +915,7 @@ fn parse(bytes: &[u8]) -> Result<Parsed> {
                     tilesets.insert(
                         id,
                         Tileset {
+                            name,
                             tile_w,
                             tile_h,
                             count,
@@ -795,7 +951,7 @@ fn parse(bytes: &[u8]) -> Result<Parsed> {
             }
             at = chunk_end;
         }
-        for map in tilemaps {
+        for map in &tilemaps {
             let layer = &layers[map.layer];
             let tileset = tilesets.get(&layer.tileset).ok_or_else(|| {
                 bad(format!(
@@ -804,7 +960,7 @@ fn parse(bytes: &[u8]) -> Result<Parsed> {
                 ))
             })?;
             let Some(image) =
-                draw_tilemap(&map, tileset, &layer.name, &mut notes, &mut stored_pixels)?
+                draw_tilemap(map, tileset, &layer.name, &mut notes, &mut stored_pixels)?
             else {
                 continue;
             };
@@ -821,6 +977,8 @@ fn parse(bytes: &[u8]) -> Result<Parsed> {
             });
         }
         frames.push((cels, duration));
+        tilemaps.extend(linked_maps);
+        frame_maps.push(tilemaps);
         pos = frame_end;
     }
     notes.dedup();
@@ -834,6 +992,8 @@ fn parse(bytes: &[u8]) -> Result<Parsed> {
         notes,
         palette,
         group_blend: group_opacity_valid,
+        tilemaps: frame_maps,
+        tilesets,
     })
 }
 
@@ -1734,6 +1894,90 @@ pub(crate) mod tests {
         let ase = read_aseprite(&external).unwrap();
         assert_eq!(ase.frames[0].0, vec![Rgba::CLEAR]);
         assert!(ase.notes[0].contains("another file"), "{:?}", ase.notes);
+    }
+
+    #[test]
+    fn tilemap_layers_open_as_tilemaps_when_their_cels_sit_on_the_grid() {
+        let tiles = [
+            1,
+            1 | X_FLIP,
+            1 | Y_FLIP,
+            1 | D_FLIP,
+            1 | D_FLIP | X_FLIP,
+            0,
+            9,
+        ];
+        let bytes = file(
+            14,
+            2,
+            32,
+            0,
+            vec![
+                (
+                    100,
+                    vec![
+                        tileset(3, 2, 2, &corner_tiles()),
+                        tilemap_layer("map", 3),
+                        cel_tilemap(0, 0, 7, 1, 32, &tiles),
+                    ],
+                ),
+                (100, vec![cel_link(0, 0)]),
+            ],
+        );
+        let (doc, notes) = read_aseprite_document(&bytes).unwrap();
+        assert_eq!(doc.layer_tileset(0), Some(0), "{notes:?}");
+        let set = &doc.tilesets()[0];
+        assert_eq!(
+            (set.len(), set.tile_width(), set.name.as_str()),
+            (1, 2, "tiles")
+        );
+        assert_eq!(
+            doc.tile_grid(0, 0).unwrap(),
+            &[
+                1,
+                1 | TILE_FLIP_X,
+                1 | TILE_FLIP_Y,
+                1 | TILE_FLIP_D,
+                1 | TILE_FLIP_D | TILE_FLIP_X,
+                0,
+                0
+            ]
+        );
+        assert_eq!(doc.tile_grid(1, 0), doc.tile_grid(0, 0), "the linked cel");
+        let flat = read_aseprite(&bytes).unwrap();
+        for frame in 0..2 {
+            assert_eq!(doc.composite(frame).unwrap(), flat.frames[frame].0);
+        }
+        assert!(
+            !notes.iter().any(|n| n.contains("plain layer")),
+            "{notes:?}"
+        );
+
+        // A cel one pixel off the grid stays a plain layer, drawn the same.
+        let off = file(
+            3,
+            2,
+            32,
+            0,
+            vec![(
+                100,
+                vec![
+                    tileset(0, 2, 2, &corner_tiles()),
+                    tilemap_layer("map", 0),
+                    cel_tilemap(0, 1, 1, 1, 8, &[1]),
+                ],
+            )],
+        );
+        let (doc, notes) = read_aseprite_document(&off).unwrap();
+        assert_eq!(doc.layer_tileset(0), None);
+        assert_eq!(
+            doc.composite(0).unwrap(),
+            read_aseprite(&off).unwrap().frames[0].0
+        );
+        assert!(
+            notes.iter().any(|n| n.contains("not on the tile grid")),
+            "{notes:?}"
+        );
     }
 
     #[test]
