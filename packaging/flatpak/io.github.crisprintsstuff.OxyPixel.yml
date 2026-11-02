@@ -25,8 +25,8 @@ modules:
     buildsystem: simple
     sources:
       - type: archive
-        url: https://github.com/crisprintsstuff/oxypixel/releases/download/v0.9.6/oxypixel-0.9.6-linux-x86_64.tar.gz
-        sha256: f9b99245020745285936860a0f6b1350a9ec6930d6aa05e908c09f1a6f542aeb
+        url: https://github.com/crisprintsstuff/oxypixel/releases/download/v1.0.0/oxypixel-1.0.0-linux-x86_64.tar.gz
+        sha256: 31ce905cea08a502515f6e804d72c988ba5cd42f8b46306573cd353af2f6bd26
         dest: release
       - type: dir
         path: ../..
