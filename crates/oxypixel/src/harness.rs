@@ -446,9 +446,10 @@ mod tests {
         let saved = std::fs::read_to_string(h.data_dir().join("keys.txt")).unwrap();
         assert!(saved.contains("preset=aseprite"), "{saved}");
         assert!(saved.contains("tool.pencil=K"), "{saved}");
-        // The menus show the preset's keys: Aseprite's Settings is Ctrl+K.
+        // The menus show the preset's keys: Aseprite's Settings is Ctrl+K (Cmd+K on a Mac).
         h.click_text("Edit");
-        assert!(h.find("Ctrl+K").is_some(), "{:?}", h.texts());
+        let settings_key = crate::keymap::Chord::ctrl(Key::K).label();
+        assert!(h.find(&settings_key).is_some(), "{:?}", h.texts());
     }
 
     #[test]
