@@ -106,7 +106,12 @@ pub fn data_dir() -> Option<PathBuf> {
     {
         std::env::var_os("APPDATA").map(|p| PathBuf::from(p).join("OxyPixel"))
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        std::env::var_os("HOME")
+            .map(|home| PathBuf::from(home).join("Library/Application Support/OxyPixel"))
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         if let Some(xdg) = std::env::var_os("XDG_DATA_HOME") {
             let path = PathBuf::from(xdg);
@@ -237,12 +242,14 @@ mod tests {
     fn data_dir_uses_the_platform_folder() {
         let root = std::env::temp_dir().join("oxypixel-recent-dir-test");
         #[cfg(windows)]
-        let (key, leaf) = ("APPDATA", "OxyPixel");
-        #[cfg(not(windows))]
-        let (key, leaf) = ("XDG_DATA_HOME", "oxypixel");
+        let (key, leaf, parent) = ("APPDATA", "OxyPixel", root.clone());
+        #[cfg(target_os = "macos")]
+        let (key, leaf, parent) = ("HOME", "OxyPixel", root.join("Library/Application Support"));
+        #[cfg(not(any(windows, target_os = "macos")))]
+        let (key, leaf, parent) = ("XDG_DATA_HOME", "oxypixel", root.clone());
         let _restore = EnvVar::set(key, root.as_os_str());
         let dir = data_dir().expect("data directory");
         assert_eq!(dir.file_name().and_then(|name| name.to_str()), Some(leaf));
-        assert_eq!(dir.parent(), Some(root.as_path()));
+        assert_eq!(dir.parent(), Some(parent.as_path()));
     }
 }

@@ -5,7 +5,7 @@
 //! panicking, so the editor can paste its in-memory patch instead.
 //!
 //! The clipboard value stays on one background thread for the life of the
-//! process. Linux clipboard owners have to keep serving the image; dropping
+//! process. Windows, macOS, and Linux all use `arboard`. Linux clipboard owners have to keep serving the image; dropping
 //! the value clears it for other programs. The set call does not wait for
 //! another program to copy, because that wait would block until then.
 
@@ -78,7 +78,7 @@ fn session_available() -> bool {
 
 /// `display` is `DISPLAY`, `wayland` is `WAYLAND_DISPLAY`. Empty values do not count.
 fn session_from(display: Option<&OsStr>, wayland: Option<&OsStr>) -> bool {
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     {
         let _ = (display, wayland);
         true
@@ -87,17 +87,14 @@ fn session_from(display: Option<&OsStr>, wayland: Option<&OsStr>) -> bool {
     {
         nonempty(display) || nonempty(wayland)
     }
-    #[cfg(not(any(windows, all(unix, not(target_os = "macos")))))]
+    #[cfg(not(any(windows, unix)))]
     {
         let _ = (display, wayland);
         false
     }
 }
 
-#[cfg(any(
-    all(unix, not(target_os = "macos")),
-    not(any(windows, all(unix, not(target_os = "macos"))))
-))]
+#[cfg(all(unix, not(target_os = "macos")))]
 fn nonempty(value: Option<&OsStr>) -> bool {
     value.is_some_and(|text| !text.is_empty())
 }
@@ -159,7 +156,7 @@ struct Job {
     reply: Sender<Outcome>,
 }
 
-#[cfg(any(windows, all(unix, not(target_os = "macos"))))]
+#[cfg(any(windows, unix))]
 fn worker(rx: Receiver<Job>) {
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -184,14 +181,14 @@ fn worker(rx: Receiver<Job>) {
     }
 }
 
-#[cfg(not(any(windows, all(unix, not(target_os = "macos")))))]
+#[cfg(not(any(windows, unix)))]
 fn worker(rx: Receiver<Job>) {
     while let Ok(job) = rx.recv() {
         let _ = job.reply.send(job.op.failure());
     }
 }
 
-#[cfg(any(windows, all(unix, not(target_os = "macos"))))]
+#[cfg(any(windows, unix))]
 fn dispatch(slot: &mut Option<arboard::Clipboard>, failed: &mut bool, op: &Op) -> Outcome {
     if !ensure(slot, failed) {
         return op.failure();
@@ -209,7 +206,7 @@ fn dispatch(slot: &mut Option<arboard::Clipboard>, failed: &mut bool, op: &Op) -
     }
 }
 
-#[cfg(any(windows, all(unix, not(target_os = "macos"))))]
+#[cfg(any(windows, unix))]
 fn ensure(slot: &mut Option<arboard::Clipboard>, failed: &mut bool) -> bool {
     if *failed {
         return false;
@@ -229,7 +226,7 @@ fn ensure(slot: &mut Option<arboard::Clipboard>, failed: &mut bool) -> bool {
     }
 }
 
-#[cfg(any(windows, all(unix, not(target_os = "macos"))))]
+#[cfg(any(windows, unix))]
 fn publish(clipboard: &mut arboard::Clipboard, width: u32, height: u32, rgba: &[u8]) -> bool {
     use std::borrow::Cow;
 
@@ -245,7 +242,7 @@ fn publish(clipboard: &mut arboard::Clipboard, width: u32, height: u32, rgba: &[
     clipboard.set_image(image).is_ok()
 }
 
-#[cfg(any(windows, all(unix, not(target_os = "macos"))))]
+#[cfg(any(windows, unix))]
 fn read(clipboard: &mut arboard::Clipboard) -> ClipboardRead {
     let image = match clipboard.get_image() {
         Ok(image) => image,
@@ -287,7 +284,7 @@ mod tests {
 
     #[test]
     fn missing_display_is_not_a_clipboard_session() {
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         assert!(session_from(None, None));
 
         #[cfg(all(unix, not(target_os = "macos")))]

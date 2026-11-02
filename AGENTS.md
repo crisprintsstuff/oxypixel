@@ -25,7 +25,7 @@ Window behavior is tested headlessly with `crates/oxypixel/src/harness.rs`: the 
 crates/oxypixel-core     document, tools, history, import/export. No GUI.
 crates/oxypixel          egui window, shortcuts, recent files, update check, CLI
 installer/               NSIS script and wizard art
-scripts/                 Windows cross-build, installer, Linux tar.gz and .deb
+scripts/                 Windows cross-build, installer, Linux tar.gz, .deb, and AppImage, the Mac .dmg
 .github/workflows/       CI (ci.yml) and release (release.yml)
 ```
 
@@ -35,7 +35,7 @@ Platform UI dependencies stay on the binary:
 
 - Windows: `rfd` with default features off (system file dialog; error boxes use `MessageBoxW`).
 - Linux: `eframe` with the `x11` feature, and `rfd` through the XDG desktop portal.
-- macOS is not a target. Do not add a macOS backend unless [docs/ROADMAP.md](docs/ROADMAP.md) grows a task for it.
+- macOS: `arboard` for the clipboard and `wgpu` with `metal`. File dialogs and error boxes run the system's `osascript`, so there is no `rfd` there. `scripts/package-macos.sh` makes the universal `.app` and `.dmg` on a Mac; nothing macOS-specific can be checked from Linux, because `ring` needs the macOS SDK, so the `macos-latest` CI job is the check.
 
 Both crates set `unsafe_code = "forbid"`.
 

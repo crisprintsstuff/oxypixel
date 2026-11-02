@@ -1,6 +1,6 @@
 # OxyPixel
 
-OxyPixel is a pixel-art editor for making sprites and short animations on Windows and Linux. Draw on a pixel canvas, stack layers, step through named frames and animation tags, then save an `.oxypix` document or export PNG, BMP, GIF, or a spritesheet with JSON for game engines. It comes with [OxyPack](#oxypack), a sprite atlas packer that also reads Aseprite files, as a command and as a window inside the editor.
+OxyPixel is a pixel-art editor for making sprites and short animations on Windows, macOS, and Linux. Draw on a pixel canvas, stack layers, step through named frames and animation tags, then save an `.oxypix` document or export PNG, BMP, GIF, or a spritesheet with JSON for game engines. It comes with [OxyPack](#oxypack), a sprite atlas packer that also reads Aseprite files, as a command and as a window inside the editor.
 
 The editing rules live in the `oxypixel-core` library, and the window is an [egui](https://github.com/emilk/egui) app. OxyPixel is an original program. It is not affiliated with Pixelorama, Orama Interactive, Godot, or Aseprite.
 
@@ -34,7 +34,7 @@ The pictures above are screenshots of OxyPixel 0.9.0. The drawing is a sample fi
 
 ## Status
 
-OxyPixel 0.9.6 is an early release. The Windows downloads are unsigned. Linux publishes a tar.gz, a `.deb`, and an AppImage. A canvas side is at most 1024 pixels. What works today, and the open task list, is in [docs/ROADMAP.md](docs/ROADMAP.md).
+OxyPixel 0.9.6 is an early release. The Windows downloads are unsigned. Linux publishes a tar.gz, a `.deb`, and an AppImage. macOS gets one app for Apple Silicon and Intel Macs, signed ad hoc but not notarized. A canvas side is at most 1024 pixels. What works today, and the open task list, is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Download
 
@@ -47,11 +47,24 @@ The files for the current release are on the [latest release](https://github.com
 | `oxypixel-<version>-linux-x86_64.tar.gz` | Linux x86_64 archive |
 | `oxypixel-<version>-linux-x86_64.deb` | Linux Debian package |
 | `OxyPixel-<version>-x86_64.AppImage` | Linux AppImage: one file that runs on most distributions with glibc 2.39 or newer |
+| `OxyPixel-<version>-macos-universal.dmg` | macOS 11 or newer, Apple Silicon and Intel. The app also holds `oxypack` |
 | `oxypack-<version>-windows-x86_64.exe` | [OxyPack](#oxypack) sprite packer for Windows. The Linux archive and `.deb` include `oxypack` |
 | [`SHA256SUMS.txt`](https://github.com/crisprintsstuff/oxypixel/releases/latest/download/SHA256SUMS.txt) | Checksums for the editor downloads, used by Check for updates |
-| `SHA256SUMS-windows.txt`, `SHA256SUMS-linux.txt` | Checksums for each platform's files, including `oxypack-<version>-windows-x86_64.exe` |
+| `SHA256SUMS-windows.txt`, `SHA256SUMS-linux.txt`, `SHA256SUMS-macos.txt` | Checksums for each platform's files, including `oxypack-<version>-windows-x86_64.exe` |
 
 The Windows files are unsigned. SmartScreen can warn that the publisher is unknown. Check `SHA256SUMS.txt` before you install. Signing steps are in [docs/BUILD-WINDOWS.md](docs/BUILD-WINDOWS.md).
+
+## macOS
+
+Open `OxyPixel-<version>-macos-universal.dmg` and drag OxyPixel onto Applications. One app runs natively on Apple Silicon and on Intel Macs, macOS 11 or newer.
+
+The app is signed ad hoc, not with an Apple Developer ID, and not notarized. The first time, macOS says it cannot check the app for malicious software. Right-click (or Control-click) OxyPixel in Applications, choose Open, then Open again; on macOS 15 and later, open System Settings, Privacy & Security, and click Open Anyway. Check `SHA256SUMS.txt` first if you like:
+
+```bash
+shasum -a 256 OxyPixel-<version>-macos-universal.dmg
+```
+
+File dialogs are the system's own. Open files with File, then Open…, by dropping them on the window, or from Terminal with `/Applications/OxyPixel.app/Contents/MacOS/oxypixel sprite.oxypix`; double-clicking a document in Finder does not open it yet. `oxypack` is at `/Applications/OxyPixel.app/Contents/MacOS/oxypack`. Settings, recent files, and recovery copies are in `~/Library/Application Support/OxyPixel`. Check for updates says when a release is out and links to it; drag the new app into Applications to update.
 
 ## Windows installer
 

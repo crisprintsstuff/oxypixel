@@ -262,7 +262,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         #[cfg(windows)]
         let key = "APPDATA";
-        #[cfg(not(windows))]
+        #[cfg(target_os = "macos")]
+        let key = "HOME";
+        #[cfg(not(any(windows, target_os = "macos")))]
         let key = "XDG_DATA_HOME";
         let _restore = EnvVar::set(key, root.as_os_str());
         assert_eq!(load(), Prefs::default());

@@ -120,12 +120,33 @@ jobs:
             dist/OxyPixel-*-x86_64.AppImage
             dist/SHA256SUMS-linux.txt
 
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - name: Test and pack
+        run: |
+          cargo test --workspace
+          ./scripts/package-macos.sh
+          (cd dist && shasum -a 256 OxyPixel-*-macos-universal.dmg > SHA256SUMS-macos.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oxypixel-macos-universal
+          path: |
+            dist/OxyPixel-*-macos-universal.dmg
+            dist/SHA256SUMS-macos.txt
+
   publish:
-    needs: [windows, linux]
+    needs: [windows, linux, macos]
     if: >-
       always() &&
       needs.windows.result == 'success' &&
       needs.linux.result == 'success' &&
+      needs.macos.result == 'success' &&
       (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -146,25 +167,29 @@ jobs:
           linux="oxypixel-${version}-linux-x86_64.tar.gz"
           deb="oxypixel-${version}-linux-x86_64.deb"
           appimage="OxyPixel-${version}-x86_64.AppImage"
+          dmg="OxyPixel-${version}-macos-universal.dmg"
           test -f "dist/${portable}"
           test -f "dist/${setup}"
           test -f "dist/${linux}"
           test -f "dist/${deb}"
           test -f "dist/${appimage}"
+          test -f "dist/${dmg}"
           test -f "dist/oxypack-${version}-windows-x86_64.exe"
-          # SHA256SUMS.txt lists the editor's four packages only; the updater
+          # SHA256SUMS.txt lists the editor's packages only; the updater
           # reads it. The oxypack exe is in SHA256SUMS-windows.txt.
           # The updater matches these basenames exactly. The first three stay
-          # in the 0.3.0 order. The .deb and the AppImage follow. PackageKind
-          # looks up a full name, so the extra lines do not hide the tar.gz.
+          # in the 0.3.0 order. The .deb, the AppImage, and the .dmg follow.
+          # PackageKind looks up a full name, so the extra lines do not hide
+          # the tar.gz. The Mac app never downloads, but its line lets anyone
+          # check the .dmg.
           (
             cd dist
-            sha256sum "$portable" "$setup" "$linux" "$deb" "$appimage"
+            sha256sum "$portable" "$setup" "$linux" "$deb" "$appimage" "$dmg"
           ) > dist/SHA256SUMS.txt
-          awk -v p="$portable" -v s="$setup" -v l="$linux" -v d="$deb" -v a="$appimage" '
+          awk -v p="$portable" -v s="$setup" -v l="$linux" -v d="$deb" -v a="$appimage" -v m="$dmg" '
             NF != 2 || length($1) != 64 { exit 1 }
             { seen[$2] = 1 }
-            END { if (!seen[p] || !seen[s] || !seen[l] || !seen[d] || !seen[a]) exit 1 }
+            END { if (!seen[p] || !seen[s] || !seen[l] || !seen[d] || !seen[a] || !seen[m]) exit 1 }
           ' dist/SHA256SUMS.txt
           # Accept "## 0.8.6" and Keep a Changelog "## [0.8.6] - 2026-10-26".
           awk -v ver="$version" '
@@ -201,7 +226,7 @@ jobs:
           else
             echo "name=v${version}" >> "$GITHUB_OUTPUT"
           fi
-      - name: Attach Linux and Windows files to the GitHub release
+      - name: Attach the Linux, Windows, and macOS files to the GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.name }}
@@ -214,7 +239,9 @@ jobs:
             dist/oxypixel-*-linux-x86_64.tar.gz
             dist/oxypixel-*-linux-x86_64.deb
             dist/OxyPixel-*-x86_64.AppImage
+            dist/OxyPixel-*-macos-universal.dmg
             dist/oxypack-*-windows-x86_64.exe
             dist/SHA256SUMS-windows.txt
             dist/SHA256SUMS-linux.txt
+            dist/SHA256SUMS-macos.txt
             dist/SHA256SUMS.txt
