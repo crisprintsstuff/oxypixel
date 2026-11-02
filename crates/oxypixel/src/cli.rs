@@ -23,6 +23,9 @@ pub fn dispatch(args: &[String]) -> Option<i32> {
         "export-bmp" => export_frame(args, export_bmp),
         "export-gif" => export_gif_cmd(args),
         "export-sheet" => export_sheet_cmd(args),
+        "export-aseprite" => export_doc(args, |doc, path| {
+            oxypack::save_aseprite(doc, path).map_err(Error::Io)
+        }),
         "export-palette" => export_palette_cmd(args),
         "import-palette" => import_palette_cmd(args),
         "import-sheet" => import_sheet_cmd(args),
@@ -270,6 +273,7 @@ Usage:
   oxypixel export-gif INPUT.oxypix OUTPUT.gif [--per-tag]
   oxypixel export-sheet INPUT.oxypix OUTPUT.png [--columns N] [--padding N] [--scale 1|2|4]
                         [--json] [--godot] [--unity] [--per-tag]
+  oxypixel export-aseprite INPUT.oxypix OUTPUT.aseprite
   oxypixel export-palette INPUT.oxypix OUTPUT.gpl
   oxypixel import-palette INPUT.oxypix PALETTE.gpl OUTPUT.oxypix
   oxypixel import-sheet SHEET.png OUTPUT.oxypix [--cell WxH] [--offset X,Y] [--gap X,Y]
@@ -281,6 +285,8 @@ Usage:
 With no command, OxyPixel opens the editor. A file argument opens that .oxypix document.
 Export commands do not open a window. FRAME is the zero-based frame index and defaults to 0.
 An INPUT.oxypix may also be an .aseprite or .ase file, read with its layers, tags, and palette.
+export-aseprite writes an Aseprite file with the layers, groups, blend modes, tags, palette, and
+tilemaps.
 export-palette writes the document palette as GIMP .gpl, hex .hex, or JASC .pal.
 import-palette replaces that palette and writes a new .oxypix. A .txt palette is read as hex.
 export-sheet puts frames in one row unless --columns is set. --padding leaves clear pixels between

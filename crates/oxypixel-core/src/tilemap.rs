@@ -61,6 +61,21 @@ impl Tileset {
         })
     }
 
+    /// A tileset with these tiles, numbered from 1 in order. Each tile is
+    /// `tile_width * tile_height` pixels, row by row.
+    pub fn with_tiles(
+        name: String,
+        tile_width: u32,
+        tile_height: u32,
+        tiles: Vec<Vec<Rgba>>,
+    ) -> Result<Self> {
+        let mut set = Self::new(name, tile_width, tile_height)?;
+        for tile in tiles {
+            set.push(tile)?;
+        }
+        Ok(set)
+    }
+
     pub fn tile_width(&self) -> u32 {
         self.tile_width
     }
@@ -264,5 +279,8 @@ mod tests {
         assert!(!set.valid_entry(2));
         assert!(!set.valid_entry(TILE_FLIP_X), "an empty cell has no flips");
         assert!(Tileset::new("x".into(), 0, 4).is_err());
+        let two = Tileset::with_tiles("y".into(), 1, 1, vec![vec![Rgba::CLEAR], vec![Rgba::CLEAR]]);
+        assert_eq!(two.unwrap().len(), 2);
+        assert!(Tileset::with_tiles("z".into(), 1, 1, vec![vec![]]).is_err());
     }
 }

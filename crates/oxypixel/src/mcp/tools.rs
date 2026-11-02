@@ -234,11 +234,11 @@ pub(crate) fn list() -> Vec<Value> {
         tool(
             "export",
             "Export",
-            "Export a document: png or bmp (one frame), gif (all frames), or sheet (a spritesheet PNG, optionally with a JSON description, a Godot 4 SpriteFrames .tres, or a Unity .png.meta beside it). per_tag writes OUTPUT_<tag>.gif or .png for each animation tag instead.",
+            "Export a document: png or bmp (one frame), gif (all frames), aseprite (an Aseprite .aseprite copy with layers, groups, blend modes, tags, palette, and tilemaps), or sheet (a spritesheet PNG, optionally with a JSON description, a Godot 4 SpriteFrames .tres, or a Unity .png.meta beside it). per_tag writes OUTPUT_<tag>.gif or .png for each animation tag instead.",
             json!({
                 "path": path,
                 "output": { "type": "string", "description": "File to write." },
-                "format": { "type": "string", "enum": ["png", "bmp", "gif", "sheet"] },
+                "format": { "type": "string", "enum": ["png", "bmp", "gif", "sheet", "aseprite"] },
                 "frame": frame,
                 "scale": { "type": "integer", "enum": [1, 2, 4], "description": "png and sheet only. Defaults to 1." },
                 "columns": { "type": "integer", "minimum": 0, "description": "sheet only. 0 is one row." },
@@ -980,6 +980,10 @@ fn export(args: &Args, paths: &Paths) -> ToolResult {
             }
         }
     }
+    if format == "aseprite" {
+        oxypack::save_aseprite(&doc, &out)?;
+        return Ok(Output::text(format!("Wrote {}.", out.display())));
+    }
     let written = match format {
         "png" => export_png_scaled(&doc, frame, &out, scale).map(|()| vec![out.clone()]),
         "bmp" => export_bmp(&doc, frame, &out).map(|()| vec![out.clone()]),
@@ -1000,7 +1004,7 @@ fn export(args: &Args, paths: &Paths) -> ToolResult {
         }
         other => {
             return Err(format!(
-                "unknown format {other}; use png, bmp, gif, or sheet"
+                "unknown format {other}; use png, bmp, gif, sheet, or aseprite"
             ))
         }
     };

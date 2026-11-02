@@ -286,6 +286,48 @@ fn exports_read_aseprite_files() {
 }
 
 #[test]
+fn export_aseprite_writes_a_file_that_reads_back() {
+    let dir = std::env::temp_dir().join(format!("oxypixel-cli-asew-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let src = dir.join("dot.oxypix");
+    let mut editor = Editor::new(3, 2).unwrap();
+    editor.set_primary(Rgba::new(10, 20, 30, 255));
+    editor.pointer_down(2, 1, MouseButton::Primary, false);
+    editor.pointer_up(2, 1, false);
+    editor.add_frame().unwrap();
+    save_oxypix(editor.document(), &src).unwrap();
+    let out = dir.join("dot.aseprite");
+    let output = bin()
+        .args([
+            "export-aseprite",
+            src.to_str().unwrap(),
+            out.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let (doc, notes) = oxypack::open_document(&out).unwrap();
+    assert!(notes.is_empty(), "{notes:?}");
+    assert_eq!(doc.frame_count(), 2);
+    assert_eq!(doc.cel(0, 0).unwrap()[5], Rgba::new(10, 20, 30, 255));
+    let missing = bin()
+        .args([
+            "export-aseprite",
+            dir.join("none.oxypix").to_str().unwrap(),
+            out.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(missing.status.code(), Some(1));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn export_png_writes_the_painted_pixel() {
     let dir = std::env::temp_dir().join(format!(
         "oxypixel-cli-{}-{}",

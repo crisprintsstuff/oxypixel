@@ -5,11 +5,13 @@
 //! `.aseprite` files, packs their frames, and writes the atlas. It never opens
 //! a window or a dialog.
 
+pub mod ase_write;
 pub mod aseprite;
 pub mod blend;
 mod files;
 pub mod pack;
 
+pub use ase_write::{save_aseprite, write_aseprite};
 pub use files::{
     collect, is_aseprite, load, open_document, pack_files, packable, write_atlas, Loaded, Packed,
 };

@@ -1292,8 +1292,8 @@ impl Document {
     /// Give a loaded document its tilesets and grids. `layer_sets` has one
     /// entry per layer; `grids[frame][layer]` is `Some` exactly on tilemap
     /// layers, sized to cover the canvas. The tilemap cels are drawn from
-    /// the grids.
-    pub(crate) fn attach_tilemaps(
+    /// the grids. Nothing changes when they do not fit together.
+    pub fn attach_tilemaps(
         &mut self,
         tilesets: Vec<Tileset>,
         layer_sets: Vec<Option<u16>>,

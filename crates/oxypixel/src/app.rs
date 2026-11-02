@@ -69,6 +69,7 @@ enum PathKind {
     ExportBmp,
     ExportGif,
     ExportSheet,
+    ExportAseprite,
     ImportPalette,
     ExportPalette,
 }
@@ -96,7 +97,7 @@ pub struct OxyApp {
     /// Which keys run which commands, from `keys.txt`.
     pub(crate) keymap: crate::keymap::Keymap,
     thumbs: ThumbCache,
-    save_path: Option<PathBuf>,
+    pub(crate) save_path: Option<PathBuf>,
     /// Where Save offers to write a document opened from an Aseprite file.
     save_suggestion: Option<PathBuf>,
     note: Option<Note>,
@@ -1487,6 +1488,15 @@ impl OxyApp {
             PathKind::ExportBmp => "frame.bmp".to_string(),
             PathKind::ExportGif => "animation.gif".to_string(),
             PathKind::ExportSheet => "sheet.png".to_string(),
+            // Beside the document, or the Aseprite file it was opened from.
+            PathKind::ExportAseprite => self
+                .save_path
+                .as_ref()
+                .or(self.save_suggestion.as_ref())
+                .map_or_else(
+                    || "untitled.aseprite".to_string(),
+                    |p| p.with_extension("aseprite").display().to_string(),
+                ),
             PathKind::ExportPalette => format!("palette.{}", self.palette_format.extension()),
         };
         if let Some(parent) = self.save_path.as_ref().and_then(|p| p.parent()) {
@@ -1524,6 +1534,7 @@ impl OxyApp {
             }
             PathKind::ExportGif => self.export_doc(&path, export_gif),
             PathKind::ExportSheet => self.export_scaled(&path, false),
+            PathKind::ExportAseprite => self.export_aseprite(&path),
             PathKind::ImportPalette => self.import_palette_file(&path),
             PathKind::ExportPalette => self.export_palette_file(path),
         };
@@ -1699,6 +1710,26 @@ impl OxyApp {
             }
             Err(err) => {
                 self.dialog_error = Some(err.to_string());
+                false
+            }
+        }
+    }
+
+    fn export_aseprite(&mut self, path: &Path) -> bool {
+        match oxypack::save_aseprite(self.editor.document(), path) {
+            Ok(()) => {
+                self.note_dir(path);
+                self.note_ok(format!(
+                    "Saved a copy as {}. The open document is still {}.",
+                    path.display(),
+                    self.save_path
+                        .as_ref()
+                        .map_or("untitled".to_string(), |p| p.display().to_string())
+                ));
+                true
+            }
+            Err(err) => {
+                self.dialog_error = Some(err);
                 false
             }
         }
@@ -1977,6 +2008,10 @@ impl OxyApp {
                     }
                     if menu_item(ui, "Export spritesheet…", "") {
                         self.open_path_dialog(PathKind::ExportSheet);
+                        ui.close_menu();
+                    }
+                    if menu_item(ui, "Save a copy as Aseprite…", "") {
+                        self.open_path_dialog(PathKind::ExportAseprite);
                         ui.close_menu();
                     }
                     if menu_item(ui, "Pack sprites…", "") {
@@ -3442,6 +3477,7 @@ impl OxyApp {
             PathKind::ExportBmp => "Export BMP",
             PathKind::ExportGif => "Export GIF",
             PathKind::ExportSheet => "Export spritesheet",
+            PathKind::ExportAseprite => "Save a copy as Aseprite",
             PathKind::ImportPalette => "Import palette",
             PathKind::ExportPalette => "Export palette",
         };
@@ -3452,6 +3488,7 @@ impl OxyApp {
                 | PathKind::ExportBmp
                 | PathKind::ExportGif
                 | PathKind::ExportSheet
+                | PathKind::ExportAseprite
                 | PathKind::ExportPalette
         );
         let mut close = false;
@@ -3473,6 +3510,15 @@ impl OxyApp {
                         }
                     });
                     ui.label("Nearest neighbor. Each pixel stays a hard square.");
+                }
+                if self.path_kind == PathKind::ExportAseprite {
+                    ui.label("Layers, groups, blend modes, tags, the palette, and tilemaps go into the .aseprite file. Keep saving the .oxypix too: references stay beside it.");
+                    if Path::new(self.path_buf.trim()).exists() {
+                        ui.colored_label(
+                            Color32::from_rgb(240, 180, 60),
+                            "That file exists and will be replaced. Anything OxyPixel did not open from it, such as slices or cel z-index, is lost.",
+                        );
+                    }
                 }
                 if self.path_kind == PathKind::ExportSheet {
                     ui.horizontal(|ui| {
@@ -4346,6 +4392,7 @@ fn filter_name(kind: PathKind, format: PaletteFormat) -> &'static str {
         PathKind::ImportDocument | PathKind::ImportLayer | PathKind::ImportSheet => "Image",
         PathKind::LoadReference => "Reference image",
         PathKind::ExportPng | PathKind::ExportSheet => "PNG",
+        PathKind::ExportAseprite => "Aseprite file",
         PathKind::ExportBmp => "BMP",
         PathKind::ExportGif => "GIF",
         PathKind::ImportPalette => "Palette",
@@ -4366,6 +4413,7 @@ fn filter_ext(kind: PathKind, format: PaletteFormat) -> &'static [&'static str] 
         }
         PathKind::LoadReference => &["png", "jpg", "jpeg"],
         PathKind::ExportPng | PathKind::ExportSheet => &["png"],
+        PathKind::ExportAseprite => &["aseprite", "ase"],
         PathKind::ExportBmp => &["bmp"],
         PathKind::ExportGif => &["gif"],
         PathKind::ImportPalette => &["gpl", "hex", "pal", "txt"],

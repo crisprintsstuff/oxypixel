@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Keyboard shortcuts can be changed: Help, then Keyboard shortcuts… binds any action to another key, and switches every key to Aseprite's or Photoshop's for the commands OxyPixel has. Menus, tool buttons, and tooltips show the keys in use. The choice is saved to `keys.txt`.
 
+- File, then Save a copy as Aseprite… writes an `.aseprite` file with layers, groups, blend modes, tags, the palette, and tilemaps. `oxypixel export-aseprite` and the MCP `export` tool's `aseprite` format do the same.
+- Aseprite tilemap layers open as OxyPixel tilemap layers, with their tilesets, when their cels sit on the tile grid at full opacity. Other tilemap layers still open as plain layers, with a note saying why.
+
 ### Changed
 
 - The Flatpak manifest builds from the 0.9.6 release archive.
