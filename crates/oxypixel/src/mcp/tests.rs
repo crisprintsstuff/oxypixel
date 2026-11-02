@@ -106,6 +106,7 @@ fn initialize_negotiates_a_version_and_lists_tools() {
         "document_info",
         "render",
         "create_document",
+        "import_sheet",
         "draw",
         "add_layer",
         "set_layer",
@@ -352,6 +353,53 @@ fn draw_render_and_edit_a_document() {
         json!({ "path": "hero.oxypix", "frame": 0, "delete": true }),
     );
     assert!(err, "the last frame stays: {text}");
+}
+
+#[test]
+fn import_sheet_cuts_cells_into_frames_or_layers() {
+    let dir = TempDir::new("slice");
+    let mut server = Server::new(Some(dir.0.clone()));
+    // Three 2×2 cells after a 1-pixel offset, each with its own red.
+    let mut image = image::RgbaImage::new(7, 3);
+    for i in 0..3u32 {
+        image.put_pixel(1 + i * 2, 1, image::Rgba([10 * (i as u8 + 1), 0, 0, 255]));
+    }
+    image.save(dir.0.join("sheet.png")).unwrap();
+    let (err, text, _) = call(
+        &mut server,
+        "import_sheet",
+        json!({ "path": "walk.oxypix", "sheet": "sheet.png", "cell_width": 2, "cell_height": 2, "offset": [1, 1], "duration_ms": 50 }),
+    );
+    assert!(!err, "{text}");
+    assert!(text.contains("3 frames of 2×2"), "{text}");
+    let doc = load_oxypix(&dir.0.join("walk.oxypix")).unwrap();
+    assert_eq!((doc.frame_count(), doc.frame_duration(1)), (3, Some(50)));
+    assert_eq!(pixel(&dir.0.join("walk.oxypix"), 2, 0, 0).r, 30);
+
+    let (err, text, _) = call(
+        &mut server,
+        "import_sheet",
+        json!({ "path": "walk.oxypix", "sheet": "sheet.png", "cell_width": 2, "cell_height": 2, "offset": [1, 1], "into": "layers" }),
+    );
+    assert!(err && text.contains("already exists"), "{text}");
+    let (err, text, _) = call(
+        &mut server,
+        "import_sheet",
+        json!({ "path": "walk.oxypix", "sheet": "sheet.png", "cell_width": 2, "cell_height": 2, "offset": [1, 1], "into": "layers", "overwrite": true }),
+    );
+    assert!(!err, "{text}");
+    assert_eq!(
+        load_oxypix(&dir.0.join("walk.oxypix"))
+            .unwrap()
+            .layer_count(),
+        3
+    );
+    let (err, _, _) = call(
+        &mut server,
+        "import_sheet",
+        json!({ "path": "x.oxypix", "sheet": "sheet.png", "gap": [1] }),
+    );
+    assert!(err);
 }
 
 #[test]

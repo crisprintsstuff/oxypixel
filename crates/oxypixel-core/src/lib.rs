@@ -30,6 +30,10 @@ pub use editor::{CustomBrush, Editor, MouseButton, Tool};
 pub use error::Error;
 pub use io::Fit;
 pub use io::{
+    cell_corners, decode_sheet, read_sheet, sheet_cells, slice_sheet, Sheet, SliceGrid, SliceInto,
+    MAX_SLICE_SHEET_PIXELS,
+};
+pub use io::{
     decode_first_rgba, export_bmp, export_bmp_bytes, export_gif, export_gif_bytes,
     export_gif_per_tag, export_palette, export_palette_string, export_png, export_png_bytes,
     export_png_bytes_scaled, export_png_scaled, export_sheet_files, export_spritesheet,

@@ -17,6 +17,59 @@ fn help_lists_export() {
     assert!(text.contains("export-gif"));
     assert!(text.contains("export-palette"));
     assert!(text.contains("import-palette"));
+    assert!(text.contains("import-sheet"));
+}
+
+#[test]
+fn import_sheet_cuts_a_strip_into_frames_or_layers() {
+    let dir = std::env::temp_dir().join(format!("oxypixel-cli-slice-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    // Four 3×3 cells in a row with a 1-pixel gap; the third is empty.
+    let sheet = dir.join("strip.png");
+    let mut image = image::RgbaImage::new(15, 3);
+    for (i, x0) in [0u32, 4, 8, 12].into_iter().enumerate() {
+        if i != 2 {
+            image.put_pixel(x0, 0, image::Rgba([i as u8 * 50, 0, 0, 255]));
+        }
+    }
+    image.save(&sheet).unwrap();
+    let out = dir.join("strip.oxypix");
+    let run = |extra: &[&str]| {
+        bin()
+            .args([
+                "import-sheet",
+                sheet.to_str().unwrap(),
+                out.to_str().unwrap(),
+            ])
+            .args(extra)
+            .output()
+            .unwrap()
+    };
+    let output = run(&["--cell", "3x3", "--gap", "1,0", "--duration", "60"]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let doc = oxypixel_core::load_oxypix(&out).unwrap();
+    assert_eq!((doc.width(), doc.height(), doc.frame_count()), (3, 3, 3));
+    assert_eq!(doc.frame_duration(0), Some(60));
+    assert_eq!(
+        doc.cel(2, 0).unwrap()[0].r,
+        150,
+        "the empty cell was dropped"
+    );
+
+    let output = run(&["--cell", "3x3", "--gap", "1,0", "--layers", "--keep-empty"]);
+    assert!(output.status.success());
+    let doc = oxypixel_core::load_oxypix(&out).unwrap();
+    assert_eq!((doc.frame_count(), doc.layer_count()), (1, 4));
+
+    assert_eq!(run(&["--cell", "three"]).status.code(), Some(2));
+    assert_eq!(run(&["--rows"]).status.code(), Some(2));
+    assert_eq!(run(&["--cell", "20x20"]).status.code(), Some(1));
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

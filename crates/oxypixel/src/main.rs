@@ -26,6 +26,7 @@ mod refsview;
 mod session;
 mod settingsview;
 mod shortcuts;
+mod sliceview;
 mod tagsview;
 mod theme;
 mod toolicons;

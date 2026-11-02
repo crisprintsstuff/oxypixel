@@ -211,7 +211,7 @@ fn initialize(params: &Value) -> Value {
             "title": "OxyPixel",
             "version": env!("CARGO_PKG_VERSION"),
         },
-        "instructions": "Tools for OxyPixel pixel-art documents (.oxypix). Coordinates are pixels from the top left, frames and layers count from 0, and layer 0 is the bottom. Colors are #RRGGBB or #RRGGBBAA. Use render to look at a frame after drawing. Editing tools save the document in place. Leave out path to work on the document open in the OxyPixel window, when its Live MCP bridge setting is on; each such call is one undo step there. create_document, export, and pack_sprites refuse to replace an existing file unless overwrite is true.",
+        "instructions": "Tools for OxyPixel pixel-art documents (.oxypix). Coordinates are pixels from the top left, frames and layers count from 0, and layer 0 is the bottom. Colors are #RRGGBB or #RRGGBBAA. Use render to look at a frame after drawing. Editing tools save the document in place. Leave out path to work on the document open in the OxyPixel window, when its Live MCP bridge setting is on; each such call is one undo step there. create_document, import_sheet, export, and pack_sprites refuse to replace an existing file unless overwrite is true.",
     })
 }
 
