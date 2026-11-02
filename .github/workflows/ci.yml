@@ -67,11 +67,12 @@ jobs:
     # Ubuntu finishes in about 5 minutes. Windows clippy was ~80s and the
     # release compile is a separate profile, so a healthy Windows run is
     # around 10 minutes. 15 leaves headroom without waiting out a hang.
-    timeout-minutes: 15
+    # macOS also builds both Mac architectures and packs the .dmg.
+    timeout-minutes: ${{ matrix.os == 'macos-latest' && 30 || 15 }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.0
@@ -129,6 +130,39 @@ jobs:
         run: cargo test --workspace --all-targets
       - name: Release build
         run: cargo build --workspace --release
+      # Start the release binary, give it time to open its window, and expect
+      # it to still be running. HOME points at a temp folder so recent files
+      # and recovery copies stay off the runner profile.
+      - name: Launch check (macOS)
+        if: matrix.os == 'macos-latest'
+        timeout-minutes: 2
+        env:
+          OXYPIXEL_NO_DIALOG: "1"
+        run: |
+          set -u
+          export HOME="$RUNNER_TEMP/oxypixel-home"
+          mkdir -p "$HOME"
+          log="$RUNNER_TEMP/oxypixel-launch.txt"
+          target/release/oxypixel > "$log" 2>&1 &
+          pid=$!
+          sleep 15
+          if ! kill -0 "$pid" 2>/dev/null; then
+            wait "$pid"
+            echo "OxyPixel exited during startup with code $?."
+            cat "$log"
+            exit 1
+          fi
+          kill "$pid"
+          wait "$pid" 2>/dev/null || true
+          echo "Still running after 15 seconds."
+          cat "$log"
+      # The universal app and .dmg the release publishes: both architectures,
+      # lipo, the bundle, the ad-hoc signature, and hdiutil.
+      - name: Pack the Mac app
+        if: matrix.os == 'macos-latest'
+        run: |
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          ./scripts/package-macos.sh
       # Start the release exe, wait for its window, close it, and expect a
       # clean exit. Nothing here can click a message box, so
       # OXYPIXEL_NO_DIALOG keeps a startup failure on stderr instead of

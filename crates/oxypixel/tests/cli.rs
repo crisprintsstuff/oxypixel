@@ -518,13 +518,17 @@ fn export_does_not_write_a_recovery_file() {
 
     #[cfg(windows)]
     let data = root.join("OxyPixel");
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    let data = root.join("Library/Application Support/OxyPixel");
+    #[cfg(not(any(windows, target_os = "macos")))]
     let data = root.join("oxypixel");
 
     let mut command = bin();
     #[cfg(windows)]
     command.env("APPDATA", &root);
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    command.env("HOME", &root);
+    #[cfg(not(any(windows, target_os = "macos")))]
     command.env("XDG_DATA_HOME", &root);
     command
         .arg("export-png")

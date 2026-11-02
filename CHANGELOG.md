@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - File, then Save a copy as Aseprite… writes an `.aseprite` file with layers, groups, blend modes, tags, the palette, and tilemaps. `oxypixel export-aseprite` and the MCP `export` tool's `aseprite` format do the same.
 - Aseprite tilemap layers open as OxyPixel tilemap layers, with their tilesets, when their cels sit on the tile grid at full opacity. Other tilemap layers still open as plain layers, with a note saying why.
 
+- A macOS build: `OxyPixel-<version>-macos-universal.dmg` holds one app for Apple Silicon and Intel Macs (macOS 11 or newer), signed ad hoc but not notarized. File dialogs are the system's own, the clipboard works, and Check for updates links to new releases. CI builds and launches it on every pull request.
+
 ### Changed
 
 - The Flatpak manifest builds from the 0.9.6 release archive.

@@ -58,11 +58,17 @@ pub enum PackageKind {
     AppImage,
     /// A Flatpak install. Flatpak updates it; nothing is downloaded here.
     Flatpak,
+    /// The Mac app. Check for updates says a release exists and links to
+    /// it; the new app is dragged into Applications by hand, since replacing
+    /// a running, unsigned app bundle in place is fragile.
+    MacApp,
 }
 
 impl PackageKind {
     pub fn for_current_process() -> Self {
-        if cfg!(windows) {
+        if cfg!(target_os = "macos") {
+            Self::MacApp
+        } else if cfg!(windows) {
             if installed_copy() {
                 Self::WindowsInstaller
             } else {
@@ -102,7 +108,16 @@ impl PackageKind {
             Self::AppImage => format!("OxyPixel-{version}-x86_64.AppImage"),
             // Never published: a Flatpak is updated by Flatpak.
             Self::Flatpak => String::new(),
+            Self::MacApp => format!("OxyPixel-{version}-macos-universal.dmg"),
         }
+    }
+}
+
+impl PackageKind {
+    /// Whether Check for updates fetches a file for this copy. A Flatpak and
+    /// the Mac app only hear that a release exists.
+    pub fn downloads(self) -> bool {
+        !matches!(self, Self::Flatpak | Self::MacApp)
     }
 }
 
@@ -125,7 +140,7 @@ pub fn appimage_path() -> Option<std::path::PathBuf> {
 }
 
 fn asset_for(release: &ReleaseInfo, kind: PackageKind) -> Option<ReleaseAsset> {
-    if kind == PackageKind::Flatpak {
+    if !kind.downloads() {
         return None;
     }
     let name = kind.asset_name(release.version);
@@ -649,7 +664,7 @@ mod tests {
             PackageKind::LinuxArchive => "oxypixel-0.2.1-linux-x86_64.tar.gz",
             PackageKind::LinuxDeb => "oxypixel-0.2.1-linux-x86_64.deb",
             PackageKind::AppImage => "OxyPixel-0.2.1-x86_64.AppImage",
-            PackageKind::Flatpak => return,
+            PackageKind::Flatpak | PackageKind::MacApp => return,
         };
         assert_eq!(report.asset.unwrap().name, expected);
     }
@@ -846,6 +861,14 @@ mod tests {
             "a Flatpak never downloads a release file"
         );
         assert!(asset_for(&release, PackageKind::AppImage).is_none());
+        assert!(
+            asset_for(&release, PackageKind::MacApp).is_none(),
+            "the Mac app never downloads a release file"
+        );
+        assert_eq!(
+            PackageKind::MacApp.asset_name(parse_version("1.2.3").unwrap()),
+            "OxyPixel-1.2.3-macos-universal.dmg"
+        );
         assert!(release
             .assets
             .iter()

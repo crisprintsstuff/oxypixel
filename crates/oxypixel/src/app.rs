@@ -3310,6 +3310,7 @@ impl OxyApp {
                 "This copy is a Flatpak. Update it with your software center or flatpak update."
                     .to_string(),
             ),
+            PackageKind::MacApp => Err(MAC_UPDATE_HINT.to_string()),
         };
         match result {
             Ok(()) => {
@@ -3699,6 +3700,11 @@ impl OxyApp {
                             });
                             if report.package == PackageKind::Flatpak {
                                 ui.label("This copy is a Flatpak. Update it with your software center or flatpak update.");
+                            } else if report.package == PackageKind::MacApp {
+                                ui.label(MAC_UPDATE_HINT);
+                                if !report.release.page_url.is_empty() {
+                                    ui.hyperlink_to("Open the release page", &report.release.page_url);
+                                }
                             } else if report.asset.is_none() || report.checksums.is_none() {
                                 ui.label("This release does not include a checksummed file for this system.");
                             } else if let Some(path) = &self.update_file {
@@ -3709,7 +3715,9 @@ impl OxyApp {
                                     PackageKind::LinuxArchive | PackageKind::AppImage => {
                                         Some("Replace this copy and restart")
                                     }
-                                    PackageKind::LinuxDeb | PackageKind::Flatpak => None,
+                                    PackageKind::LinuxDeb
+                                    | PackageKind::Flatpak
+                                    | PackageKind::MacApp => None,
                                 };
                                 if let Some(action) = action {
                                     if ui.button(action).clicked() {
@@ -4286,6 +4294,8 @@ fn paint_tool_shortcut(ui: &egui::Ui, rect: egui::Rect, shortcut: &str) {
         Color32::from_rgb(246, 243, 236),
     );
 }
+
+const MAC_UPDATE_HINT: &str = "Download the .dmg from the release page, open it, and drag OxyPixel into Applications to replace this copy.";
 
 fn menu_item(ui: &mut egui::Ui, label: &str, shortcut: &str) -> bool {
     menu_item_enabled(ui, label, shortcut, true)
