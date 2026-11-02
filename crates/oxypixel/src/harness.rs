@@ -392,6 +392,40 @@ mod tests {
     }
 
     #[test]
+    fn keys_follow_a_preset_and_can_be_changed() {
+        let mut h = Harness::new();
+        h.click_text("Help");
+        h.click_text("Keyboard shortcuts…");
+        // Aseprite's U is the rectangle.
+        h.click_text("OxyPixel");
+        h.click_text("Aseprite");
+        h.click_text("Close");
+        h.key(Key::U, Modifiers::NONE);
+        assert_eq!(h.app.editor.tool(), Tool::Rectangle);
+        // Click the pencil's key, then press K.
+        h.click_text("Help");
+        h.click_text("Keyboard shortcuts…");
+        h.click_text("B");
+        assert!(h.find("Press a key…").is_some(), "{:?}", h.texts());
+        h.key(Key::K, Modifiers::NONE);
+        assert!(h.find("Pencil is now K.").is_some(), "{:?}", h.texts());
+        assert_eq!(
+            h.app.editor.tool(),
+            Tool::Rectangle,
+            "the key was not a command"
+        );
+        h.click_text("Close");
+        h.key(Key::K, Modifiers::NONE);
+        assert_eq!(h.app.editor.tool(), Tool::Pencil);
+        let saved = std::fs::read_to_string(h.data_dir().join("keys.txt")).unwrap();
+        assert!(saved.contains("preset=aseprite"), "{saved}");
+        assert!(saved.contains("tool.pencil=K"), "{saved}");
+        // The menus show the preset's keys: Aseprite's Settings is Ctrl+K.
+        h.click_text("Edit");
+        assert!(h.find("Ctrl+K").is_some(), "{:?}", h.texts());
+    }
+
+    #[test]
     fn shortcuts_and_settings() {
         let mut h = Harness::new();
         h.key(Key::E, Modifiers::NONE);

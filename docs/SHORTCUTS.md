@@ -2,6 +2,25 @@
 
 Letter shortcuts are ignored while a text field is focused. Escape leaves the text field.
 
+These are OxyPixel's own keys. Help, then Keyboard shortcuts… (or Edit, then Keyboard shortcuts…) lists the keys in use and changes them:
+
+- Click an action's key, then press the new key. Esc cancels. A key another action had moves to the new one, and the window says which.
+- Clear leaves an action with no key, and Reset puts back the preset's key.
+- **Keys like** switches every key to a preset: OxyPixel, Aseprite, or Photoshop. A preset only changes the keys below; everything else stays as in this table.
+- Copy (Ctrl+C), paste (Ctrl+V), Esc, Delete, Backspace, and the arrow keys cannot be moved.
+- The choice is saved as `keys.txt` in the data folder: the preset, then one `action=keys` line per action changed from it. On a Mac, Ctrl in this file and in the table is Cmd.
+
+| Action | OxyPixel | Aseprite | Photoshop |
+| --- | --- | --- | --- |
+| Rectangle | R | U | U |
+| Ellipse | O | Shift+U | Shift+U |
+| New frame | Ctrl+Shift+N | Alt+N | None |
+| New layer | Ctrl+Shift+L | Shift+N | Ctrl+Shift+N |
+| Settings | Ctrl+, | Ctrl+K | Ctrl+K |
+| Redo | Ctrl+Y, Ctrl+Shift+Z | same | Ctrl+Shift+Z |
+| Zoom in | Ctrl+Plus, Ctrl+= | Plus, =, Ctrl+Plus | same |
+| Zoom out | Ctrl+Minus | Minus, Ctrl+Minus | same |
+
 | Keys | Action |
 | --- | --- |
 | B | Pencil |

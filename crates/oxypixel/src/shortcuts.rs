@@ -1,4 +1,5 @@
-//! Keyboard shortcut map. Plain letter shortcuts are ignored while a text field is focused.
+//! Keyboard commands. Which key runs which command is in [`crate::keymap`].
+//! Plain letter shortcuts are ignored while a text field is focused.
 //! The UI checks that before it runs the commands from [`commands_from_events`].
 //!
 //! egui reports Ctrl+C as [`egui::Event::Copy`] and keeps that key-down. An image-only
@@ -6,6 +7,8 @@
 
 use eframe::egui::{self, Key, Modifiers};
 use oxypixel_core::{Tool, Transform};
+
+use crate::keymap::Keymap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
@@ -44,204 +47,28 @@ pub enum Command {
     ToggleSnap,
 }
 
-pub struct Binding {
-    pub keys: &'static str,
-    pub action: &'static str,
-}
-
-pub const BINDINGS: &[Binding] = &[
-    Binding {
-        keys: "B E G I L R O M",
-        action: "Pencil, eraser, fill, eyedropper, line, rectangle, ellipse, select",
-    },
-    Binding {
-        keys: "X",
-        action: "Swap primary and secondary colors",
-    },
-    Binding {
-        keys: "[ ]",
-        action: "Smaller or larger brush",
-    },
-    Binding {
-        keys: "Ctrl+Z",
-        action: "Undo",
-    },
-    Binding {
-        keys: "Ctrl+Y or Ctrl+Shift+Z",
-        action: "Redo",
-    },
-    Binding {
-        keys: "Ctrl+N",
-        action: "New document",
-    },
-    Binding {
-        keys: "Ctrl+O",
-        action: "Open",
-    },
-    Binding {
-        keys: "Ctrl+S",
-        action: "Save",
-    },
-    Binding {
-        keys: "Ctrl+Shift+S",
-        action: "Save as",
-    },
-    Binding {
-        keys: "Ctrl+Shift+N",
-        action: "New frame",
-    },
-    Binding {
-        keys: "Ctrl+Shift+L",
-        action: "New layer",
-    },
-    Binding {
-        keys: "Ctrl+A",
-        action: "Select all",
-    },
-    Binding {
-        keys: "Ctrl+D",
-        action: "Deselect",
-    },
-    Binding {
-        keys: "Esc",
-        action: "Stop playback, cancel a shape, or deselect",
-    },
-    Binding {
-        keys: "Delete",
-        action: "Clear pixels inside the selection",
-    },
-    Binding {
-        keys: "Ctrl+Plus / Ctrl+Minus / Ctrl+0",
-        action: "Zoom in or out by one whole-pixel step, or fit",
-    },
-    Binding {
-        keys: "Enter",
-        action: "Play or pause",
-    },
-    Binding {
-        keys: "Ctrl+C / Ctrl+V",
-        action: "Copy or paste the selection image",
-    },
-    Binding {
-        keys: "Arrow keys",
-        action: "Nudge the selection by one pixel",
-    },
-    Binding {
-        keys: "Shift+H / Shift+V",
-        action: "Flip the selection horizontally or vertically, or the active cel when nothing is selected",
-    },
-    Binding {
-        keys: "Shift+. / Shift+, / Ctrl+Shift+.",
-        action: "Turn that area 90 degrees clockwise, counter-clockwise, or 180 degrees",
-    },
-    Binding {
-        keys: "Comma / Period",
-        action: "Previous or next frame",
-    },
-    Binding {
-        keys: "Space+drag or middle-drag",
-        action: "Pan",
-    },
-    Binding {
-        keys: "Alt+click",
-        action: "Pick a color without changing tools",
-    },
-    Binding {
-        keys: "Ctrl+drag",
-        action: "Move the reference image under the pointer. Without Ctrl, tools draw over it",
-    },
-    Binding {
-        keys: "P",
-        action: "Pixel-perfect pencil. One-pixel strokes drop the extra diagonal corner",
-    },
-    Binding {
-        keys: "D",
-        action: "Shade with the pencil. Left steps a pixel to the next swatch, right to the one before",
-    },
-    Binding {
-        keys: "T",
-        action: "Wrap drawing past an edge onto the opposite edge",
-    },
-    Binding {
-        keys: "Shift+T",
-        action: "Tiled view. Draw the canvas 3 by 3 so the seam is visible. Export is unchanged",
-    },
-    Binding {
-        keys: "S",
-        action: "Snap pencil, fill, and shapes to the nearest palette color. The eraser still clears",
-    },
-    Binding {
-        keys: "Shift+drag",
-        action: "Constrain lines to 45 degrees and shapes to squares",
-    },
-    Binding {
-        keys: "Ctrl+,",
-        action: "Settings",
-    },
-    Binding {
-        keys: "Ctrl+Q",
-        action: "Quit",
-    },
+/// Mouse gestures, listed under the keys in the Keyboard shortcuts window.
+pub const GESTURES: &[(&str, &str)] = &[
+    ("Space+drag or middle-drag", "Pan"),
+    ("Alt+click", "Pick a color without changing tools"),
+    (
+        "Ctrl+drag",
+        "Move the reference image under the pointer. Without Ctrl, tools draw over it",
+    ),
+    (
+        "Shift+drag",
+        "Constrain lines to 45 degrees and shapes to squares",
+    ),
+    ("Right-drag", "Draw with the second color"),
+    ("Wheel", "Zoom toward the pointer"),
+    (
+        "Shift+click, Alt+click with a selection tool",
+        "Add to the selection, or cut out of it",
+    ),
 ];
 
-pub fn command_from(modifiers: Modifiers, key: Key) -> Option<Command> {
-    let ctrl = modifiers.command || modifiers.ctrl;
-    let shift = modifiers.shift;
-    if modifiers.alt {
-        return None;
-    }
-    match (ctrl, shift, key) {
-        (true, true, Key::S) => Some(Command::SaveAs),
-        (true, true, Key::Z) => Some(Command::Redo),
-        (true, true, Key::N) => Some(Command::AddFrame),
-        (true, true, Key::L) => Some(Command::AddLayer),
-        (true, true, Key::Period) => Some(Command::Transform(Transform::Rotate180)),
-        (true, false, Key::S) => Some(Command::Save),
-        (true, false, Key::Z) => Some(Command::Undo),
-        (true, false, Key::Y) => Some(Command::Redo),
-        (true, false, Key::N) => Some(Command::New),
-        (true, false, Key::O) => Some(Command::Open),
-        (true, false, Key::A) => Some(Command::SelectAll),
-        (true, false, Key::D) => Some(Command::Deselect),
-        (true, false, Key::Num0) => Some(Command::ZoomFit),
-        (true, false, Key::Equals | Key::Plus) => Some(Command::ZoomIn),
-        (true, false, Key::Minus) => Some(Command::ZoomOut),
-        (true, false, Key::Q) => Some(Command::Quit),
-        (true, false, Key::Comma) => Some(Command::Settings),
-        (true, false, Key::C) => Some(Command::Copy),
-        (true, false, Key::V) => Some(Command::Paste),
-        (false, false, Key::B) => Some(Command::Tool(Tool::Pencil)),
-        (false, false, Key::E) => Some(Command::Tool(Tool::Eraser)),
-        (false, false, Key::G) => Some(Command::Tool(Tool::Bucket)),
-        (false, false, Key::I) => Some(Command::Tool(Tool::Eyedropper)),
-        (false, false, Key::L) => Some(Command::Tool(Tool::Line)),
-        (false, false, Key::R) => Some(Command::Tool(Tool::Rectangle)),
-        (false, false, Key::O) => Some(Command::Tool(Tool::Ellipse)),
-        (false, false, Key::M) => Some(Command::Tool(Tool::Select)),
-        (false, false, Key::W) => Some(Command::Tool(Tool::Wand)),
-        (false, false, Key::X) => Some(Command::SwapColors),
-        (false, false, Key::P) => Some(Command::TogglePixelPerfect),
-        (false, false, Key::D) => Some(Command::ToggleShade),
-        (false, false, Key::T) => Some(Command::ToggleWrap),
-        (false, true, Key::T) => Some(Command::ToggleTiled),
-        (false, false, Key::S) => Some(Command::ToggleSnap),
-        (false, false, Key::OpenBracket) => Some(Command::BrushSmaller),
-        (false, false, Key::CloseBracket) => Some(Command::BrushLarger),
-        (false, false, Key::Enter) => Some(Command::PlayToggle),
-        (false, false, Key::Comma) => Some(Command::PrevFrame),
-        (false, false, Key::Period) => Some(Command::NextFrame),
-        (false, false, Key::ArrowLeft) => Some(Command::Nudge(-1, 0)),
-        (false, false, Key::ArrowRight) => Some(Command::Nudge(1, 0)),
-        (false, false, Key::ArrowUp) => Some(Command::Nudge(0, -1)),
-        (false, true, Key::H) => Some(Command::Transform(Transform::FlipHorizontal)),
-        (false, true, Key::V) => Some(Command::Transform(Transform::FlipVertical)),
-        (false, true, Key::Period) => Some(Command::Transform(Transform::Rotate90Cw)),
-        (false, true, Key::Comma) => Some(Command::Transform(Transform::Rotate90Ccw)),
-        (false, false, Key::ArrowDown) => Some(Command::Nudge(0, 1)),
-        (false, false, Key::Delete | Key::Backspace) => Some(Command::DeleteSelection),
-        (false, false, Key::Escape) => Some(Command::Escape),
-        _ => None,
-    }
+pub fn command_from(map: &Keymap, modifiers: Modifiers, key: Key) -> Option<Command> {
+    map.command(modifiers, key)
 }
 
 pub fn allows_repeat(command: Command) -> bool {
@@ -267,7 +94,11 @@ pub struct ClipboardChord {
 /// Copy is the copy event (or a copy key-down, when one arrives). Paste is the
 /// paste event when egui emits one, and otherwise the paste key-up. An image on
 /// the clipboard produces that key-up with no paste event.
-pub fn commands_from_events(events: &[egui::Event], chord: &mut ClipboardChord) -> Vec<Command> {
+pub fn commands_from_events(
+    events: &[egui::Event],
+    chord: &mut ClipboardChord,
+    map: &Keymap,
+) -> Vec<Command> {
     let mut commands = Vec::new();
     for event in events {
         match event {
@@ -281,7 +112,7 @@ pub fn commands_from_events(events: &[egui::Event], chord: &mut ClipboardChord) 
                 ..
             } => {
                 if *pressed {
-                    if let Some(command) = command_from(*modifiers, *key) {
+                    if let Some(command) = command_from(map, *modifiers, *key) {
                         if command == Command::Copy {
                             note_copy(&mut commands, chord);
                             continue;
@@ -353,6 +184,14 @@ fn is_paste_release(modifiers: Modifiers, key: Key) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn command_from(modifiers: Modifiers, key: Key) -> Option<Command> {
+        super::command_from(&Keymap::default(), modifiers, key)
+    }
+
+    fn commands_from_events(events: &[egui::Event], chord: &mut ClipboardChord) -> Vec<Command> {
+        super::commands_from_events(events, chord, &Keymap::default())
+    }
 
     #[test]
     fn save_as_is_not_save() {
@@ -549,13 +388,7 @@ mod tests {
     }
 
     #[test]
-    fn help_table_mentions_core_actions() {
-        let text = BINDINGS
-            .iter()
-            .map(|b| b.action)
-            .collect::<Vec<_>>()
-            .join(" ");
-        assert!(text.contains("Undo"));
-        assert!(text.contains("Pencil"));
+    fn gestures_list_pan() {
+        assert!(GESTURES.iter().any(|(_, what)| *what == "Pan"));
     }
 }
