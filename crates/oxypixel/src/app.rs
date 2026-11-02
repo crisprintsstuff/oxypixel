@@ -47,7 +47,6 @@ enum DialogKind {
     Path,
     Unsaved,
     About,
-    Shortcuts,
     Update,
     Recovery,
 }
@@ -93,6 +92,9 @@ pub struct OxyApp {
     pack_window: crate::packview::PackWindow,
     tags_window: crate::tagsview::TagsWindow,
     settings_window: crate::settingsview::SettingsWindow,
+    keys_window: crate::keysview::KeysWindow,
+    /// Which keys run which commands, from `keys.txt`.
+    pub(crate) keymap: crate::keymap::Keymap,
     thumbs: ThumbCache,
     save_path: Option<PathBuf>,
     /// Where Save offers to write a document opened from an Aseprite file.
@@ -223,6 +225,8 @@ impl OxyApp {
             pack_window: crate::packview::PackWindow::default(),
             tags_window: crate::tagsview::TagsWindow::default(),
             settings_window: crate::settingsview::SettingsWindow::default(),
+            keys_window: crate::keysview::KeysWindow::default(),
+            keymap: crate::keymap::Keymap::load(),
             thumbs: ThumbCache::default(),
             save_path: None,
             save_suggestion: None,
@@ -525,6 +529,11 @@ impl OxyApp {
         self.pack_window.show(ctx);
         self.tags_window.show(ctx, &mut self.editor);
         self.show_settings(ctx);
+        if self.keys_window.show(ctx, &mut self.keymap) {
+            if let Err(err) = self.keymap.save() {
+                self.note_err(format!("Could not save the keyboard shortcuts: {err}"));
+            }
+        }
         self.show_dialog(ctx);
         self.consider_autosave(ctx);
     }
@@ -568,6 +577,11 @@ impl OxyApp {
     }
 
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
+        if self.keys_window.capturing() {
+            // The next key is the new shortcut, not a command.
+            let _ = self.shortcut_commands(ctx);
+            return;
+        }
         if self.dialog.is_some() {
             // Track chord releases while the dialog is up so the next copy still runs.
             let _ = self.shortcut_commands(ctx);
@@ -602,8 +616,9 @@ impl OxyApp {
 
     fn shortcut_commands(&mut self, ctx: &egui::Context) -> Vec<Command> {
         let mut chord = self.clipboard_chord;
-        let commands =
-            ctx.input(|input| shortcuts::commands_from_events(&input.raw.events, &mut chord));
+        let commands = ctx.input(|input| {
+            shortcuts::commands_from_events(&input.raw.events, &mut chord, &self.keymap)
+        });
         self.clipboard_chord = chord;
         commands
     }
@@ -1358,6 +1373,14 @@ impl OxyApp {
         }
     }
 
+    /// A label with the key that toggles it, such as "Snap (S)".
+    fn with_key(&self, text: &str, command: Command) -> String {
+        match self.keymap.hint(command) {
+            key if key.is_empty() => text.to_string(),
+            key => format!("{text} ({key})"),
+        }
+    }
+
     fn request_import_sheet(&mut self) {
         if self.has_unsaved_changes() {
             self.pending = Some(Pending::ImportSheet);
@@ -1881,11 +1904,11 @@ impl OxyApp {
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("File", |ui| {
-                    if menu_item(ui, "New…", "Ctrl+N") {
+                    if menu_item(ui, "New…", &self.keymap.hint(Command::New)) {
                         self.request_new();
                         ui.close_menu();
                     }
-                    if menu_item(ui, "Open…", "Ctrl+O") {
+                    if menu_item(ui, "Open…", &self.keymap.hint(Command::Open)) {
                         self.request_open();
                         ui.close_menu();
                     }
@@ -1915,11 +1938,11 @@ impl OxyApp {
                             }
                         });
                     }
-                    if menu_item(ui, "Save", "Ctrl+S") {
+                    if menu_item(ui, "Save", &self.keymap.hint(Command::Save)) {
                         self.request_save();
                         ui.close_menu();
                     }
-                    if menu_item(ui, "Save as…", "Ctrl+Shift+S") {
+                    if menu_item(ui, "Save as…", &self.keymap.hint(Command::SaveAs)) {
                         self.open_path_dialog(PathKind::Save);
                         ui.close_menu();
                     }
@@ -1984,17 +2007,17 @@ impl OxyApp {
                         self.set_autosave_enabled(!self.autosave_enabled);
                         ui.close_menu();
                     }
-                    if menu_item(ui, "Quit", "Ctrl+Q") {
+                    if menu_item(ui, "Quit", &self.keymap.hint(Command::Quit)) {
                         self.request_quit(ui.ctx());
                         ui.close_menu();
                     }
                 });
                 ui.menu_button("Edit", |ui| {
-                    if menu_item_enabled(ui, "Undo", "Ctrl+Z", self.editor.can_undo()) {
+                    if menu_item_enabled(ui, "Undo", &self.keymap.hint(Command::Undo), self.editor.can_undo()) {
                         self.undo_step(false);
                         ui.close_menu();
                     }
-                    if menu_item_enabled(ui, "Redo", "Ctrl+Y", self.editor.can_redo()) {
+                    if menu_item_enabled(ui, "Redo", &self.keymap.hint(Command::Redo), self.editor.can_redo()) {
                         self.undo_step(true);
                         ui.close_menu();
                     }
@@ -2003,40 +2026,40 @@ impl OxyApp {
                         self.hex = self.editor.primary().to_hex();
                         ui.close_menu();
                     }
-                    if menu_item(ui, "Select all", "Ctrl+A") {
+                    if menu_item(ui, "Select all", &self.keymap.hint(Command::SelectAll)) {
                         self.editor.select_all();
                         ui.close_menu();
                     }
-                    if menu_item(ui, "Deselect", "Ctrl+D") {
+                    if menu_item(ui, "Deselect", &self.keymap.hint(Command::Deselect)) {
                         self.editor.deselect();
                         ui.close_menu();
                     }
-                    if menu_item(ui, "Copy", "Ctrl+C") {
+                    if menu_item(ui, "Copy", &self.keymap.hint(Command::Copy)) {
                         self.copy_selection();
                         ui.close_menu();
                     }
-                    if menu_item(ui, "Paste", "Ctrl+V") {
+                    if menu_item(ui, "Paste", &self.keymap.hint(Command::Paste)) {
                         self.paste_selection();
                         ui.close_menu();
                     }
                     ui.separator();
-                    if menu_item(ui, "Flip horizontal", "Shift+H") {
+                    if menu_item(ui, "Flip horizontal", &self.keymap.hint(Command::Transform(Transform::FlipHorizontal))) {
                         self.apply(|editor| editor.transform_pixels(Transform::FlipHorizontal));
                         ui.close_menu();
                     }
-                    if menu_item(ui, "Flip vertical", "Shift+V") {
+                    if menu_item(ui, "Flip vertical", &self.keymap.hint(Command::Transform(Transform::FlipVertical))) {
                         self.apply(|editor| editor.transform_pixels(Transform::FlipVertical));
                         ui.close_menu();
                     }
-                    if menu_item(ui, "Rotate 90 clockwise", "Shift+.") {
+                    if menu_item(ui, "Rotate 90 clockwise", &self.keymap.hint(Command::Transform(Transform::Rotate90Cw))) {
                         self.apply(|editor| editor.transform_pixels(Transform::Rotate90Cw));
                         ui.close_menu();
                     }
-                    if menu_item(ui, "Rotate 90 counter-clockwise", "Shift+,") {
+                    if menu_item(ui, "Rotate 90 counter-clockwise", &self.keymap.hint(Command::Transform(Transform::Rotate90Ccw))) {
                         self.apply(|editor| editor.transform_pixels(Transform::Rotate90Ccw));
                         ui.close_menu();
                     }
-                    if menu_item(ui, "Rotate 180", "Ctrl+Shift+.") {
+                    if menu_item(ui, "Rotate 180", &self.keymap.hint(Command::Transform(Transform::Rotate180))) {
                         self.apply(|editor| editor.transform_pixels(Transform::Rotate180));
                         ui.close_menu();
                     }
@@ -2075,26 +2098,30 @@ impl OxyApp {
                         self.open_canvas_dialog();
                         ui.close_menu();
                     }
-                    if menu_item(ui, "Clear selection", "Delete") {
+                    if menu_item(ui, "Clear selection", &self.keymap.hint(Command::DeleteSelection)) {
                         self.apply(|editor| editor.clear_selection_pixels());
                         ui.close_menu();
                     }
                     ui.separator();
-                    if menu_item(ui, "Settings…", "Ctrl+,") {
+                    if menu_item(ui, "Settings…", &self.keymap.hint(Command::Settings)) {
                         self.settings_window.open = true;
+                        ui.close_menu();
+                    }
+                    if menu_item(ui, "Keyboard shortcuts…", "") {
+                        self.keys_window.open = true;
                         ui.close_menu();
                     }
                 });
                 ui.menu_button("View", |ui| {
-                    if menu_item(ui, "Zoom in", "Ctrl+Plus") {
+                    if menu_item(ui, "Zoom in", &self.keymap.hint(Command::ZoomIn)) {
                         self.view.zoom_step(1);
                         ui.close_menu();
                     }
-                    if menu_item(ui, "Zoom out", "Ctrl+Minus") {
+                    if menu_item(ui, "Zoom out", &self.keymap.hint(Command::ZoomOut)) {
                         self.view.zoom_step(-1);
                         ui.close_menu();
                     }
-                    if menu_item(ui, "Fit", "Ctrl+0") {
+                    if menu_item(ui, "Fit", &self.keymap.hint(Command::ZoomFit)) {
                         self.view.fit(
                             self.editor.document().width(),
                             self.editor.document().height(),
@@ -2164,8 +2191,8 @@ impl OxyApp {
                     {
                         session::save(&self.prefs);
                     }
-                    if ui.button("Shortcuts").clicked() {
-                        self.dialog = Some(DialogKind::Shortcuts);
+                    if ui.button("Keyboard shortcuts…").clicked() {
+                        self.keys_window.open = true;
                         ui.close_menu();
                     }
                     if ui.button("About").clicked() {
@@ -2208,16 +2235,16 @@ impl OxyApp {
                 ui.horizontal(|ui| {
                     if ui
                         .add_enabled(self.editor.can_undo(), egui::Button::new("Undo"))
-                        .on_hover_text("Ctrl+Z")
-                        .on_disabled_hover_text("Ctrl+Z")
+                        .on_hover_text(self.keymap.hint(Command::Undo))
+                        .on_disabled_hover_text(self.keymap.hint(Command::Undo))
                         .clicked()
                     {
                         self.undo_step(false);
                     }
                     if ui
                         .add_enabled(self.editor.can_redo(), egui::Button::new("Redo"))
-                        .on_hover_text("Ctrl+Y")
-                        .on_disabled_hover_text("Ctrl+Y")
+                        .on_hover_text(self.keymap.hint(Command::Redo))
+                        .on_disabled_hover_text(self.keymap.hint(Command::Redo))
                         .clicked()
                     {
                         self.undo_step(true);
@@ -2225,20 +2252,21 @@ impl OxyApp {
                 });
                 self.ensure_tool_icons(ui.ctx());
                 let tools = [
-                    (Tool::Pencil, "B"),
-                    (Tool::Eraser, "E"),
-                    (Tool::Bucket, "G"),
-                    (Tool::Eyedropper, "I"),
-                    (Tool::Line, "L"),
-                    (Tool::Rectangle, "R"),
-                    (Tool::Ellipse, "O"),
-                    (Tool::Select, "M"),
-                    (Tool::Wand, "W"),
+                    Tool::Pencil,
+                    Tool::Eraser,
+                    Tool::Bucket,
+                    Tool::Eyedropper,
+                    Tool::Line,
+                    Tool::Rectangle,
+                    Tool::Ellipse,
+                    Tool::Select,
+                    Tool::Wand,
                 ];
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
-                    for (tool, shortcut) in tools {
-                        self.tool_button(ui, tool, shortcut);
+                    for tool in tools {
+                        let shortcut = self.keymap.hint(Command::Tool(tool));
+                        self.tool_button(ui, tool, &shortcut);
                     }
                 });
                 ui.separator();
@@ -2248,7 +2276,11 @@ impl OxyApp {
                 ui.label("Brush");
                 if ui
                     .add(egui::Slider::new(&mut size, 1..=oxypixel_core::MAX_BRUSH).suffix(" px"))
-                    .on_hover_text("Brush size. [ and ] change it too.")
+                    .on_hover_text(format!(
+                        "Brush size. {} and {} change it too.",
+                        self.keymap.hint(Command::BrushSmaller),
+                        self.keymap.hint(Command::BrushLarger)
+                    ))
                     .changed()
                 {
                     self.editor.set_brush(size);
@@ -2327,7 +2359,7 @@ impl OxyApp {
                 }
                 let mut perfect = self.editor.pixel_perfect();
                 if ui
-                    .checkbox(&mut perfect, "Pixel-perfect (P)")
+                    .checkbox(&mut perfect, self.with_key("Pixel-perfect", Command::TogglePixelPerfect))
                     .on_hover_text(
                         "One-pixel pencil drops the extra corner of a diagonal step. The line tool is unchanged.",
                     )
@@ -2337,7 +2369,7 @@ impl OxyApp {
                 }
                 let mut shade = self.editor.shades();
                 if ui
-                    .checkbox(&mut shade, "Shade (D)")
+                    .checkbox(&mut shade, self.with_key("Shade", Command::ToggleShade))
                     .on_hover_text(
                         "The pencil steps each pixel one swatch along the palette: left to the next, right to the one before. Colors not in the palette stay.",
                     )
@@ -2357,7 +2389,7 @@ impl OxyApp {
                 }
                 let mut wrap = self.editor.wraps();
                 if ui
-                    .checkbox(&mut wrap, "Wrap (T)")
+                    .checkbox(&mut wrap, self.with_key("Wrap", Command::ToggleWrap))
                     .on_hover_text(
                         "Pencil, eraser, fill, lines, and shapes that leave an edge continue on the opposite edge.",
                     )
@@ -2418,15 +2450,19 @@ impl OxyApp {
         let has_icon = image.is_some();
         let mut button = match image {
             Some(image) => egui::Button::image(image),
-            None => egui::Button::new(shortcut),
+            None => egui::Button::new(tool_name(tool)),
         };
         if selected {
             button = button.fill(Color32::from_rgb(78, 62, 32));
         }
-        let tip = format!("{} ({shortcut})\n{}", tool_name(tool), tool_hint(tool));
+        let tip = if shortcut.is_empty() {
+            format!("{}\n{}", tool_name(tool), tool_hint(tool))
+        } else {
+            format!("{} ({shortcut})\n{}", tool_name(tool), tool_hint(tool))
+        };
         let response = ui.add_sized([34.0, 34.0], button).on_hover_text(tip);
         if has_icon {
-            paint_tool_shortcut(ui, response.rect, shortcut);
+            paint_tool_shortcut(ui, response.rect, &corner_label(shortcut));
         }
         if response.clicked() {
             self.editor.set_tool(tool);
@@ -2613,7 +2649,7 @@ impl OxyApp {
                     }
                     let mut snap = self.editor.snaps_to_palette();
                     if ui
-                        .checkbox(&mut snap, "Snap (S)")
+                        .checkbox(&mut snap, self.with_key("Snap", Command::ToggleSnap))
                         .on_hover_text(
                             "Pencil, fill, and shapes stamp the nearest palette color. The eraser still clears.",
                         )
@@ -3042,7 +3078,10 @@ impl OxyApp {
             }
             let mut tiled = self.view.tiled;
             if ui
-                .checkbox(&mut tiled, "Tiled view (Shift+T)")
+                .checkbox(
+                    &mut tiled,
+                    self.with_key("Tiled view", Command::ToggleTiled),
+                )
                 .on_hover_text("Show the canvas repeated 3 by 3. Export still writes one copy.")
                 .changed()
             {
@@ -3270,7 +3309,6 @@ impl OxyApp {
             DialogKind::Path => self.dialog_path(ctx),
             DialogKind::Unsaved => self.dialog_unsaved(ctx),
             DialogKind::About => self.dialog_about(ctx),
-            DialogKind::Shortcuts => self.dialog_shortcuts(ctx),
             DialogKind::Update => self.dialog_update(ctx),
             DialogKind::Recovery => self.dialog_recovery(ctx),
         }
@@ -3674,28 +3712,6 @@ impl OxyApp {
                 ui.label("An original pixel-art editor.");
                 ui.label("MIT License. Drawings stay on this computer.");
                 ui.label("GitHub is contacted only when you choose Check for updates, or once a day at launch if Automatic updates is on.");
-                if ui.button("Close").clicked() {
-                    close = true;
-                }
-            });
-        if close {
-            self.dialog = None;
-        }
-    }
-
-    fn dialog_shortcuts(&mut self, ctx: &egui::Context) {
-        let mut close = false;
-        egui::Window::new("Shortcuts")
-            .collapsible(false)
-            .resizable(true)
-            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-            .order(egui::Order::Foreground)
-            .show(ctx, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    for binding in shortcuts::BINDINGS {
-                        ui.label(format!("{}: {}", binding.keys, binding.action));
-                    }
-                });
                 if ui.button("Close").clicked() {
                     close = true;
                 }
@@ -4194,6 +4210,16 @@ fn recovery_row(entry: &recovery::RecoveryEntry) -> (String, String, String) {
         None => "This drawing had not been saved to a file yet.".to_string(),
     };
     (entry.name.clone(), detail, when)
+}
+
+/// A key short enough for the corner of a tool button: `U`, or `⇧U` for
+/// Shift+U. Anything longer is left to the tooltip.
+fn corner_label(shortcut: &str) -> String {
+    match shortcut.strip_prefix("Shift+") {
+        Some(key) if key.chars().count() == 1 => format!("⇧{key}"),
+        _ if shortcut.chars().count() <= 2 => shortcut.to_string(),
+        _ => String::new(),
+    }
 }
 
 fn paint_tool_shortcut(ui: &egui::Ui, rect: egui::Rect, shortcut: &str) {

@@ -323,6 +323,12 @@ Each release: update the Flatpak manifest's archive URL and SHA-256, and add a `
 
 File, then Import spritesheet… reads a PNG, BMP, or GIF (its first frame) of up to 16384 pixels on a side and `MAX_SLICE_SHEET_PIXELS` in all, and cuts it into cells row by row: a cell size, an offset to the first cell, and a gap between cells. A cell that runs off the edge is left out, and so is a cell with no visible pixel unless Keep empty cells is on. Each kept cell becomes a frame (one layer named Sheet, with the chosen duration) or a layer (Cell 1 at the bottom, one frame) of a new untitled document, the way Import image as document… works. The window previews the sheet, sampled down past 2048 pixels, with each kept cell outlined. `SliceGrid::guess` starts with square cells for a one-row or one-column strip, or the whole image. `oxypixel import-sheet` and the MCP `import_sheet` tool do the same. Tested in `slice.rs`, `sliceview.rs`, `tests/cli.rs`, `mcp/tests.rs`, and the window harness.
 
+### OX-P36
+
+**Custom keyboard shortcuts with presets.** Status: done. Area: `crates/oxypixel/src/keymap.rs`, `keysview.rs`, `shortcuts.rs`, `app.rs`.
+
+Help (or Edit), then Keyboard shortcuts… lists every bindable action with its keys. Clicking a key and pressing another binds it; a key another action had moves over and the window says from where. Clear and Reset work per action, Reset all per map. Keys like switches the whole map to the OxyPixel, Aseprite, or Photoshop preset; each preset lists only the keys that differ, for commands OxyPixel has (the table is in [SHORTCUTS.md](SHORTCUTS.md)). Copy, paste, Esc, Delete, Backspace, and the arrows are fixed, since copy and paste follow egui's clipboard events. While a key is being chosen no shortcut runs. Menus, the tool buttons' corner letters, tooltips, and toggle labels read the map. `keys.txt` in the data folder stores the preset and the actions changed from it, by stable ids; lines that do not parse are skipped. Tested in `keymap.rs` (no preset binds one key twice or a fixed key, round trip, conflicts) and by the window harness.
+
 ## Human only
 
 ### OX-H1

@@ -16,6 +16,8 @@ mod framestrip;
 #[cfg(test)]
 mod harness;
 mod icon;
+mod keymap;
+mod keysview;
 mod mcp;
 mod native;
 mod packview;

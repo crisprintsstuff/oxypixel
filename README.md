@@ -226,7 +226,9 @@ The maintainer develops OxyPixel with AI coding agents. The written rules for th
 | Ctrl+drag | Move a reference image |
 | Ctrl+Plus / Ctrl+Minus / Ctrl+0 | Zoom in, zoom out (whole-pixel steps), fit |
 
-The full list is [docs/SHORTCUTS.md](docs/SHORTCUTS.md).
+These are OxyPixel's own keys. Help, then Keyboard shortcuts… (also in the Edit menu) changes them: click an action's key and press the new one, or switch every key to Aseprite's or Photoshop's for the commands OxyPixel has. Menus, tool buttons, and tooltips show the keys in use, and the choice is saved to `keys.txt` in the data folder. Copy, paste, Esc, Delete, and the arrow keys stay where they are.
+
+The full list, with what each preset changes, is [docs/SHORTCUTS.md](docs/SHORTCUTS.md).
 
 ## OxyPack
 
