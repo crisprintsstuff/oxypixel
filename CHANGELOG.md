@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-02
+
 ### Added
 
 - File, then Import spritesheet… cuts a PNG, BMP, or GIF spritesheet into one frame or one layer per cell, with a cell size, an offset, a gap between cells, and a preview that outlines each kept cell. Empty cells are left out unless kept. `oxypixel import-sheet` and the MCP `import_sheet` tool do the same.

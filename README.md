@@ -34,7 +34,7 @@ The pictures above are screenshots of OxyPixel 0.9.0. The drawing is a sample fi
 
 ## Status
 
-OxyPixel 0.9.6 is an early release. The Windows downloads are unsigned. Linux publishes a tar.gz, a `.deb`, and an AppImage. macOS gets one app for Apple Silicon and Intel Macs, signed ad hoc but not notarized. A canvas side is at most 1024 pixels. What works today, and the open task list, is in [docs/ROADMAP.md](docs/ROADMAP.md).
+OxyPixel 1.0.0 is the current release. The Windows downloads are unsigned. Linux publishes a tar.gz, a `.deb`, and an AppImage. macOS gets one app for Apple Silicon and Intel Macs, signed ad hoc but not notarized. A canvas side is at most 1024 pixels. What works today, and the open task list, is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Download
 
@@ -88,18 +88,18 @@ The tagged Windows build embeds the application icon and a version resource when
 
 Each release publishes two Linux files.
 
-`oxypixel-<version>-linux-x86_64.tar.gz` holds the x86_64 `oxypixel` and `oxypack` executables, `LICENSE`, and `README.txt`. Unpack it and run the program from that directory. For 0.9.6:
+`oxypixel-<version>-linux-x86_64.tar.gz` holds the x86_64 `oxypixel` and `oxypack` executables, `LICENSE`, and `README.txt`. Unpack it and run the program from that directory. For 1.0.0:
 
 ```bash
-tar -xzf oxypixel-0.9.6-linux-x86_64.tar.gz
-cd oxypixel-0.9.6-linux-x86_64
+tar -xzf oxypixel-1.0.0-linux-x86_64.tar.gz
+cd oxypixel-1.0.0-linux-x86_64
 ./oxypixel
 ```
 
-`oxypixel-<version>-linux-x86_64.deb` installs `/usr/bin/oxypixel`, `/usr/bin/oxypack`, a desktop entry, a 32×32 icon, and the `.oxypix` mime type. For 0.9.6 the Debian package version is `0.9.6-1`:
+`oxypixel-<version>-linux-x86_64.deb` installs `/usr/bin/oxypixel`, `/usr/bin/oxypack`, a desktop entry, a 32×32 icon, and the `.oxypix` mime type. For 1.0.0 the Debian package version is `1.0.0-1`:
 
 ```bash
-sudo apt install ./oxypixel-0.9.6-linux-x86_64.deb
+sudo apt install ./oxypixel-1.0.0-linux-x86_64.deb
 sudo apt remove oxypixel
 ```
 
@@ -108,9 +108,9 @@ On Ubuntu 24.04, `apt install` and `apt remove` were checked for a package built
 `OxyPixel-<version>-x86_64.AppImage` is one file. Make it executable and run it; it holds `oxypixel` and `oxypack`, a desktop file, and a 256×256 icon. It needs the same system libraries as the tar.gz, and FUSE 2 or 3 to mount itself (without FUSE, run it with `--appimage-extract-and-run`). A link to it named `oxypack` starts OxyPack:
 
 ```bash
-chmod +x OxyPixel-0.9.6-x86_64.AppImage
-./OxyPixel-0.9.6-x86_64.AppImage
-ln -s OxyPixel-0.9.6-x86_64.AppImage oxypack && ./oxypack --help
+chmod +x OxyPixel-1.0.0-x86_64.AppImage
+./OxyPixel-1.0.0-x86_64.AppImage
+ln -s OxyPixel-1.0.0-x86_64.AppImage oxypack && ./oxypack --help
 ```
 
 A Flatpak manifest is in [packaging/flatpak/](packaging/flatpak/). It builds a local Flatpak from the release archive; OxyPixel is not on Flathub yet. See [docs/LINUX-PACKAGING.md](docs/LINUX-PACKAGING.md).
