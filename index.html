@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OxyPixel — Blazing Fast 2D Pixel Art Editor in Rust</title>
+  <meta name="description" content="OxyPixel is a lightweight, high-performance pixel art suite targeting digital illustrators. Built entirely in Rust with an oxypixel-core engine and an egui interface.">
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@1.59.0/dist/umd/lucide.min.js"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+            display: ['Outfit', 'sans-serif'],
+          },
+          colors: {
+            oxy: {
+                pink: '#ec4899',
+                purple: '#a855f7',
+                blue: '#3b82f6',
+                dark: '#050505'
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body {
+        background-color: #050505;
+        color: #f8fafc;
+        overflow-x: hidden;
+    }
+
+    /* Fluid Gradient Blobs */
+    @keyframes blob {
+        0% { transform: translate(0px, 0px) scale(1); }
+        33% { transform: translate(50px, -50px) scale(1.1); }
+        66% { transform: translate(-20px, 40px) scale(0.9); }
+        100% { transform: translate(0px, 0px) scale(1); }
+    }
+    
+    .animate-blob { animation: blob 10s infinite; }
+    .animation-delay-2000 { animation-delay: 2s; }
+    .animation-delay-4000 { animation-delay: 4s; }
+    .animation-delay-6000 { animation-delay: 6s; }
+
+    /* Glassmorphism Utilities */
+    .glass {
+        background: rgba(255, 255, 255, 0.03);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+    }
+    
+    .glass-card:hover {
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(168, 85, 247, 0.3); /* Purple accent for OxyPixel */
+        box-shadow: 0 0 40px rgba(59, 130, 246, 0.15); /* Blue glow */
+        transform: translateY(-5px);
+    }
+    
+    .glass-card {
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* Text Gradients */
+    .text-gradient {
+        background: linear-gradient(135deg, #3b82f6 0%, #a855f7 50%, #ec4899 100%); /* Blue to Pink for OxyPixel */
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+    
+    /* Scrollbars */
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track { background: #050505; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(168, 85, 247, 0.5); }
+  </style>
+</head>
+<body class="antialiased selection:bg-oxy-purple selection:text-white flex flex-col min-h-screen">
+
+  <!-- Ambient Background Elements -->
+  <div class="fixed inset-0 overflow-hidden pointer-events-none z-0">
+      <div class="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-oxy-blue/20 rounded-full mix-blend-screen filter blur-[120px] animate-blob"></div>
+      <div class="absolute top-[20%] right-[-10%] w-[600px] h-[600px] bg-oxy-purple/20 rounded-full mix-blend-screen filter blur-[120px] animate-blob animation-delay-2000"></div>
+      <div class="absolute bottom-[-20%] left-[20%] w-[700px] h-[700px] bg-oxy-pink/20 rounded-full mix-blend-screen filter blur-[120px] animate-blob animation-delay-4000"></div>
+  </div>
+
+  <!-- Notification Toast -->
+  <div id="toast" class="fixed bottom-6 right-6 z-50 transform translate-y-24 opacity-0 transition-all duration-300 pointer-events-none flex items-center gap-3 px-4 py-3 rounded-2xl glass text-xs font-mono text-slate-200 shadow-2xl">
+    <div class="w-2 h-2 rounded-full bg-oxy-purple animate-ping"></div>
+    <span id="toastMsg">Copied to clipboard</span>
+  </div>
+
+  <!-- Navigation -->
+  <header class="fixed w-full z-40 top-0 transition-all duration-300 glass border-x-0 border-t-0 border-b border-white/5">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 h-20 flex items-center justify-between">
+      
+      <!-- Brand -->
+      <a href="#" class="flex items-center gap-3 group">
+        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-oxy-blue to-oxy-purple p-[2px] shadow-lg">
+          <div class="w-full h-full bg-[#050505] rounded-full flex items-center justify-center text-white group-hover:text-oxy-blue transition-colors">
+            <i data-lucide="grid" class="w-5 h-5"></i>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="font-display font-bold text-xl tracking-wide text-white">OxyPixel</span>
+        </div>
+      </a>
+
+      <!-- Desktop Nav -->
+      <nav class="hidden lg:flex items-center gap-8 text-xs font-medium font-sans text-slate-300">
+        <a href="#features" class="hover:text-oxy-blue transition-colors flex items-center gap-1.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-oxy-blue"></span>
+          <span>Features</span>
+        </a>
+        <a href="#downloads" class="hover:text-oxy-purple transition-colors">Download</a>
+      </nav>
+
+      <!-- Action Buttons -->
+      <div class="flex items-center gap-3">
+        <a href="#downloads" class="px-5 py-2.5 rounded-full bg-gradient-to-r from-oxy-blue to-oxy-purple hover:opacity-90 text-white font-semibold text-xs transition-all flex items-center gap-1.5 shadow-lg">
+          <i data-lucide="download" class="w-4 h-4"></i>
+          <span>Get OxyPixel</span>
+        </a>
+        <a href="https://github.com/crisprintsstuff/oxypixel" target="_blank" rel="noopener noreferrer" class="p-2.5 rounded-full glass hover:bg-white/10 text-slate-300 hover:text-white transition-all group" title="GitHub Repository">
+          <svg class="w-4 h-4 group-hover:scale-110 transition-transform" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.766 11.328c-2.063-.25-3.516-1.734-3.516-3.656 0-.781.281-1.625.75-2.188-.203-.515-.172-1.609.063-2.062.625-.078 1.468.25 1.968.703.594-.187 1.219-.281 1.985-.281.765 0 1.39.094 1.953.265.484-.437 1.344-.765 1.969-.687.218.422.25 1.515.046 2.047.5.593.766 1.39.766 2.203 0 1.922-1.453 3.375-3.547 3.64.531.344.89 1.094.89 1.954v1.625c0 .468.391.734.86.547C13.781 14.359 16 11.53 16 8.03 16 3.61 12.406 0 7.984 0 3.563 0 0 3.61 0 8.031a7.88 7.88 0 0 0 5.172 7.422c.422.156.828-.125.828-.547v-1.25c-.219.094-.5.156-.75.156-1.031 0-1.64-.562-2.078-1.609-.172-.422-.36-.672-.719-.719-.187-.015-.25-.093-.25-.187 0-.188.313-.328.625-.328.453 0 .844.281 1.25.86.313.452.64.655 1.031.655s.641-.14 1-.5c.266-.265.47-.5.657-.656"></path></svg>
+        </a>
+      </div>
+
+    </div>
+  </header>
+
+  <main class="flex-grow relative z-10 pt-20">
+    
+    <!-- Hero Section -->
+    <section class="relative pt-24 pb-20 border-b border-white/5">
+      <div class="max-w-5xl mx-auto px-4 sm:px-6 text-center relative z-10">
+        
+        <!-- Abstract Pixel Art Icon -->
+        <div class="mb-10 inline-flex items-center justify-center relative">
+           <div class="absolute inset-0 bg-oxy-blue/20 blur-[60px] rounded-full"></div>
+           <div class="grid grid-cols-4 grid-rows-4 gap-1.5 relative z-10 transform rotate-12 scale-110">
+               <div class="w-6 h-6 bg-oxy-blue/40 rounded-sm"></div>
+               <div class="w-6 h-6 bg-oxy-purple/60 rounded-sm"></div>
+               <div class="w-6 h-6 bg-transparent"></div>
+               <div class="w-6 h-6 bg-oxy-pink/40 rounded-sm"></div>
+               
+               <div class="w-6 h-6 bg-transparent"></div>
+               <div class="w-6 h-6 bg-white/90 rounded-sm shadow-[0_0_20px_rgba(255,255,255,0.8)]"></div>
+               <div class="w-6 h-6 bg-oxy-blue/80 rounded-sm"></div>
+               <div class="w-6 h-6 bg-transparent"></div>
+               
+               <div class="w-6 h-6 bg-oxy-pink/60 rounded-sm"></div>
+               <div class="w-6 h-6 bg-transparent"></div>
+               <div class="w-6 h-6 bg-oxy-purple/50 rounded-sm"></div>
+               <div class="w-6 h-6 bg-white/20 rounded-sm"></div>
+
+               <div class="w-6 h-6 bg-transparent"></div>
+               <div class="w-6 h-6 bg-oxy-blue/30 rounded-sm"></div>
+               <div class="w-6 h-6 bg-transparent"></div>
+               <div class="w-6 h-6 bg-oxy-pink/30 rounded-sm"></div>
+           </div>
+        </div>
+
+        <!-- Badge row -->
+        <div class="inline-flex flex-wrap items-center justify-center gap-3 mb-8">
+          <span class="glass px-4 py-1.5 rounded-full text-xs font-medium text-slate-300 flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-oxy-purple animate-pulse"></span>
+            Rust + egui
+          </span>
+          <span class="glass px-4 py-1.5 rounded-full text-xs font-medium text-slate-300 flex items-center gap-2">
+            <i data-lucide="monitor" class="w-3.5 h-3.5 text-oxy-blue"></i>
+            Windows, macOS, Linux
+          </span>
+          <span class="glass px-4 py-1.5 rounded-full text-xs font-medium text-slate-300 flex items-center gap-2">
+            <i data-lucide="heart" class="w-3.5 h-3.5 text-oxy-pink"></i>
+            Independent & Open Source
+          </span>
+        </div>
+
+        <h1 class="text-5xl sm:text-6xl lg:text-7xl font-display font-extrabold tracking-tight mb-6 leading-tight">
+          A Blazing Fast, <br class="hidden sm:block"/> <span class="text-gradient">Pure Rust</span> 2D Pixel Art Editor
+        </h1>
+
+        <p class="text-slate-400 text-lg max-w-3xl mx-auto mb-10 font-light leading-relaxed">
+          OxyPixel is a lightweight, high-performance pixel art suite targeting digital illustrators. Built entirely in Rust with a custom engine and an immediate-mode interface, it delivers a focused, native experience without the overhead of heavy game engines.
+        </p>
+
+        <!-- CTA Downloads / Commands -->
+        <div class="flex flex-wrap items-center justify-center gap-4 mb-8">
+          <a href="#downloads" class="px-8 py-4 rounded-full bg-white hover:bg-slate-200 text-black font-semibold transition-all flex items-center gap-2 shadow-xl hover:shadow-2xl hover:-translate-y-1">
+            <i data-lucide="download-cloud" class="w-5 h-5 text-oxy-purple"></i>
+            <span>Download</span>
+          </a>
+          <button onclick="copyCommand('git clone https://github.com/crisprintsstuff/oxypixel.git')" class="px-6 py-4 rounded-full glass hover:bg-white/10 text-slate-300 hover:text-white font-mono text-xs transition-all flex items-center gap-3">
+            <i data-lucide="terminal" class="w-4 h-4 text-oxy-blue"></i>
+            <span>git clone https://github.com/crisprintsstuff/oxypixel.git</span>
+            <i data-lucide="copy" class="w-4 h-4 opacity-50"></i>
+          </button>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Architecture & Features -->
+    <section id="features" class="py-24 border-b border-white/5 relative">
+        <div class="absolute inset-0 bg-gradient-to-b from-oxy-blue/5 to-transparent pointer-events-none"></div>
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 relative z-10">
+        
+        <div class="text-center mb-16">
+            <div class="text-sm font-bold text-oxy-blue uppercase tracking-widest mb-3">Core Technology</div>
+            <h2 class="text-4xl md:text-5xl font-display font-extrabold text-white tracking-tight mb-6">Built for Uncompromising Speed</h2>
+            <p class="text-slate-400 text-lg max-w-2xl mx-auto">
+              OxyPixel strips away bloat. It leverages Rust's memory safety and performance alongside immediate-mode rendering to provide a completely fluid drawing experience.
+            </p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+          
+          <div class="glass glass-card p-10 rounded-3xl flex flex-col relative overflow-hidden group">
+            <div class="absolute -right-12 -top-12 w-32 h-32 bg-oxy-blue/20 rounded-full blur-2xl group-hover:scale-150 transition-transform duration-700"></div>
+            <div class="relative z-10">
+              <div class="text-xs font-mono text-oxy-blue bg-oxy-blue/10 px-2 py-1 rounded inline-block mb-6 border border-oxy-blue/20">oxypixel-core</div>
+              <h4 class="text-2xl font-display font-bold text-white mb-4">Modular Data Engine</h4>
+              <p class="text-slate-400 leading-relaxed">
+                A highly decoupled, native Rust engine exclusively handling 2D pixel data manipulation. Clean separation of concerns allows for extreme stability, rapid memory operations, and headless testing capabilities.
+              </p>
+            </div>
+          </div>
+
+          <div class="glass glass-card p-10 rounded-3xl flex flex-col relative overflow-hidden group">
+             <div class="absolute -right-12 -top-12 w-32 h-32 bg-oxy-purple/20 rounded-full blur-2xl group-hover:scale-150 transition-transform duration-700"></div>
+             <div class="relative z-10">
+              <div class="text-xs font-mono text-oxy-purple bg-oxy-purple/10 px-2 py-1 rounded inline-block mb-6 border border-oxy-purple/20">egui</div>
+              <h4 class="text-2xl font-display font-bold text-white mb-4">Immediate-Mode UI</h4>
+              <p class="text-slate-400 leading-relaxed">
+                A highly responsive, zero-lag graphical interface built on the <code>egui</code> framework. Because the UI is re-drawn every frame, tool switching, panning, and drawing are incredibly snappy with virtually zero input latency.
+              </p>
+            </div>
+          </div>
+
+          <div class="glass glass-card p-10 rounded-3xl flex flex-col relative overflow-hidden group">
+             <div class="absolute -right-12 -top-12 w-32 h-32 bg-oxy-pink/20 rounded-full blur-2xl group-hover:scale-150 transition-transform duration-700"></div>
+             <div class="relative z-10">
+              <div class="text-xs font-mono text-oxy-pink bg-oxy-pink/10 px-2 py-1 rounded inline-block mb-6 border border-oxy-pink/20">Standalone</div>
+              <h4 class="text-2xl font-display font-bold text-white mb-4">True Independence</h4>
+              <p class="text-slate-400 leading-relaxed">
+                Completely independent architecture. Unlike other popular pixel art tools that rely on heavy game engines (like Godot) or bloated C++ web-wrappers, OxyPixel is a small, natively compiled binary.
+              </p>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- Downloads Section -->
+    <section id="downloads" class="py-24 border-b border-white/5 relative">
+        <div class="absolute inset-0 bg-gradient-to-t from-oxy-purple/5 to-transparent pointer-events-none"></div>
+      <div class="max-w-6xl mx-auto px-4 sm:px-6 relative z-10">
+        
+        <div class="text-center mb-16">
+          <div class="text-sm font-bold text-white uppercase tracking-widest mb-3">Install</div>
+          <h2 class="text-4xl md:text-5xl font-display font-extrabold text-white tracking-tight mb-4">Download OxyPixel</h2>
+          <p class="text-slate-400 text-lg max-w-xl mx-auto">
+            Grab the latest pre-compiled binaries for your operating system via GitHub Releases.
+          </p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8 mb-16">
+          
+          <!-- Windows -->
+          <div class="glass glass-card p-8 rounded-3xl flex flex-col justify-between group">
+            <div>
+              <div class="flex items-center justify-between mb-6">
+                <div class="w-12 h-12 rounded-full bg-oxy-blue/10 flex items-center justify-center text-oxy-blue">
+                    <i data-lucide="monitor" class="w-6 h-6"></i>
+                </div>
+                <span class="text-xs font-mono px-3 py-1 rounded-full bg-white/10 text-white">x86_64</span>
+              </div>
+              <h3 class="text-2xl font-display font-bold text-white mb-2">Windows</h3>
+              <p class="text-sm text-slate-400 mb-8">Native performance for Windows 10 / 11.</p>
+              
+              <div class="space-y-3">
+                <a href="https://github.com/crisprintsstuff/oxypixel/releases" target="_blank" class="w-full py-4 px-6 rounded-2xl glass hover:bg-oxy-blue hover:text-white hover:border-oxy-blue text-sm font-medium text-slate-200 flex items-center justify-between transition-all">
+                  <span class="flex items-center gap-3">
+                    <i data-lucide="package" class="w-4 h-4 opacity-70"></i>
+                    <span>Installer (.exe)</span>
+                  </span>
+                  <i data-lucide="download" class="w-4 h-4"></i>
+                </a>
+                <a href="https://github.com/crisprintsstuff/oxypixel/releases" target="_blank" class="w-full py-4 px-6 rounded-2xl glass hover:bg-white/10 text-sm font-medium text-slate-300 flex items-center justify-between transition-all">
+                  <span class="flex items-center gap-3">
+                    <i data-lucide="file-archive" class="w-4 h-4 opacity-70"></i>
+                    <span>Portable (.zip)</span>
+                  </span>
+                  <i data-lucide="download" class="w-4 h-4 opacity-50"></i>
+                </a>
+              </div>
+            </div>
+          </div>
+
+          <!-- macOS -->
+          <div class="glass glass-card p-8 rounded-3xl flex flex-col justify-between group">
+            <div>
+              <div class="flex items-center justify-between mb-6">
+                <div class="w-12 h-12 rounded-full bg-oxy-purple/10 flex items-center justify-center text-oxy-purple">
+                    <i data-lucide="laptop" class="w-6 h-6"></i>
+                </div>
+                <span class="text-xs font-mono px-3 py-1 rounded-full bg-white/10 text-white">Universal</span>
+              </div>
+              <h3 class="text-2xl font-display font-bold text-white mb-2">macOS</h3>
+              <p class="text-sm text-slate-400 mb-8">macOS 11+ running Apple Silicon (M-series) &amp; Intel.</p>
+              
+              <div class="space-y-3">
+                <a href="https://github.com/crisprintsstuff/oxypixel/releases" target="_blank" class="w-full py-4 px-6 rounded-2xl glass hover:bg-oxy-purple hover:text-white hover:border-oxy-purple text-sm font-medium text-slate-200 flex items-center justify-between transition-all">
+                  <span class="flex items-center gap-3">
+                    <i data-lucide="disc" class="w-4 h-4 opacity-70"></i>
+                    <span>App Image (.dmg)</span>
+                  </span>
+                  <i data-lucide="download" class="w-4 h-4"></i>
+                </a>
+              </div>
+            </div>
+          </div>
+
+          <!-- Linux -->
+          <div class="glass glass-card p-8 rounded-3xl flex flex-col justify-between group">
+            <div>
+              <div class="flex items-center justify-between mb-6">
+                <div class="w-12 h-12 rounded-full bg-oxy-pink/10 flex items-center justify-center text-oxy-pink">
+                    <i data-lucide="terminal" class="w-6 h-6"></i>
+                </div>
+                <span class="text-xs font-mono px-3 py-1 rounded-full bg-white/10 text-white">Flatpak</span>
+              </div>
+              <h3 class="text-2xl font-display font-bold text-white mb-2">Linux</h3>
+              <p class="text-sm text-slate-400 mb-8">Modern desktop distributions via Flatpak or standalone.</p>
+              
+              <div class="space-y-3">
+                <a href="https://github.com/crisprintsstuff/oxypixel/releases" target="_blank" class="w-full py-4 px-6 rounded-2xl glass hover:bg-oxy-pink hover:text-white hover:border-oxy-pink text-sm font-medium text-slate-200 flex items-center justify-between transition-all">
+                  <span class="flex items-center gap-3">
+                    <i data-lucide="box" class="w-4 h-4 opacity-70"></i>
+                    <span>Flatpak Bundle</span>
+                  </span>
+                  <i data-lucide="download" class="w-4 h-4"></i>
+                </a>
+                <a href="https://github.com/crisprintsstuff/oxypixel/releases" target="_blank" class="w-full py-4 px-6 rounded-2xl glass hover:bg-white/10 text-sm font-medium text-slate-300 flex items-center justify-between transition-all">
+                  <span class="flex items-center gap-3">
+                    <i data-lucide="file-archive" class="w-4 h-4 opacity-70"></i>
+                    <span>Portable (.tar.gz)</span>
+                  </span>
+                  <i data-lucide="download" class="w-4 h-4 opacity-50"></i>
+                </a>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Build from Source Banner -->
+        <div class="rounded-3xl glass p-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+          <div>
+            <div class="text-lg font-display font-bold text-white mb-2">Build from source</div>
+            <div class="text-sm text-slate-400">Compile directly with a standard Rust toolchain.</div>
+          </div>
+          <button onclick="copyCommand('cargo run --release')" class="px-6 py-4 rounded-2xl glass hover:bg-white/10 text-sm font-mono text-white flex items-center gap-3 transition-all">
+            <i data-lucide="terminal" class="w-4 h-4 text-oxy-purple"></i>
+            <span>cargo run --release</span>
+            <i data-lucide="copy" class="w-4 h-4 opacity-50"></i>
+          </button>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="relative z-10 border-t border-white/10 bg-[#050505]/80 backdrop-blur-lg pt-12 pb-12">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col items-center">
+          <div class="w-12 h-12 rounded-full bg-gradient-to-br from-oxy-blue to-oxy-purple p-[1px] mb-6">
+              <div class="w-full h-full bg-[#050505] rounded-full flex items-center justify-center">
+                  <i data-lucide="grid" class="w-5 h-5 text-white"></i>
+              </div>
+          </div>
+          <div class="flex gap-6 mb-8">
+              <a href="https://github.com/crisprintsstuff/oxypixel" target="_blank" class="text-slate-400 hover:text-oxy-blue transition-colors text-sm font-medium">GitHub Repository</a>
+              <a href="https://github.com/crisprintsstuff/oxypixel/releases" target="_blank" class="text-slate-400 hover:text-oxy-purple transition-colors text-sm font-medium">Releases</a>
+          </div>
+          <p class="text-slate-600 text-xs font-mono">
+              &copy; <script>document.write(new Date().getFullYear())</script> Oxytocin Labs. OxyPixel created by crisprintsstuff.
+          </p>
+      </div>
+  </footer>
+
+  <!-- Script Logic -->
+  <script>
+    lucide.createIcons();
+
+    // Copy to clipboard
+    function copyCommand(text) {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand('copy');
+        showToast('Copied to clipboard');
+      } catch (err) {
+        showToast('Unable to copy');
+      }
+      document.body.removeChild(textarea);
+    }
+
+    // Toast notifications
+    function showToast(message) {
+      const toast = document.getElementById('toast');
+      const msg = document.getElementById('toastMsg');
+      msg.textContent = message;
+      toast.classList.remove('translate-y-24', 'opacity-0');
+      toast.classList.add('translate-y-0', 'opacity-100');
+      setTimeout(() => {
+        toast.classList.add('translate-y-24', 'opacity-0');
+        toast.classList.remove('translate-y-0', 'opacity-100');
+      }, 2400);
+    }
+  </script>
+</body>
+</html>
